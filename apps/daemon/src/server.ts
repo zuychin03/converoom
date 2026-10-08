@@ -10,9 +10,13 @@ import {
   type Event,
   type Product,
   type Runtime,
+  type Seat,
+  type Turn,
+  type ToolArgs,
 } from '../../../packages/shared/src/contracts.js';
 import { TOOL_DEFINITIONS, validateToolArgs } from '../../../packages/mcp/src/tools.js';
 import { redactPublic } from '../../../packages/store/src/index.js';
+import { MANAGED_TOOLS, type ManagedScope } from '../../../packages/mcp/src/managed.js';
 
 export const VERSION = '0.1.0';
 const secret = () => randomBytes(32).toString('base64url');
@@ -96,6 +100,7 @@ export interface ServerOptions {
   pairingCode?: string;
   pairingExpiresAt?: number;
   controlToken?: string;
+  onPairingCode?: (code: string, expiresAt: number) => void;
   uiDir?: string;
   onStop?: () => Promise<void>;
 }
@@ -239,6 +244,7 @@ export async function createServer(
     'candidate_review',
     'candidate_apply',
     'workspace_cleanup',
+    'attempt_release',
     'managed_stop',
     'adapter_status',
     'room_export',
@@ -285,13 +291,32 @@ export async function createServer(
     browserOrigin(request, false);
     const auth = String(request.headers.authorization ?? '');
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-    const principal = token ? runtime.core.store.get<Actor>('bridge', hash(token)) : undefined;
+    const principal = token ? runtime.core.store.get<Actor & { scope?: ManagedScope }>('bridge', hash(token)) : undefined;
     if (
       !principal ||
       principal.kind !== 'agent' ||
       runtime.core.store.get('revoked', principal.principalId)
     )
       throw new ConveroomError('unauthorised', 'Agent bridge credential required', 401);
+    if (principal.scope) {
+      const scope = principal.scope;
+      const body = request.body as { name?: string; args?: ToolArgs };
+      const turn = runtime.core.store.get<Turn>('turn', scope.turnId);
+      const seat = runtime.core.store.get<Seat>('seat', scope.seatId);
+      const attempt = scope.attemptId ? runtime.core.store.get<ToolArgs>('attempt', scope.attemptId) : undefined;
+      if (!turn || !['dispatching', 'running'].includes(turn.status) ||
+        turn.roomId !== scope.roomId || turn.seatId !== scope.seatId || turn.attemptId !== scope.attemptId ||
+        !seat?.consent || seat.status === 'left' || seat.principalId !== principal.principalId ||
+        (scope.attemptId && (!attempt || attempt.generation !== scope.generation ||
+          !['ready', 'running'].includes(String(attempt.status)) || !(Number(attempt.leaseExpiresAt) > Date.now()) ||
+          runtime.core.store.get<ToolArgs>('task', scope.roomId + ':' + attempt.taskId)?.generation !== scope.generation)))
+        throw new ConveroomError('unauthorised', 'Managed turn credential expired or fenced', 401);
+      if (!body || !MANAGED_TOOLS.has(String(body.name)) ||
+        (body.name !== 'runtime_capabilities' && body.args?.roomId !== scope.roomId) ||
+        (body.args?.attemptId && body.args.attemptId !== scope.attemptId) ||
+        (body.args?.seatId && body.args.seatId !== scope.seatId))
+        throw new ConveroomError('managed_scope', 'Managed tools are limited to this seat and room', 403);
+    }
     return dispatch(request, {
       kind: 'agent',
       principalId: principal.principalId,
@@ -300,7 +325,7 @@ export async function createServer(
   });
   app.post('/local/commands', async (request) => {
     localAuth(request);
-    return dispatch(request, human);
+    throw new ConveroomError('human_session_required', 'Pair a human session to issue commands', 403);
   });
   app.post<{ Body: { product: Product } }>('/local/credentials', async (request) => {
     localAuth(request);
@@ -308,10 +333,13 @@ export async function createServer(
   });
   app.post('/local/pair', async (request) => {
     localAuth(request);
+    if (!options.onPairingCode)
+      throw new ConveroomError('pairing_unavailable', 'Use the code in the original start terminal', 409);
     pairing = secret().slice(0, 12);
     pairingExpiresAt = Date.now() + 300000;
     pairingUsed = false;
-    return { code: pairing, expiresAt: pairingExpiresAt };
+    options.onPairingCode(pairing, pairingExpiresAt);
+    return { issued: true, expiresAt: pairingExpiresAt };
   });
   app.post('/local/stop', async (request) => {
     localAuth(request);

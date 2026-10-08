@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, issueBridgeCredential } from '../apps/daemon/src/server.js';
 import type { Actor, Runtime, Store } from '../packages/shared/src/contracts.js';
+import { humanCommand } from '../apps/cli/src/human.js';
+import { createHash } from 'node:crypto';
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
@@ -28,16 +30,48 @@ function memoryRuntime(dataDir: string): Runtime {
     stop: async () => {},
   };
 }
-async function fixture() {
+async function fixture(onPairingCode?: (code: string) => void) {
   const dir = await mkdtemp(join(tmpdir(), 'converoom-http-'));
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   const runtime = memoryRuntime(dir);
-  const server = await createServer(runtime, { port: 0, pairingCode: 'local-pair-code' });
+  const server = await createServer(runtime, {
+    port: 0,
+    pairingCode: 'local-pair-code',
+    controlToken: 'installation-fixture-token',
+    onPairingCode,
+  });
   cleanup.push(() => server.close());
   const headers = { host: new URL(server.url).host, origin: server.url };
   return { runtime, server, headers };
 }
 describe('local identity boundary', () => {
+  it('does not let the on-disk installation token act as a human or obtain a pairing code', async () => {
+    let terminalCode = '';
+    const { server, headers } = await fixture((code) => { terminalCode = code; });
+    const installationHeaders = { host: headers.host, authorization: 'Bearer installation-fixture-token' };
+    for (const name of ['permission_grant', 'candidate_apply', 'room_list']) {
+      const response = await server.app.inject({
+        method: 'POST', url: '/local/commands', headers: installationHeaders,
+        payload: { name, args: { roomId: 'room', requestId: 'request' } },
+      });
+      expect(response.statusCode).toBe(403);
+    }
+    const pair = await server.app.inject({
+      method: 'POST', url: '/local/pair', headers: installationHeaders, payload: {},
+    });
+    expect(pair.statusCode).toBe(200);
+    expect(terminalCode.length).toBeGreaterThanOrEqual(12);
+    expect(pair.body).not.toContain(terminalCode);
+    expect(pair.json()).not.toHaveProperty('code');
+    expect((await server.app.inject({
+      method: 'POST', url: '/api/pair', headers,
+      payload: { code: 'local-pair-code' },
+    })).statusCode).toBe(401);
+    expect((await server.app.inject({
+      method: 'POST', url: '/api/pair', headers,
+      payload: { code: terminalCode },
+    })).statusCode).toBe(200);
+  });
   it('rejects unpaired browser access and reusing a pairing code', async () => {
     const { server, headers } = await fixture();
     expect(
@@ -62,6 +96,14 @@ describe('local identity boundary', () => {
         })
       ).statusCode,
     ).toBe(401);
+  });
+  it('pairs an explicit CLI human command without storing its session credential', async () => {
+    const { server, runtime } = await fixture();
+    const result = await humanCommand(server.url, 'local-pair-code', 'room_list', {}) as { actor: Actor };
+    expect(result.actor.kind).toBe('human');
+    expect(runtime.core.store.list('bridge')).toEqual([]);
+    await expect(humanCommand(server.url, 'local-pair-code', 'room_list', {})).rejects.toThrow(/invalid|expired/);
+    await expect(humanCommand('https://example.com', 'fixture', 'room_list', {})).rejects.toThrow(/loopback/);
   });
   it('requires exact host, browser origin and CSRF for human mutations', async () => {
     const { server, headers } = await fixture();
@@ -168,5 +210,28 @@ describe('local identity boundary', () => {
         })
       ).statusCode,
     ).toBe(413);
+  });
+  it('rejects an expired or replaced managed attempt directly at authentication', async () => {
+    const { server, runtime, headers } = await fixture();
+    const credential = issueBridgeCredential(runtime, 'codex');
+    const key = createHash('sha256').update(credential.token).digest('hex');
+    runtime.core.store.put('bridge', key, { ...runtime.core.store.get<Actor>('bridge', key),
+      scope: { roomId: 'scoped-room', seatId: 'scoped-seat', turnId: 'scoped-turn', attemptId: 'scoped-attempt', generation: 1 } });
+    runtime.core.store.put('seat', 'scoped-seat', { principalId: credential.principalId, consent: true, status: 'busy' });
+    runtime.core.store.put('turn', 'scoped-turn', { roomId: 'scoped-room', seatId: 'scoped-seat', attemptId: 'scoped-attempt', status: 'running' });
+    const attempt = { taskId: 'task', status: 'running', generation: 1, leaseExpiresAt: Date.now() + 60000 };
+    runtime.core.store.put('attempt', 'scoped-attempt', attempt);
+    runtime.core.store.put('task', 'scoped-room:task', { generation: 1 });
+    const request = () => server.app.inject({
+      method: 'POST', url: '/agent/commands',
+      headers: { host: headers.host, authorization: 'Bearer ' + credential.token },
+      payload: { name: 'room_post', args: { roomId: 'scoped-room', text: 'Public fixture', clientKey: 'post' } },
+    });
+    expect((await request()).statusCode).toBe(200);
+    runtime.core.store.put('attempt', 'scoped-attempt', { ...attempt, leaseExpiresAt: Date.now() - 1 });
+    expect((await request()).statusCode).toBe(401);
+    runtime.core.store.put('attempt', 'scoped-attempt', attempt);
+    runtime.core.store.put('task', 'scoped-room:task', { generation: 2 });
+    expect((await request()).statusCode).toBe(401);
   });
 });

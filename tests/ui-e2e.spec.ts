@@ -7,10 +7,7 @@ const axe = async (page: Page) =>
 test('complete human room lifecycle at desktop and mobile', async ({ page, request }, info) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  const pair = await request.post('/local/pair', {
-    headers: { authorization: 'Bearer browser-fixture-control' },
-    data: {},
-  });
+  const pair = await request.post('http://127.0.0.1:43318/pair');
   const code = (await pair.json()).code;
   await page.goto('/');
   await axe(page);
@@ -46,8 +43,22 @@ test('complete human room lifecycle at desktop and mobile', async ({ page, reque
   await page.getByRole('button', { name: 'Review and grant' }).click();
   await page.getByRole('button', { name: 'Grant permission' }).click();
   await expect(page.getByText('No approvals waiting')).toBeVisible();
+  const roomId = await page.evaluate(async () => {
+    const state = await (await fetch('/api/state')).json();
+    return state.rooms.find((room: { title: string; status: string }) => room.title === 'Acceptance room' && room.status === 'open').id as string;
+  });
+  expect((await request.post('http://127.0.0.1:43318/workspace?roomId=' + encodeURIComponent(roomId))).ok()).toBe(true);
   await page.getByRole('button', { name: 'Work', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Work', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Inspect reservation' }).click();
+  await expect(page.getByRole('dialog', { name: 'Inspect and release reservation' })).toBeVisible();
+  expect(await page.getByRole('dialog', { name: 'Inspect and release reservation' }).evaluate((dialog) => dialog.scrollWidth <= dialog.clientWidth)).toBe(true);
+  await axe(page);
+  await page.getByLabel('Inspection and retained-work handoff').fill('Inspected retained work; no worker was dispatched');
+  await page.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-reservation.png', fullPage: true });
+  await page.getByRole('button', { name: 'Release reservation', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Inspect reservation' })).toBeHidden();
+  await expect(page.getByText('Rework requested', { exact: true })).toBeVisible();
   await axe(page);
   await page.getByRole('button', { name: 'Room', exact: true }).click();
   await page.getByText('Room controls', { exact: true }).click();

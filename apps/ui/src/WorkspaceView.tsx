@@ -327,7 +327,7 @@ function TaskRow({
       command: 'task_claim',
       args: { roomId, taskId: task.id },
       description:
-        'Reserve the source scopes and provision a separate clone. The 60-second lease starts now, so request the coding turn and grant it promptly.',
+        'Reserve source scopes and provision a separate clone. Once ready, you have up to an hour to authorise the coding turn. Active workers use a renewable 60-second lease.',
       fields: [
         {
           key: 'seatId',
@@ -361,7 +361,7 @@ function TaskRow({
               title: 'Launch assigned coding turn',
               command: 'turn_request',
               args: { roomId, seatId: attempt.seatId, attemptId: attempt.id },
-              description: 'The new managed session is bound to this clone and generation. Grant its request before the lease ends.',
+              description: 'The new managed session is bound to this clone and generation. Review and grant the request before the approval window ends.',
               fields: [{ key: 'prompt', label: 'Coding instructions', type: 'textarea', required: true }],
             })
           }
@@ -475,6 +475,14 @@ function TaskRow({
         ? ['ok', 'Applied']
         : ['ok', 'In a candidate']
       : ['ok', 'Accepted'];
+  if (attempt && (['quarantined', 'uncertain'].includes(attemptStatus) ||
+    (attemptStatus === 'completed' && !leaseLive)))
+    actions.push(<button key="release" type="button" className="button small" onClick={() =>
+      openAction({ title: 'Inspect and release reservation', command: 'attempt_release',
+        args: { roomId, attemptId: attempt.id, confirm: true }, label: 'Release reservation',
+        description: `Inspect the preserved clone at ${string(attempt, 'path')}. Release retains its files and fences this generation. Active or uncertain processes must have confirmed stop before release.`,
+        fields: [{ key: 'reason', label: 'Inspection and retained-work handoff', type: 'textarea', required: true }],
+      })}>Inspect reservation</button>);
   const showLease = attempt && ['ready', 'completed'].includes(attemptStatus) && status === 'claimed';
   return (
     <li className="task">

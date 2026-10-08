@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   ConveroomError as E,
   requiredString as str,
@@ -75,6 +75,9 @@ export interface Attempt {
   profileId: string;
   leaseExpiresAt: number;
   wallDeadline: number;
+  approvalDeadline?: number;
+  submissionDeadline?: number;
+  processStoppedAt?: number;
   resourceId: string;
   sessionId?: string;
 }
@@ -108,6 +111,7 @@ interface Candidate {
   verificationId?: string;
   createdAt: number;
   targetDigest: string;
+  checkoutSettings: Record<string, string>;
 }
 interface Verification {
   id: string;
@@ -172,6 +176,17 @@ export function mountWorkspace(
     return r;
   };
   const task = (roomId: string, id: string) => get<Task>('task', roomId + ':' + id);
+  const attemptAccess = (a: Actor, roomId: string, at: Attempt) => {
+    if (a.kind === 'human') return true;
+    const seat = core.requireSeat(a, roomId);
+    return at.seatId === seat.id || core.requireRoom(a, roomId).hostSeatId === seat.id;
+  };
+  const workerStopped = (at: Attempt) => !s.list<Turn & { dispatchBoundaryAt?: number; sessionId?: string }>('turn')
+    .some((turn) => turn.attemptId === at.id && (
+      ['running', 'dispatching', 'cancelling', 'uncertain'].includes(turn.status) ||
+      (turn.dispatchBoundaryAt && (!at.processStoppedAt || at.processStoppedAt < turn.dispatchBoundaryAt)) ||
+      (turn.sessionId && !at.processStoppedAt)
+    ));
   const putTask = (t: Task) => s.put('task', t.roomId + ':' + t.id, t);
   const ev = (a: Actor, r: string, n: string, x: ToolArgs) => s.append(r, n, a.principalId, x);
   const load = async (path: string): Promise<Snapshot> => {
@@ -267,6 +282,48 @@ export function mountWorkspace(
     if ((await run('git', ['remote'], path)).output.trim())
       throw new E('clone_remote', 'Clone retains a donor remote');
     return path;
+  };
+  const checkoutSettings = async (path: string) => {
+    const attributes = await run('git', ['rev-parse', '--git-path', 'info/attributes'], path);
+    if (attributes.exitCode) throw new E('checkout_policy', 'Cannot inspect the Git attributes path');
+    if ((await readFile(resolve(path, attributes.output.trim()), 'utf8').catch((e: NodeJS.ErrnoException) => {
+      if (e.code === 'ENOENT') return '';
+      throw e;
+    })).trim()) throw new E('checkout_policy', 'Local Git attributes are unsupported; use tracked .gitattributes');
+    const filters = await run('git', ['config', '--local', '--get-regexp', '^filter\\.'], path);
+    if (filters.exitCode === 0)
+      throw new E('checkout_policy', 'Custom Git filters or external attributes require explicit support');
+    if (filters.exitCode !== 1) throw new E('checkout_policy', 'Cannot inspect Git conversion settings');
+    const externalAttributes = await run('git', ['config', '--get', 'core.attributesFile'], path);
+    if (externalAttributes.exitCode === 0)
+      throw new E('checkout_policy', 'External Git attributes require explicit support');
+    if (externalAttributes.exitCode !== 1) throw new E('checkout_policy', 'Cannot inspect external attributes');
+    const settings: Record<string, string> = {};
+    for (const [key, fallback] of [['core.autocrlf', 'false'], ['core.eol', 'native']]) {
+      const result = await run('git', ['config', '--get', key], path);
+      if (![0, 1].includes(result.exitCode)) throw new E('repository', 'Cannot read checkout policy');
+      settings[key] = result.exitCode === 1 ? fallback : result.output.trim();
+    }
+    return settings;
+  };
+  const materializeCheckout = async (repo: Repo, id: string, content: Snapshot,
+    settings: Record<string, string>) => {
+    const path = await clone(repo, 'apply-' + id);
+    await writeSnapshot(path, content);
+    const git = async (args: string[]) => {
+      const result = await run('git', args, path);
+      if (result.exitCode) throw new E('checkout_conversion', 'Git checkout conversion failed');
+    };
+    await git(['add', '--all', '--force', '--', '.']);
+    const empty: Snapshot = { files: [], digest: scopeDigest([]) };
+    await writeSnapshot(path, empty);
+    await git(['checkout-index', '--all', '--force']);
+    if ((await snapshot(path)).digest !== content.digest)
+      throw new E('checkout_conversion', 'Git filters changed the verified content');
+    for (const [key, value] of Object.entries(settings)) await git(['config', key, value]);
+    await writeSnapshot(path, empty);
+    await git(['checkout-index', '--all', '--force']);
+    return snapshot(path);
   };
   const dependencies = (t: Task): Manifest[] => {
     const visited = new Set<string>(),
@@ -417,7 +474,8 @@ export function mountWorkspace(
       if (
         tracked.output
           .split('\0')
-          .some((p) => /(^|\/)(\.env(?:\..*)?|id_rsa|credentials(?:\.json)?)$/i.test(p))
+          .some((p) => /(^|\/)(\.env(?:\..*)?|id_rsa|credentials(?:\.json)?)$/i.test(p) &&
+            !/(^|\/)\.env\.example$/i.test(p))
       )
         throw new E(
           'sensitive_source',
@@ -567,8 +625,13 @@ export function mountWorkspace(
       const t = task(roomId, str(x, 'taskId')),
         repo = repoAccess(a, t.repoId),
         p = profile(a, t.profileId),
-        seatId = a.kind === 'agent' ? core.requireSeat(a, roomId).id : str(x, 'seatId'),
+        seatId = x.seatId ? str(x, 'seatId') : core.requireSeat(a, roomId).id,
         seat = get<Seat>('seat', seatId);
+      if (a.kind === 'agent') {
+        const caller = core.requireSeat(a, roomId);
+        if (seatId !== caller.id && core.requireRoom(a, roomId).hostSeatId !== caller.id)
+          throw new E('host', 'Only the room host can claim work for another managed seat', 403);
+      }
       if (
         seat.roomId !== roomId ||
         seat.mode !== 'managed' ||
@@ -595,8 +658,8 @@ export function mountWorkspace(
         basePath: '',
         dependencies: deps.map((m) => m.id),
         profileId: p.id,
-        leaseExpiresAt: Date.now() + 60000,
-        wallDeadline: Date.now() + 1800000,
+        leaseExpiresAt: 0,
+        wallDeadline: 0,
         resourceId: id,
       };
       s.transaction(() => {
@@ -606,7 +669,7 @@ export function mountWorkspace(
           throw new E('claimed', 'Task already claimed', 409);
         for (const active of s.list<Attempt>('attempt'))
           if (
-            ['provisioning', 'ready', 'running', 'uncertain', 'quarantined'].includes(
+            ['provisioning', 'ready', 'running', 'submitting', 'uncertain', 'quarantined', 'draining'].includes(
               active.status,
             ) &&
             get<Repo>('repo', active.repoId).path.toLowerCase() === repo.path.toLowerCase()
@@ -644,6 +707,8 @@ export function mountWorkspace(
           await mkdir(join(dataDir, 'resources', id, d), { recursive: true });
         const fixture = await provision(id, p);
         attempt.status = 'ready';
+        attempt.approvalDeadline = Date.now() + 3600000;
+        attempt.leaseExpiresAt = attempt.approvalDeadline;
         s.put('attempt', id, attempt);
         putTask({ ...task(roomId, t.id), status: 'claimed' });
         s.put('resource', id, {
@@ -688,13 +753,15 @@ export function mountWorkspace(
     const at = get<Attempt>('attempt', str(x, 'attemptId'));
     if (
       at.roomId !== roomId ||
-      (a.kind === 'agent' && at.seatId !== core.requireSeat(a, roomId).id) ||
+      !attemptAccess(a, roomId, at) ||
       at.generation !== task(roomId, at.taskId).generation ||
       !['ready', 'running'].includes(at.status) ||
       at.leaseExpiresAt < Date.now()
     )
       throw new E('stale_lease', 'Attempt lease no longer current', 409);
-    at.leaseExpiresAt = Math.min(Date.now() + 60000, at.wallDeadline);
+    at.leaseExpiresAt = at.status === 'ready'
+      ? at.approvalDeadline ?? at.leaseExpiresAt
+      : Math.min(Date.now() + 60000, at.wallDeadline);
     s.put('attempt', at.id, at);
     return at;
   });
@@ -708,7 +775,7 @@ export function mountWorkspace(
         repo = repoAccess(a, at.repoId);
       if (
         at.roomId !== roomId ||
-        (a.kind === 'agent' && at.seatId !== core.requireSeat(a, roomId).id) ||
+        !attemptAccess(a, roomId, at) ||
         at.generation !== t.generation ||
         at.leaseExpiresAt < Date.now() ||
         !['ready', 'completed'].includes(at.status)
@@ -718,15 +785,7 @@ export function mountWorkspace(
           'Attempt is active, expired or fenced by lease/dependency changes',
           409,
         );
-      if (
-        s
-          .list<Turn>('turn')
-          .some(
-            (turn) =>
-              turn.attemptId === at.id &&
-              ['running', 'dispatching', 'cancelling', 'uncertain'].includes(turn.status),
-          )
-      )
+      if (!workerStopped(at))
         throw new E('active_worker', 'Worker stop must be confirmed before submission', 409);
       if (scopeDigest(dependencies(t).map((m) => m.id)) !== scopeDigest(at.dependencies))
         throw new E('dependency_changed', 'Prerequisites changed; downstream attempt fenced', 409);
@@ -770,17 +829,44 @@ export function mountWorkspace(
               .join('\n'),
           ),
         };
-      await brokers.get(at.id)?.close();
-      brokers.delete(at.id);
-      executionEnvironments.delete(at.id);
-      s.put('manifest', id, m);
-      s.put('attempt', at.id, { ...at, status: 'submitted' });
-      s.put('resource', at.resourceId, {
-        ...(s.get('resource', at.resourceId) as ToolArgs),
-        status: 'retained',
+      const validateSubmission = (status: string[]) => {
+        workspaceAccess(a, roomId);
+        const current = get<Attempt>('attempt', at.id), latestTask = task(roomId, at.taskId);
+        if (current.generation !== at.generation || latestTask.generation !== at.generation ||
+          current.leaseExpiresAt < Date.now() || !status.includes(current.status))
+          throw new E('stale_lease', 'Submission was fenced while reading preserved work', 409);
+        if (scopeDigest(dependencies(latestTask).map((d) => d.id)) !== scopeDigest(at.dependencies))
+          throw new E('dependency_changed', 'Prerequisites changed while reading the submission', 409);
+        if (!workerStopped(current))
+          throw new E('active_worker', 'Worker stop must be confirmed before submission', 409);
+        return { current, latestTask };
+      };
+      s.transaction(() => {
+        const { current } = validateSubmission(['ready', 'completed']);
+        s.put('attempt', at.id, { ...current, status: 'submitting' });
       });
-      putTask({ ...t, status: 'submitted', manifestId: id });
-      ev(a, roomId, 'task.submitted', { manifestId: id, resultDigest: m.resultDigest });
+      try {
+        await brokers.get(at.id)?.close();
+        brokers.delete(at.id);
+        executionEnvironments.delete(at.id);
+        s.transaction(() => {
+          const { current, latestTask } = validateSubmission(['submitting']);
+          s.put('manifest', id, m);
+          s.put('attempt', at.id, { ...current, status: 'submitted' });
+          s.put('resource', at.resourceId, {
+            ...(s.get('resource', at.resourceId) as ToolArgs), status: 'retained',
+          });
+          putTask({ ...latestTask, status: 'submitted', manifestId: id });
+          ev(a, roomId, 'task.submitted', { manifestId: id, resultDigest: m.resultDigest });
+        });
+      } catch (error) {
+        const current = get<Attempt>('attempt', at.id);
+        if (current.status === 'submitting') {
+          s.put('attempt', at.id, { ...current, status: 'quarantined' });
+          s.put('resource', at.resourceId, { ...get<ToolArgs>('resource', at.resourceId), status: 'quarantined' });
+        }
+        throw error;
+      }
       return m;
     }),
   );
@@ -913,6 +999,7 @@ export function mountWorkspace(
         status: 'prepared',
         createdAt: Date.now(),
         targetDigest: (await snapshot(repo.path, p.generatedPaths)).digest,
+        checkoutSettings: await checkoutSettings(repo.path),
       };
       s.put('candidate', id, c);
       const v = await freshChecks(a, roomId, repo, content, p, { candidateId: id });
@@ -959,24 +1046,46 @@ export function mountWorkspace(
       )
         throw new E('evidence', 'Candidate content/evidence changed');
       const original = await snapshot(repo.path, p.generatedPaths);
+      const foundation = await load(repo.foundationPath);
+      const generated = (path: string) => p.generatedPaths.some((g) => path === g || path.startsWith(g + '/'));
+      const clean = await run('git', ['--no-optional-locks', 'diff', '--quiet', '--no-ext-diff', 'HEAD', '--', '.',
+        ...p.generatedPaths.map((g) => ':(exclude,literal)' + g)], repo.path);
       if (
         original.digest !== c.targetDigest ||
-        original.digest !== repo.foundation ||
+        scopeDigest(original.files.map((f) => f.path)) !==
+          scopeDigest(foundation.files.filter((f) => !generated(f.path)).map((f) => f.path)) ||
+        clean.exitCode !== 0 ||
+        scopeDigest(await checkoutSettings(repo.path)) !== scopeDigest(c.checkoutSettings) ||
         (await run('git', ['rev-parse', 'HEAD'], repo.path)).output.trim() !== repo.head
       )
         throw new E(
           'target_changed',
           'Target is dirty or changed; original checkout preserved',
           409,
-        );
+      );
+      const baseContent = { files: foundation.files.filter((f) => !generated(f.path)), digest: '' };
+      baseContent.digest = scopeDigest(baseContent.files.map(({ path, mode, digest }) => ({ path, mode, digest })));
+      const baseline = await materializeCheckout(repo, 'foundation-' + c.id, baseContent, c.checkoutSettings);
+      if (baseline.files.some((file) => {
+        const actual = original.files.find((f) => f.path === file.path);
+        const canonical = foundation.files.find((f) => f.path === file.path);
+        return !actual || actual.mode !== file.mode ||
+          (actual.digest !== file.digest && actual.digest !== canonical?.digest);
+      }))
+        throw new E('target_changed', 'Target is dirty or changed; original checkout preserved', 409);
+      const checkout = await materializeCheckout(repo, c.id, content, c.checkoutSettings);
+      if ((await snapshot(repo.path, p.generatedPaths)).digest !== original.digest ||
+        (await run('git', ['rev-parse', 'HEAD'], repo.path)).output.trim() !== repo.head ||
+        scopeDigest(await checkoutSettings(repo.path)) !== scopeDigest(c.checkoutSettings))
+        throw new E('target_changed', 'Target changed during checkout preparation', 409);
       s.put('candidate', c.id, {
         ...c,
         status: 'applying',
         rollbackPath: await save('rollback-' + c.id, original),
       });
       try {
-        await writeSnapshot(repo.path, content, p.generatedPaths);
-        if ((await snapshot(repo.path, p.generatedPaths)).digest !== c.resultDigest)
+        await writeSnapshot(repo.path, checkout, p.generatedPaths);
+        if ((await snapshot(repo.path, p.generatedPaths)).digest !== checkout.digest)
           throw new E('apply_mismatch', 'Applied content mismatch');
       } catch (e) {
         try {
@@ -995,7 +1104,7 @@ export function mountWorkspace(
         }
         throw e;
       }
-      s.put('candidate', c.id, { ...c, status: 'applied' });
+      s.put('candidate', c.id, { ...c, status: 'applied', checkoutDigest: checkout.digest });
       return ev(a, roomId, 'candidate.applied', {
         candidateId: c.id,
         resultDigest: c.resultDigest,
@@ -1026,10 +1135,44 @@ export function mountWorkspace(
     s.put('attempt', at.id, { ...at, status: 'removed' });
     return { removed: at.id };
   });
+  core.register('attempt_release', (a, x) => journal(a, 'attempt_release', x, async () => {
+    const roomId = str(x, 'roomId');
+    core.requireOwner(a, roomId);
+    const at = get<Attempt>('attempt', str(x, 'attemptId'));
+    const reason = str(x, 'reason');
+    if (at.roomId !== roomId || x.confirm !== true ||
+      !['ready', 'completed', 'quarantined', 'uncertain'].includes(at.status))
+      throw new E('release_refused', 'Inspect and confirm an inactive attempt', 409);
+    const turns = s.list<Turn & { dispatchBoundaryAt?: number }>('turn')
+      .filter((t) => t.attemptId === at.id);
+    if (!workerStopped(at))
+      throw new E('release_refused', 'Uncertain or active worker stop must be confirmed first', 409);
+    s.transaction(() => {
+      for (const turn of turns.filter((t) => t.status === 'queued')) {
+        s.put('turn', turn.id, { ...turn, status: 'cancelled' });
+        const permission = s.get<ToolArgs>('permission', turn.permissionRequestId ?? '');
+        if (permission) s.put('permission', String(permission.id), { ...permission, status: 'denied' });
+      }
+      const current = task(roomId, at.taskId);
+      if (current.generation === at.generation)
+        putTask({ ...current, generation: current.generation + 1, status: 'rework' });
+      s.put('attempt', at.id, { ...at, status: 'draining', leaseExpiresAt: 0 });
+      s.put('resource', at.resourceId, { ...get<ToolArgs>('resource', at.resourceId), status: 'draining' });
+      ev(a, roomId, 'attempt.release_requested', { attemptId: at.id, reason, generation: at.generation });
+    });
+    await brokers.get(at.id)?.close();
+    brokers.delete(at.id);
+    executionEnvironments.delete(at.id);
+    s.put('attempt', at.id, { ...get<Attempt>('attempt', at.id), status: 'released' });
+    s.put('resource', at.resourceId, { ...get<ToolArgs>('resource', at.resourceId),
+      status: 'released', releasedAt: Date.now(), credentialRevoked: true });
+    ev(a, roomId, 'attempt.released', { attemptId: at.id, reason, workspacePreserved: true });
+    return { released: at.id, workspacePreserved: true };
+  }));
   for (const c of s.list<Candidate>('candidate'))
     if (c.status === 'applying') s.put('candidate', c.id, { ...c, status: 'uncertain' });
   for (const at of s.list<Attempt>('attempt'))
-    if (['provisioning', 'ready', 'running'].includes(at.status)) {
+    if (['provisioning', 'ready', 'running', 'submitting', 'draining'].includes(at.status)) {
       s.put('attempt', at.id, { ...at, status: 'uncertain' });
       s.put('resource', at.resourceId, {
         ...(s.get('resource', at.resourceId) as ToolArgs),

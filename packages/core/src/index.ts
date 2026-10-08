@@ -196,6 +196,7 @@ export function createCore(store: Store): Core {
         'integration_prepare',
         'candidate_apply',
         'workspace_cleanup',
+        'attempt_release',
         'repo_register',
         'managed_stop',
         'backup_request',

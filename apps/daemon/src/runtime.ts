@@ -1,5 +1,7 @@
 import { mkdir, cp, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import {
   createStore,
@@ -25,6 +27,7 @@ import {
   type ManagedSession,
 } from '../../../packages/adapters/src/index.js';
 import { canonicalRoot } from '../../../packages/adapters/src/process.js';
+import { managedBridge } from '../../../packages/mcp/src/managed.js';
 import {
   ConveroomError,
   type Runtime,
@@ -107,6 +110,8 @@ export async function createRuntime(
   const execute = async (t: Turn, s: Seat) => {
     const entry = active.get(t.id)!;
     let attempt: Attempt | undefined;
+    let bridge: Awaited<ReturnType<typeof managedBridge>> | undefined;
+    let nativeStartupBegan = false;
     try {
       let cwd = join(dataDir, 'sessions', s.id);
       await mkdir(cwd, { recursive: true });
@@ -128,15 +133,32 @@ export async function createRuntime(
         if ((await snapshot(attempt.path, p.generatedPaths)).digest !== attempt.effectiveBase)
           throw new ConveroomError('worker_binding', 'Workspace base changed before admission');
         cwd = attempt.path;
+        const attemptId = attempt.id;
+        store.transaction(() => {
+          const current = store.get<Attempt>('attempt', attemptId);
+          if (!current || current.status !== 'ready' || current.leaseExpiresAt < Date.now() ||
+            current.generation !== attempt!.generation ||
+            store.get<ToolArgs>('task', current.roomId + ':' + current.taskId)?.generation !== current.generation)
+            throw new ConveroomError('worker_binding', 'Attempt changed while checking its source');
+          attempt = current;
+          store.put('attempt', attemptId, { ...current, processStoppedAt: undefined });
+        });
       }
+      const here = dirname(fileURLToPath(import.meta.url));
+      const cli = [join(here, 'cli.js'), resolve(here, '../../../dist/cli.js')].find(existsSync);
+      if (!cli) throw new ConveroomError('runtime_missing', 'Build or repair the compiled room bridge');
+      bridge = await managedBridge(core, dataDir, cli, s, t, attempt?.generation);
+      nativeStartupBegan = true;
       const session = await (options.startSession ?? startManaged)(
         s.product,
         cwd,
         (scope) => permission(t, s, scope),
         attempt ? attemptEnvironment(attempt.id) : {},
         !attempt,
+        bridge.server,
       );
       entry.session = session;
+      const admittedAttempt = attempt ? store.get<Attempt>('attempt', attempt.id) : undefined;
       if (
         stopped ||
         !t.requestedBy ||
@@ -144,10 +166,13 @@ export async function createRuntime(
         !grant(t) ||
         store.get<Room>('room', t.roomId)?.status !== 'open' ||
         !store.get<Seat>('seat', s.id)?.consent ||
-        store.get<Turn>('turn', t.id)?.status !== 'dispatching'
+        store.get<Turn>('turn', t.id)?.status !== 'dispatching' ||
+        (attempt && (!admittedAttempt || admittedAttempt.status !== 'ready' ||
+          admittedAttempt.leaseExpiresAt < Date.now() ||
+          admittedAttempt.generation !== attempt.generation ||
+          store.get<ToolArgs>('task', attempt.roomId + ':' + attempt.taskId)?.generation !== attempt.generation))
       ) {
-        await session.close();
-        store.put('turn', t.id, { ...t, status: 'cancelled' });
+        store.put('turn', t.id, { ...store.get<Turn>('turn', t.id)!, status: 'cancelled' });
         return;
       }
       store.put('seat', s.id, {
@@ -157,19 +182,23 @@ export async function createRuntime(
         capabilities: { ...s.capabilities, probed: session.capabilities },
       });
       store.put('turn', t.id, {
-        ...t,
+        ...store.get<Turn>('turn', t.id)!,
         status: 'running',
         sessionId: session.id,
         startedAt: Date.now(),
       });
-      if (attempt)
-        store.put('attempt', attempt.id, { ...attempt, status: 'running', sessionId: session.id });
+      if (attempt) {
+        attempt = { ...admittedAttempt!, status: 'running', sessionId: session.id,
+          wallDeadline: Date.now() + 1800000, leaseExpiresAt: Date.now() + 60000 };
+        store.put('attempt', attempt.id, attempt);
+      }
       emit(t, 'turn.started', {
         turnId: t.id,
         sessionId: session.id,
         newManagedSession: true,
         workspace: cwd,
         containment: 'trusted-local advisory',
+        mcpInjected: true,
       });
       const room = store.get<Room>('room', t.roomId)!;
       const recent = store
@@ -218,12 +247,6 @@ export async function createRuntime(
         store.put('turn', t.id, { ...current, status: 'completed', completedAt: Date.now() });
         emit(t, 'turn.completed', { turnId: t.id });
       }
-      if (attempt)
-        store.put('attempt', attempt.id, {
-          ...store.get<Attempt>('attempt', attempt.id)!,
-          status: 'completed',
-          leaseExpiresAt: Math.min(Date.now() + 60000, attempt.wallDeadline),
-        });
     } catch (e) {
       const current = store.get<Turn>('turn', t.id)!;
       const message = redactPublic(e instanceof Error ? e.message : 'Vendor failure');
@@ -255,9 +278,19 @@ export async function createRuntime(
         await workspace.revoke(attempt.id);
       }
     } finally {
-      const confirmed = entry.session ? await entry.session.close() : true;
+      let credentialCleanupFailed = false;
+      try { await bridge?.revoke(); } catch { credentialCleanupFailed = true; }
+      const confirmed = entry.session ? await entry.session.close().catch(() => false) : !nativeStartupBegan;
       const seat = store.get<Seat>('seat', s.id)!;
       store.put('seat', s.id, { ...seat, status: confirmed ? 'idle' : 'degraded' });
+      if (attempt && confirmed) {
+        const current = store.get<Attempt>('attempt', attempt.id)!;
+        const completed = store.get<Turn>('turn', t.id)?.status === 'completed';
+        const submissionDeadline = Date.now() + 1800000;
+        store.put('attempt', attempt.id, { ...current, processStoppedAt: Date.now(),
+          ...(completed ? { status: 'completed', submissionDeadline,
+            leaseExpiresAt: submissionDeadline } : {}) });
+      }
       if (!confirmed) {
         const current = store.get<Turn>('turn', t.id)!;
         store.put('turn', t.id, {
@@ -273,6 +306,8 @@ export async function createRuntime(
           await workspace.revoke(attempt.id);
         }
       }
+      if (credentialCleanupFailed)
+        emit(t, 'bridge.cleanup_needed', { turnId: t.id, repair: 'Inspect the inactive bridge credential file' });
       active.delete(t.id);
     }
   };
@@ -331,6 +366,12 @@ export async function createRuntime(
           !grant(t)
         )
           continue;
+        if (t.attemptId) {
+          const attempt = store.get<Attempt>('attempt', t.attemptId);
+          if (!attempt || attempt.status !== 'ready' || attempt.leaseExpiresAt < Date.now() ||
+            store.get<ToolArgs>('task', t.roomId + ':' + attempt.taskId)?.generation !== attempt.generation)
+            continue;
+        }
         if (
           active.size >= 2 ||
           active.size >= Number(room.policy.maxActiveTurns) ||
@@ -451,8 +492,10 @@ export async function createRuntime(
         clearInterval(timer);
         for (const e of active.values()) {
           const t = store.get<Turn>('turn', e.turn.id)!;
-          store.put('turn', t.id, { ...t, status: 'cancelling' });
-          await e.session?.cancel().catch(() => {});
+          if (['dispatching', 'running', 'cancelling'].includes(t.status)) {
+            store.put('turn', t.id, { ...t, status: 'cancelling' });
+            await e.session?.cancel().catch(() => {});
+          }
           await e.session?.close();
         }
         while (ticking) await new Promise((r) => setTimeout(r, 10));

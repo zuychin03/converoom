@@ -4,6 +4,8 @@ import { open, writeFile, unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
+import { createInterface } from 'node:readline/promises';
+import { humanCommand } from './human.js';
 import { createRuntime } from '../../daemon/src/runtime.js';
 import { createServer } from '../../daemon/src/server.js';
 import { serveMcp } from '../../../packages/mcp/src/index.js';
@@ -61,9 +63,20 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       throw new Error(String((v.error as ToolArgs)?.message ?? 'Runtime operation failed'));
     return v;
   };
-  const call = async (name: string, args: ToolArgs = {}) =>
-    (await local('/local/commands', { name, args: { ...args, clientKey: crypto.randomUUID() } }))
-      .result;
+  const call = async (name: string, args: ToolArgs = {}) => {
+    if (!process.stdin.isTTY)
+      throw new Error('Human commands require an interactive terminal. Use the paired room UI.');
+    await local('/local/pair', {});
+    console.log('A one-use code was printed in the terminal running converoom start.');
+    const input = createInterface({ input: process.stdin, output: process.stdout });
+    let code: string;
+    try {
+      code = (await input.question('Enter that code to authorise this command: ')).trim();
+    } finally {
+      input.close();
+    }
+    return humanCommand((await metadata()).url, code, name, args);
+  };
   const config = (p: string) =>
     p === 'codex'
       ? join(homedir(), '.codex', 'config.toml')
@@ -162,6 +175,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         port: Number(flag('--port') ?? 0),
         pairingCode,
         controlToken,
+        onPairingCode: (code) => console.log('Browser or CLI pairing code: ' + code),
         onStop: close,
       });
       await privateJson(metaPath, {
@@ -190,7 +204,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === 'pair') {
-    console.log('Browser pairing code: ' + (await local('/local/pair', {})).code);
+    await local('/local/pair', {});
+    console.log('A new one-use pairing code was printed in the terminal running converoom start.');
     return;
   }
   if (command === 'status') {

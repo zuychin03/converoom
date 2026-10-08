@@ -4,6 +4,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { TOOL_DEFINITIONS, validateToolArgs } from './tools.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { MANAGED_TOOLS, type ManagedScope } from './managed.js';
 export async function serveMcp(
   dataDir: string,
   client: string,
@@ -11,13 +12,13 @@ export async function serveMcp(
 ): Promise<void> {
   const credential = JSON.parse(
     await readFile(credentialFile ?? join(dataDir, 'clients', client + '.json'), 'utf8'),
-  ) as { token: string; principalId: string };
+  ) as { token: string; principalId: string; scope?: ManagedScope };
   const server = new Server(
     { name: 'converoom', version: '0.1.0' },
     { capabilities: { tools: {} } },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: TOOL_DEFINITIONS.map((t) => ({
+    tools: TOOL_DEFINITIONS.filter((t) => !credential.scope || MANAGED_TOOLS.has(t.name)).map((t) => ({
       ...t,
       inputSchema: { ...t.inputSchema, type: 'object' as const },
     })),

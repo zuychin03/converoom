@@ -1571,6 +1571,7 @@ textarea {
 .dialog-copy {
   color: var(--ink-2);
   font-size: var(--text-sm);
+  overflow-wrap: anywhere;
 }
 .confirmation {
   margin: var(--space-4) 0;

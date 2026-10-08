@@ -1,6 +1,6 @@
 # Requirement acceptance matrix
 
-08/10/2026. All 80 requirements are retained. Automated fixtures, available live vendor checks and package tests provide bounded evidence, not blanket acceptance. The full V1 gates stay open for the Windows preview. This conservative matrix must be updated requirement by requirement when each full acceptance condition in SRS.md has evidence.
+09/10/2026. All 80 requirements are retained. Automated fixtures, available live vendor checks and package tests provide bounded evidence, not blanket acceptance. The full V1 gates stay open for the Windows preview. Update this matrix requirement by requirement when each full acceptance condition has evidence. The complete implementation specification is local-only.
 
 | ID | Release gate | Contract |
 |---|---|---|
@@ -76,11 +76,11 @@
 | NFR-16 | Open V1 acceptance | Provisioning, readiness, allocation waits and cleanup have finite profile limits and visible timeout outcomes. Proposed defaults: 120-second provisioning/readiness, at most 3 approved port attempts, 5-minute resource wait and 10-minute retained preview. Cleanup timeout quarantines resources rather than treating them as released. Fault fixtures demonstrate no silent indefinite wait. These are targets to validate, not measured results. |
 | NFR-17 | Open V1 acceptance | Capacity admission counts agent workers, check/service descendants, retained previews, quarantined resources and disk requirements. Start with one active coding worker on an 8 GB machine; raise limits only after target-hardware benchmarks. Configured count/disk limits block new work with diagnostics; memory/CPU pressure triggers bounded degradation. Reservations do not claim to prevent native-process resource exhaustion. |
 | NFR-18 | Open V1 acceptance | Every advertised package/Node/OS/architecture combination passes packed-payload install, start, MCP exchange, bootstrap-cache loss, upgrade and uninstall acceptance. End users need no repository build, pnpm, native compiler or mandatory administrator/service installation. Unsupported native profiles fail before a ready claim; publication checks bind evidence to the exact package digest. |
-| IF-01 | Open V1 acceptance |  |
-| IF-02 | Open V1 acceptance |  |
-| IF-03 | Open V1 acceptance |  |
-| IF-04 | Open V1 acceptance |  |
-| IF-05 | Open V1 acceptance |  |
-| IF-06 | Open V1 acceptance |  |
-| IF-07 | Open V1 acceptance |  |
-| IF-08 | Open V1 acceptance |  |
+| IF-01 | Open V1 acceptance | MCP exposes versioned tool/resource schemas, role checks and bounded payloads. Private remote authentication requires advertised-client acceptance; cloud release requires compatible OAuth and public HTTPS. |
+| IF-02 | Open V1 acceptance | ACP negotiates initialise/auth/session/prompt/update/cancel and optional resume/mode support. Unsupported features return explicit capability results. |
+| IF-03 | Open V1 acceptance | Native adapter modules provide equivalent prompt/cancel/event contracts with dated vendor API tests. The baseline uses no terminal keystroke injection. |
+| IF-04 | Open V1 acceptance | Browser API uses authenticated JSON and resumable SSE with bounded buffering/backpressure. Large artefacts are fetched separately. |
+| IF-05 | Open V1 acceptance | Git addresses human-registered repositories and immutable content/SHAs. Agent input cannot define arbitrary executables, commands or protected refs. |
+| IF-06 | Open V1 acceptance | Versioned JSON and readable Markdown exports retain digests and source links. Imports validate version, scope, paths and size before storage. |
+| IF-07 | Open V1 acceptance | Human-approved resource profiles bind executable/argv, cwd, per-process settings, credential references, resource requirements, probes and cleanup. Broker manifests are redacted and read-only. Agents select approved IDs, and every advertised profile maps allocations to actual application behaviour. |
+| IF-08 | Open V1 acceptance | Versioned public CLI/bin provides guided setup, noninteractive redacted status/doctor and documented exit codes. Static vendor payloads reference a durable exact-version runtime. npx/global npm are equivalent bootstrap paths without vendor-credential changes or agent-configuration lifecycle scripts. |

@@ -4,6 +4,7 @@ import { executable, launch, run } from './process.js';
 import { RpcPeer } from './rpc.js';
 import { ConveroomError, type Product, type ToolArgs } from '../../shared/src/contracts.js';
 import { redactPublic } from '../../store/src/index.js';
+import { MANAGED_TOOLS, type ManagedMcp } from '../../mcp/src/managed.js';
 export interface ManagedSession {
   id: string;
   product: Product;
@@ -75,10 +76,18 @@ export async function startManaged(
   onPermission: PermissionHandler,
   env: NodeJS.ProcessEnv = {},
   readOnly = true,
+  mcp?: ManagedMcp,
 ): Promise<ManagedSession> {
   const entry = await executable(product === 'cursor' ? 'agent' : product);
   if (product === 'codex') {
-    const child = launch(entry.command, [...entry.args, 'app-server', '--stdio'], cwd, env),
+    const mcpArgs = mcp ? [
+      '-c', 'mcp_servers.converoom.command=' + JSON.stringify(mcp.command),
+      '-c', 'mcp_servers.converoom.args=[' + mcp.args.map((arg) => JSON.stringify(arg)).join(',') + ']',
+      '-c', 'mcp_servers.converoom.enabled=true',
+      '-c', 'mcp_servers.converoom.required=true',
+      '-c', 'mcp_servers.converoom.enabled_tools=[' + [...MANAGED_TOOLS].map((name) => JSON.stringify(name)).join(',') + ']',
+    ] : [];
+    const child = launch(entry.command, [...entry.args, ...mcpArgs, 'app-server', '--stdio'], cwd, env),
       rpc = new RpcPeer(child);
     rpc.requestHandler = async (method, p) => {
       if (method.includes('requestApproval')) {
@@ -111,7 +120,7 @@ export async function startManaged(
         approvalPolicy: 'on-request',
         ephemeral: false,
         developerInstructions:
-          'Participate in a Converoom room. Return only the public answer, preserve dissent, follow the assigned workspace and task scope. Do not commit, push, deploy or use a separately billed API provider. The host mediates room messages. Native tools are trusted local; no containment promise.',
+          'Participate in a Converoom room. Return only the public answer, preserve dissent, follow the assigned workspace and task scope. Use the supplied Converoom MCP tools for public room context and directed replies. Do not commit, push, deploy or use a separately billed API provider. Native tools are trusted local; no containment promise.',
       });
       const thread = result.thread as ToolArgs,
         id = String(thread.id);
@@ -213,8 +222,11 @@ export async function startManaged(
         }),
         30000,
       );
+      const sessionParams: acp.NewSessionRequest = { cwd, mcpServers: mcp ? [{
+        name: mcp.name, command: mcp.command, args: mcp.args, env: mcp.env,
+      }] : [] };
       const session = await bounded(
-        connection.agent.request(acp.methods.agent.session.new, { cwd, mcpServers: [] }),
+        connection.agent.request(acp.methods.agent.session.new, sessionParams),
         30000,
       );
       if (readOnly && session.modes?.availableModes.some((m) => m.id === 'ask' || m.id === 'plan'))

@@ -13,6 +13,13 @@ export interface Snapshot {
   digest: string;
   files: SourceFile[];
 }
+function sourceSnapshot(files: SourceFile[]): Snapshot {
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return {
+    digest: scopeDigest(files.map(({ path, mode, digest }) => ({ path, mode, digest }))),
+    files,
+  };
+}
 export function validateSnapshot(content: Snapshot): void {
   if (
     !content ||
@@ -82,10 +89,7 @@ export async function snapshot(root: string, generated: string[] = []): Promise<
     }
   }
   await walk(base);
-  return {
-    digest: scopeDigest(files.map(({ path, mode, digest }) => ({ path, mode, digest }))),
-    files,
-  };
+  return sourceSnapshot(files);
 }
 export async function writeSnapshot(
   root: string,
@@ -145,9 +149,5 @@ export function compose(base: Snapshot, patches: DeltaFile[][]): Snapshot {
         m.set(d.path, { path: d.path, mode: d.mode!, digest: d.afterDigest!, bytes: d.bytes });
       }
     }
-  const files = [...m.values()].sort((a, b) => a.path.localeCompare(b.path));
-  return {
-    files,
-    digest: scopeDigest(files.map(({ path, mode, digest }) => ({ path, mode, digest }))),
-  };
+  return sourceSnapshot([...m.values()]);
 }

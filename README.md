@@ -65,7 +65,7 @@ Accept each exact submission after independent checks, then prepare the combined
 
 `npm test` covers behaviour, persistence, identity, scheduling, content, workspace, fixture and process boundaries. `npm run test:e2e` uses a non-inference fixture server for rendered desktop/mobile flows. Live vendor tests are recorded separately and never inferred from fixture success.
 
-`converoom export ROOM_ID --output room.json` produces a redacted versioned history export with ordered event provenance. Use a `.md` output for a readable transcript. `backup --output DIRECTORY` creates a private local backup directory containing a consistent SQLite copy and immutable content artefacts. Keep backups private. Restore imports history into an empty data directory and does not reactivate local execution paths. Cleanup retains dirty, unexported and uncertain work.
+`converoom export ROOM_ID --output room.json` produces a redacted versioned history export with ordered event provenance. A `.md` output currently lists event data in JSON blocks; a readable Markdown transcript remains an open requirement. `backup --output DIRECTORY` creates a private local backup directory containing a consistent SQLite copy and immutable content artefacts. Export, backup and cleanup require an interactive terminal: enter the one-use code printed in the terminal running `converoom start`. `converoom pair` also prints its new code in that original terminal. The installation token in `runtime.json` cannot issue human commands or retrieve codes. Keep backups private. Restore imports history into an empty data directory and does not reactivate local execution paths. Cleanup retains dirty, unexported and uncertain work.
 
 ## Licence
 
