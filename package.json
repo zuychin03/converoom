@@ -1,0 +1,72 @@
+{
+  "name": "@converoom/cli",
+  "version": "0.1.0",
+  "description": "Local rooms for coding agents, debate and verified collaboration",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.14 <25"
+  },
+  "bin": {
+    "converoom": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "plugins",
+    "packages/plugin-content",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "native/bin",
+    "native/supervisor/src",
+    "native/supervisor/Cargo.toml",
+    "native/supervisor/Cargo.lock",
+    "RELEASE_MANIFEST.json",
+    "THIRD_PARTY_NOTICES.md",
+    "npm-shrinkwrap.json"
+  ],
+  "scripts": {
+    "dev": "tsx apps/cli/src/index.ts start",
+    "build": "tsup --config tsup.config.ts && vite build --config apps/ui/vite.config.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "pack:check": "npm pack --dry-run",
+    "release:manifest": "node scripts/release-manifest.mjs"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.7.0",
+    "@fastify/static": "10.1.5",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "better-sqlite3": "13.0.3",
+    "fastify": "5.12.5",
+    "lucide-react": "^0.577.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@eslint/js": "^9.39.0",
+    "@playwright/test": "^1.58.0",
+    "@tailwindcss/vite": "^4.2.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.0.0",
+    "eslint": "^9.39.0",
+    "node": "24.21.0",
+    "tailwindcss": "^4.2.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.0",
+    "vite": "8.3.3",
+    "vitest": "5.0.3"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
+  }
+}

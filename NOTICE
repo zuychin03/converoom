@@ -1,0 +1,8 @@
+Converoom
+Copyright 2026 Duy Nguyen
+Licensed under Apache-2.0.
+
+Agent Client Protocol SDK is Apache-2.0, Copyright Zed Industries and contributors.
+Model Context Protocol TypeScript SDK is MIT, Copyright Anthropic and contributors.
+The Windows supervisor uses windows-sys and windows-link (Microsoft, MIT OR Apache-2.0), under Apache-2.0.
+Runtime dependencies retain their licences in installed npm packages. A versioned dependency licence manifest accompanies the package.

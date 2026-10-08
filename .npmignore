@@ -1,0 +1,17 @@
+AGENTS.md
+SPEC.md
+PRODUCT.md
+DESIGN.md
+docs/IMPLEMENTATION_*.md
+docs/task-*.md
+.agents/
+.codex/
+.claude/
+.cursor/
+.artifacts/
+.env*
+*.log
+*.sqlite*
+*.tgz
+runtime.json
+runtime.lock
