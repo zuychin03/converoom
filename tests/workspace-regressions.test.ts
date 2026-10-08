@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
@@ -205,7 +205,7 @@ it('registers committed public environment examples', async () => {
   await run('git', ['add', '--', '.env.example', 'config/.env.example'], donor);
   await run('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
     'commit', '-m', 'Public examples'], donor);
-  expect(await call('repo_register', { path: donor })).toMatchObject({ path: donor });
+  expect(await call('repo_register', { path: donor })).toMatchObject({ path: await realpath(donor) });
 });
 
 it.each(['.env', '.env.production', 'config/.env', 'credentials.json', 'id_rsa'])(
