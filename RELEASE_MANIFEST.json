@@ -18,16 +18,52 @@
       "sha256": "56aba303a921c9b4def42d3d9710d00d2127016b48d9132ce4922ade7d6bd83c"
     },
     {
-      "path": "dist/ui/assets/index-B-3OGlE1.css",
-      "sha256": "e4dc95ff23b85986230af51647b7a13a6d934d55c79915dd68f61ba51ce053de"
+      "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
+      "sha256": "60646d55eae90d3654838d6603a73d7294a02cce2d7426b3e192328ce892392f"
     },
     {
-      "path": "dist/ui/assets/index-DtfmWfVY.js",
-      "sha256": "f080eae4b641d242595a77929a0110a342e2414d7e4ba98fef2f30776e8c73b5"
+      "path": "dist/ui/assets/hubot-sans-latin-wdth-normal-y0SF6Opx.woff2",
+      "sha256": "650838c44a4bc0f7daebe48bcea3db9f91abb165973b9b6f109edca3a6dfa2b9"
+    },
+    {
+      "path": "dist/ui/assets/hubot-sans-vietnamese-wdth-normal-wBII_FLJ.woff2",
+      "sha256": "809306f8444febde9c633c98531c6db7d3505735545b2369881e8cce511a31f9"
+    },
+    {
+      "path": "dist/ui/assets/index-CZEZb1Wd.js",
+      "sha256": "73a5b348588aa5adf12811c7559efb32d29738695870300cc8486c367db60a19"
+    },
+    {
+      "path": "dist/ui/assets/index-DbuYlcnp.css",
+      "sha256": "b8a8c7a9306ac5f5a0923c635ca33413fdec2a77cdbe5fe2b1f2a1f89ba1ca3d"
+    },
+    {
+      "path": "dist/ui/assets/martian-mono-cyrillic-wght-normal-B84CD5C_.woff2",
+      "sha256": "2d30189f145a92ec118dc73194c7d813f218db9ec084444f6c071d419ce6b529"
+    },
+    {
+      "path": "dist/ui/assets/martian-mono-latin-ext-wght-normal-DlL6xMw5.woff2",
+      "sha256": "c26a87eedc388afebc0c6331d99b248196ea64a883322fc519831278ffd169d5"
+    },
+    {
+      "path": "dist/ui/assets/martian-mono-latin-wght-normal-5W32yIyr.woff2",
+      "sha256": "d0be3a78a854bcea53a9dc26b6620ba322eaa515ccbd92bb4b6ec20a3c91b291"
+    },
+    {
+      "path": "dist/ui/assets/mona-sans-latin-ext-wght-normal-BqSk0Z3x.woff2",
+      "sha256": "5adec652263260d219807b036bca9fe94ab6dc2ba6d30c0d45dc6a955dac270e"
+    },
+    {
+      "path": "dist/ui/assets/mona-sans-latin-wght-normal-Pz49MTQZ.woff2",
+      "sha256": "a59061e38c5e7e6a00aaa6b6645a220c7d9c530991167f058cc0f8575f5d5844"
+    },
+    {
+      "path": "dist/ui/assets/mona-sans-vietnamese-wght-normal-DsUdksa4.woff2",
+      "sha256": "933a526b6c42ba27afe0de46e25be7170c25768bfbf833448e730e9de90f5fc7"
     },
     {
       "path": "dist/ui/index.html",
-      "sha256": "8c76032e3273117d81a6e67f9f9c7c801be5f10b6048a4423720379b2a8c2ff5"
+      "sha256": "f13b78dd08873cd4d9c07a8d1060c6ca932d0d8c521bd495abf3493e99033946"
     },
     {
       "path": "plugins/README.md",
@@ -51,7 +87,7 @@
     "node": "24.21.0"
   },
   "lockfile": "npm-shrinkwrap.json",
-  "lockfileSha256": "06481cc8bf6f6b610544d44b58ddcf4acdaf4f0d41b90d4c0487efbd57a78582",
+  "lockfileSha256": "13abf93345620a8516b774056d9efb0d7c06c8c77e23ca4989b2797c4a46feb9",
   "native": [
     {
       "path": "native/bin/win32-x64/converoom-supervisor.exe",
@@ -184,6 +220,42 @@
         {
           "name": "LICENSE",
           "sha256": "ba9677e5a34c2738c26b36bb478f95e0369cac48fbe68a01a91fd5c7972f2043"
+        }
+      ]
+    },
+    {
+      "name": "@fontsource-variable/hubot-sans",
+      "version": "5.3.0",
+      "license": "OFL-1.1",
+      "noticeStatus": "included licence text",
+      "notices": [
+        {
+          "name": "LICENSE",
+          "sha256": "f138ca2159509b2e7c4184ded044722e1596f30c638c6a0ef5407bf386f1d18e"
+        }
+      ]
+    },
+    {
+      "name": "@fontsource-variable/martian-mono",
+      "version": "5.3.0",
+      "license": "OFL-1.1",
+      "noticeStatus": "included licence text",
+      "notices": [
+        {
+          "name": "LICENSE",
+          "sha256": "bd7d799f6a67b704f9546422ee83d69b4dc5e4ae289d5eabc22581251dd7150a"
+        }
+      ]
+    },
+    {
+      "name": "@fontsource-variable/mona-sans",
+      "version": "5.3.0",
+      "license": "OFL-1.1",
+      "noticeStatus": "included licence text",
+      "notices": [
+        {
+          "name": "LICENSE",
+          "sha256": "41e9911493de5899a20336baf13b6ea6483b5eea34e237f2ffed22c39bdc4a8d"
         }
       ]
     },

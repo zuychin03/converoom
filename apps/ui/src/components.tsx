@@ -1,14 +1,28 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { X, AlertCircle, Plus, ArrowRight } from 'lucide-react';
-import { type RecordData, string } from './api.js';
+import { AlertTriangle, Check, Circle, CircleHelp, Diamond, Pause, Square, X } from 'lucide-react';
+import type { RecordData } from './api.js';
+import { fmtDuration, seatCode, type Kind } from './model.js';
 
-export function Status({ value }: { value: string }) {
+const ICONS: Record<Kind, ReactNode> = {
+  live: <Circle size={8} fill="currentColor" strokeWidth={0} aria-hidden="true" className="dot" />,
+  needs: <Diamond size={9} fill="currentColor" strokeWidth={0} aria-hidden="true" />,
+  ok: <Check size={12} strokeWidth={2.75} aria-hidden="true" />,
+  warn: <CircleHelp size={12} strokeWidth={2.4} aria-hidden="true" />,
+  fail: <X size={12} strokeWidth={2.75} aria-hidden="true" />,
+  idle: <Circle size={8} strokeWidth={2.6} aria-hidden="true" />,
+  paused: <Pause size={10} strokeWidth={2.6} aria-hidden="true" />,
+  closed: <Square size={9} strokeWidth={2.6} aria-hidden="true" />,
+};
+
+export function Status({ kind, children }: { kind: Kind; children: ReactNode }) {
   return (
-    <span className={`status status-${value.toLowerCase().replace(/[^a-z]/g, '')}`}>
-      {value.replaceAll('_', ' ')}
+    <span className={`status status-${kind}`}>
+      {ICONS[kind]}
+      <span>{children}</span>
     </span>
   );
 }
+
 export function Empty({
   title,
   children,
@@ -26,43 +40,124 @@ export function Empty({
     </div>
   );
 }
+
 export function ErrorNotice({ children, dismiss }: { children: ReactNode; dismiss?: () => void }) {
   return (
-    <div className="error-notice" role="alert">
-      <AlertCircle size={18} aria-hidden="true" />
+    <div className="notice-error" role="alert">
+      <AlertTriangle size={16} aria-hidden="true" />
       <span>{children}</span>
       {dismiss && (
-        <button className="icon-button" aria-label="Dismiss error" onClick={dismiss}>
-          <X size={18} />
+        <button type="button" className="icon-button" aria-label="Dismiss error" onClick={dismiss}>
+          <X size={16} aria-hidden="true" />
         </button>
       )}
     </div>
   );
 }
-export function JsonDetails({
-  value,
-  title = 'Inspect record',
-}: {
-  value: unknown;
-  title?: string;
-}) {
+
+export function JsonDetails({ value, title = 'Raw record' }: { value: unknown; title?: string }) {
   return (
-    <details className="record-details">
+    <details className="raw">
       <summary>{title}</summary>
       <pre>{JSON.stringify(value, null, 2)}</pre>
     </details>
   );
 }
-export const describe = (value: unknown): string =>
-  typeof value === 'string' ? value : (JSON.stringify(value, null, 2) ?? '');
+
+export function useNow(intervalMs = 1000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
+
+export function Elapsed({ since }: { since: number }) {
+  const now = useNow();
+  return <span className="num">{fmtDuration(now - since)}</span>;
+}
+
+export function Countdown({ until, urgentBelow = 30000 }: { until: number; urgentBelow?: number }) {
+  const now = useNow();
+  const left = until - now;
+  if (left <= 0) return <span className="num countdown expired">expired</span>;
+  return (
+    <span className={`num countdown${left < urgentBelow ? ' urgent' : ''}`}>
+      {fmtDuration(left)}
+    </span>
+  );
+}
+
 export function When({ at }: { at: unknown }) {
-  const date = new Date(typeof at === 'number' || typeof at === 'string' ? at : 0);
+  const date = new Date(typeof at === 'number' ? at : 0);
   return date.getTime() ? (
-    <time dateTime={date.toISOString()} title={date.toLocaleString('en-AU')}>
+    <time className="num" dateTime={date.toISOString()} title={date.toLocaleString('en-AU')}>
       {date.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })}
     </time>
   ) : null;
 }
+
+export function Gauge({ label, value, max }: { label: string; value: number; max: number }) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return (
+    <div className="gauge">
+      <span className="gauge-label">{label}</span>
+      <span
+        className={`gauge-bar${pct >= 85 ? ' near' : ''}`}
+        role="meter"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={max}
+        aria-valuenow={Math.min(value, max)}
+      >
+        <i style={{ width: `${pct}%` }} />
+      </span>
+      <span className="gauge-value num">
+        {Math.round(value)}/{max}
+      </span>
+    </div>
+  );
+}
+
+export function DurationBar({ elapsed, budget }: { elapsed: number; budget: number }) {
+  const pct = budget > 0 ? Math.min(100, (elapsed / budget) * 100) : 0;
+  return (
+    <span
+      className={`duration${pct >= 80 ? ' near' : ''}`}
+      role="meter"
+      aria-label="Turn time against its budget"
+      aria-valuemin={0}
+      aria-valuemax={Math.round(budget / 1000)}
+      aria-valuenow={Math.round(Math.min(elapsed, budget) / 1000)}
+    >
+      <i style={{ width: `${pct}%` }} />
+    </span>
+  );
+}
+
+export function LiveDuration({ since, budget }: { since: number; budget: number }) {
+  const now = useNow();
+  return (
+    <span className="timing">
+      <DurationBar elapsed={now - since} budget={budget} />
+      <span className="num">
+        {fmtDuration(now - since)} of {fmtDuration(budget)}
+      </span>
+    </span>
+  );
+}
+
+export function SeatCode({ id }: { id: string }) {
+  return (
+    <span className="code" aria-hidden="true">
+      {seatCode(id).map((tone, i) => (
+        <i key={i} className={`code-${tone}`} />
+      ))}
+    </span>
+  );
+}
+
 export type Field = {
   key: string;
   label: string;
@@ -143,10 +238,11 @@ export function ActionDialog({
       setBusy(false);
     }
   }
+  const set = (key: string, value: string) => setValues({ ...values, [key]: value });
   return (
     <dialog
       ref={ref}
-      className="action-dialog"
+      className="dialog"
       aria-labelledby={`${prefix}-title`}
       onCancel={(event) => {
         if (busy) event.preventDefault();
@@ -158,7 +254,7 @@ export function ActionDialog({
           void submit(event);
         }}
       >
-        <div className="dialog-heading">
+        <div className="dialog-head">
           <h2 id={`${prefix}-title`}>{action.title}</h2>
           <button
             type="button"
@@ -167,85 +263,83 @@ export function ActionDialog({
             disabled={busy}
             onClick={close}
           >
-            <X size={20} />
+            <X size={18} aria-hidden="true" />
           </button>
         </div>
-        {action.description && <p className="muted">{action.description}</p>}
-        {action.confirm && <div className="confirmation">{action.confirm}</div>}
-        {action.fields?.map((field) => (
-          <label
-            className={field.type === 'checkbox' ? 'check-field' : 'field'}
-            key={field.key}
-            htmlFor={`${prefix}-field-${field.key}`}
-          >
-            {field.type !== 'checkbox' && (
-              <span>
+        {action.description && <p className="dialog-copy">{action.description}</p>}
+        {action.confirm && <p className="confirmation">{action.confirm}</p>}
+        {action.fields?.map((field) => {
+          const id = `${prefix}-field-${field.key}`;
+          if (field.type === 'checkbox')
+            return (
+              <label className="check-field" key={field.key} htmlFor={id}>
+                <input
+                  id={id}
+                  type="checkbox"
+                  checked={values[field.key] === 'true'}
+                  disabled={busy}
+                  onChange={(event) => set(field.key, String(event.target.checked))}
+                />
+                <span>{field.label}</span>
+              </label>
+            );
+          return (
+            <label className="field" key={field.key} htmlFor={id}>
+              <span className="field-label">
                 {field.label}
                 {field.required && <span aria-hidden="true"> *</span>}
               </span>
-            )}
-            {field.type === 'textarea' || field.type === 'json' || field.type === 'paths' ? (
-              <textarea
-                id={`${prefix}-field-${field.key}`}
-                className={field.type === 'json' ? 'code-input' : ''}
-                value={values[field.key]}
-                rows={field.type === 'json' ? 7 : 3}
-                required={field.required}
-                disabled={busy}
-                onChange={(event) => setValues({ ...values, [field.key]: event.target.value })}
-              />
-            ) : field.type === 'select' ? (
-              <select
-                id={`${prefix}-field-${field.key}`}
-                value={values[field.key]}
-                required={field.required}
-                disabled={busy}
-                onChange={(event) => setValues({ ...values, [field.key]: event.target.value })}
-              >
-                <option value="">Choose…</option>
-                {field.options?.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            ) : field.type === 'checkbox' ? (
-              <>
-                <input
-                  id={`${prefix}-field-${field.key}`}
-                  type="checkbox"
-                  checked={values[field.key] === 'true'}
+              {field.type === 'textarea' || field.type === 'json' || field.type === 'paths' ? (
+                <textarea
+                  id={id}
+                  className={field.type === 'json' ? 'code-input' : ''}
+                  value={values[field.key]}
+                  rows={field.type === 'json' ? 8 : 3}
                   required={field.required}
                   disabled={busy}
-                  onChange={(event) =>
-                    setValues({ ...values, [field.key]: String(event.target.checked) })
-                  }
+                  onChange={(event) => set(field.key, event.target.value)}
                 />
-                <span>{field.label}</span>
-              </>
-            ) : (
-              <input
-                id={`${prefix}-field-${field.key}`}
-                type={field.type === 'number' ? 'number' : 'text'}
-                value={values[field.key]}
-                required={field.required}
-                min={field.min}
-                max={field.max}
-                disabled={busy}
-                onChange={(event) => setValues({ ...values, [field.key]: event.target.value })}
-              />
-            )}
-            {field.hint && <small>{field.hint}</small>}
-          </label>
-        ))}
+              ) : field.type === 'select' ? (
+                <select
+                  id={id}
+                  value={values[field.key]}
+                  required={field.required}
+                  disabled={busy}
+                  onChange={(event) => set(field.key, event.target.value)}
+                >
+                  <option value="">Choose…</option>
+                  {field.options?.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id={id}
+                  type={field.type === 'number' ? 'number' : 'text'}
+                  value={values[field.key]}
+                  required={field.required}
+                  min={field.min}
+                  max={field.max}
+                  disabled={busy}
+                  autoComplete="off"
+                  onChange={(event) => set(field.key, event.target.value)}
+                />
+              )}
+              {field.hint && <small>{field.hint}</small>}
+            </label>
+          );
+        })}
         {error && <ErrorNotice>{error}</ErrorNotice>}
         <div className="dialog-actions">
-          <button type="button" disabled={busy} onClick={close}>
+          <button type="button" className="button" disabled={busy} onClick={close}>
             Cancel
           </button>
           <button
-            className={action.danger ? 'danger-button' : 'primary'}
+            className={`button ${action.danger ? 'danger' : 'primary'}`}
             disabled={busy}
+            aria-busy={busy || undefined}
             type="submit"
           >
             {busy ? 'Working…' : (action.label ?? action.title)}
@@ -253,41 +347,5 @@ export function ActionDialog({
         </div>
       </form>
     </dialog>
-  );
-}
-export function AddButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
-  return (
-    <button onClick={onClick}>
-      <Plus size={16} aria-hidden="true" />
-      {children}
-    </button>
-  );
-}
-export function RecordRow({
-  item,
-  title,
-  children,
-}: {
-  item: RecordData;
-  title?: string;
-  children?: ReactNode;
-}) {
-  return (
-    <article className="record-row">
-      <div className="row-heading">
-        <h3>{title ?? string(item, 'title', string(item, 'name', string(item, 'id')))}</h3>
-        {string(item, 'status') && <Status value={string(item, 'status')} />}
-      </div>
-      {children}
-      <JsonDetails value={item} />
-    </article>
-  );
-}
-export function LinkButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
-  return (
-    <button className="text-button" onClick={onClick}>
-      {children}
-      <ArrowRight size={15} aria-hidden="true" />
-    </button>
   );
 }
