@@ -38,6 +38,8 @@ const mutationNames = new Set([
   'room_post',
   'interaction_resolve',
   'turn_request',
+  'turn_claim',
+  'turn_complete',
   'room_set_agenda',
   'room_propose_decision',
   'host_transfer_request',
@@ -104,6 +106,7 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
     },
   },
   room_inbox: { required: ['roomId'] },
+  room_members: { required: ['roomId'] },
   interaction_resolve: {
     required: ['roomId', 'interactionId', 'reason'],
     fields: { reason: string },
@@ -112,6 +115,10 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
     required: ['roomId', 'seatId', 'prompt'],
     fields: { prompt: string, attemptId: small, interactionId: small },
   },
+  turn_claim: { required: ['roomId', 'turnId'] },
+  turn_complete: { required: ['roomId', 'turnId'], fields: {
+    text: string, reason: string, outcome: { type: 'string', enum: ['completed', 'failed', 'cancelled'] },
+  } },
   room_set_agenda: { required: ['roomId', 'agenda'], fields: { agenda: string } },
   room_propose_decision: {
     required: ['roomId', 'decision'],
@@ -156,6 +163,8 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
   task_heartbeat: { required: ['roomId', 'attemptId'] },
   task_submit: { required: ['roomId', 'attemptId'] },
   artefact_get: { required: ['roomId', 'manifestId'] },
+  shared_artefact_get: { required: ['roomId', 'artefactId'] },
+  shared_artefact_list: { required: ['roomId'] },
   verification_request: { required: ['roomId', 'manifestId'] },
   review_submit: {
     required: ['roomId', 'manifestId', 'verdict', 'reason'],

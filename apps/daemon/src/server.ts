@@ -13,16 +13,25 @@ import {
   type Seat,
   type Turn,
   type ToolArgs,
+  type RemoteConnection,
 } from '../../../packages/shared/src/contracts.js';
 import { TOOL_DEFINITIONS, validateToolArgs } from '../../../packages/mcp/src/tools.js';
-import { redactPublic } from '../../../packages/store/src/index.js';
+import { redactTransport } from '../../../packages/store/src/index.js';
 import { MANAGED_TOOLS, type ManagedScope } from '../../../packages/mcp/src/managed.js';
+import { SHARED_READS, SHARED_WRITES } from '../../../packages/core/src/membership.js';
+import { artefactMetadata } from '../../../packages/core/src/shared-artefacts.js';
+import type { SharedArtefact } from '../../../packages/shared/src/contracts.js';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 const secret = () => randomBytes(32).toString('base64url');
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const equal = (a: string, b: string) =>
   a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const readCommands = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_get', 'repo_list',
+  'resource_profile_list', 'adapter_status', 'room_export']);
+const outcome = (name: string, args: ToolArgs) => ({ committed: !readCommands.has(name), retrySafe: readCommands.has(name) ||
+  (typeof args.clientKey === 'string' && TOOL_DEFINITIONS.some((t) => t.name === name) &&
+    !['task_claim', 'task_submit', 'verification_request', 'integration_prepare'].includes(name)) });
 export function humanIdentity(runtime: Runtime): Actor {
   let actor = runtime.core.store.get<Actor>('identity', 'human');
   if (!actor) {
@@ -35,32 +44,29 @@ export function humanIdentity(runtime: Runtime): Actor {
 export function issueBridgeCredential(
   runtime: Runtime,
   product: Product,
-): { token: string; principalId: string } {
+  remoteConnectionId?: string,
+): { token: string; principalId: string; remoteConnectionId?: string } {
   if (!['codex', 'claude', 'cursor', 'opencode'].includes(product))
     throw new ConveroomError('invalid_product', 'Choose a supported product');
   const token = secret();
   const principalId = crypto.randomUUID();
+  if (remoteConnectionId) {
+    const c = runtime.core.store.get<RemoteConnection>('remote_connection', remoteConnectionId);
+    if (!c || c.localOwnerId !== humanIdentity(runtime).ownerId || c.status !== 'connected' || c.mode !== 'polling' || c.product !== product)
+      throw new ConveroomError('remote_registration', 'Own connected polling product required', 403);
+  }
   runtime.core.store.put('bridge', hash(token), {
     kind: 'agent',
     principalId,
     ownerId: humanIdentity(runtime).ownerId,
     product,
+    ...(remoteConnectionId ? { remoteConnectionId } : {}),
     createdAt: Date.now(),
   });
-  return { token, principalId };
+  return { token, principalId, ...(remoteConnectionId ? { remoteConnectionId } : {}) };
 }
 export function redact(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redact);
-  if (value && typeof value === 'object')
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(
-          ([key]) =>
-            !/(token|secret|password|credential|reasoning|authorization|cookie|csrf)/i.test(key),
-        )
-        .map(([key, child]) => [key, redact(child)]),
-    );
-  return redactPublic(value);
+  return redactTransport(value);
 }
 const entities = {
   rooms: 'room',
@@ -77,23 +83,25 @@ const entities = {
   reviews: 'review',
   candidates: 'candidate',
   resources: 'resource',
+  remoteConnections: 'remote_connection',
+  remoteProposals: 'remote_proposal',
+  members: 'human_membership',
+  ownerConsents: 'owner_consent',
+  sharedArtefacts: 'shared_artefact',
 };
 export function snapshot(runtime: Runtime): Record<string, unknown> {
   const state: Record<string, unknown> = {};
   for (const [key, kind] of Object.entries(entities))
     state[key] = redact(runtime.core.store.list(kind));
   state.events = redact(allEvents(runtime));
+  state.sharedArtefacts = runtime.core.store.list<SharedArtefact>('shared_artefact').map(artefactMetadata);
+  state.invitations = runtime.core.store.list<Record<string, unknown>>('invitation').map((row) => {
+    const { codeHash: _hash, ...metadata } = row; return metadata;
+  });
   return state;
 }
 function allEvents(runtime: Runtime): Event[] {
-  return runtime.core.store
-    .list<{ id: string }>('room')
-    .flatMap((room) => {
-      const r = runtime.core.store.get<{ seq: number }>('room', room.id)!;
-      return runtime.core.store.events(room.id, Math.max(0, r.seq - 1000), 1000);
-    })
-    .sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
-    .slice(-1000);
+  return runtime.core.store.recentEvents(1000);
 }
 export interface ServerOptions {
   port?: number;
@@ -175,7 +183,7 @@ export async function createServer(
     if (rates.size > 1000)
       for (const [key, value] of rates) if (value.at < Date.now() - 60000) rates.delete(key);
   });
-  app.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {
+  app.setErrorHandler((error: Error & { statusCode?: number; committed?: boolean | null; retrySafe?: boolean }, _request, reply) => {
     const known = error instanceof ConveroomError;
     const status = known
       ? error.status
@@ -200,6 +208,8 @@ export async function createServer(
             : status === 500
               ? 'The operation failed. Check local runtime status.'
               : 'Invalid request',
+          committed: error.committed ?? (known && ['invalid_argument', 'unknown_command', 'unauthorised', 'invalid_csrf', 'human_session_required'].includes(error.code) ? false : null),
+          retrySafe: error.retrySafe ?? (status === 413 || (known && ['invalid_argument', 'unknown_command', 'unauthorised', 'invalid_csrf', 'human_session_required'].includes(error.code))),
         },
       });
   });
@@ -249,6 +259,9 @@ export async function createServer(
     'adapter_status',
     'room_export',
     'backup_request',
+    'remote_connection_prepare', 'remote_connection_finish', 'remote_connection_disconnect', 'remote_connection_enable',
+    'remote_refresh', 'remote_turn_accept', 'remote_turn_decline',
+    'membership_invite', 'membership_confirm', 'membership_revoke', 'invitation_revoke', 'owner_consent_update', 'shared_artefact_publish',
   ]);
   const dispatch = async (request: FastifyRequest, actor: Actor) => {
     const body = request.body as { name?: unknown; args?: unknown };
@@ -269,9 +282,14 @@ export async function createServer(
     else if (actor.kind !== 'human' || !humanCommands.has(body.name))
       throw new ConveroomError('unknown_command', 'Unsupported command');
     const result = await runtime.core.dispatch(actor, body.name, args);
+    if (actor.kind === 'human' && body.name === 'remote_connection_prepare') {
+      const prepared = result as ToolArgs;
+      return { result: { ...redact(prepared) as ToolArgs, authorizationUrl: prepared.authorizationUrl }, committed: true, retrySafe: false };
+    }
     if (body.name === 'room_create' && result && typeof result === 'object') {
       const room = result as { id: string };
       return {
+        ...outcome(body.name, args),
         result: redact({
           ...result,
           appUrl: url + '/?room=' + encodeURIComponent(room.id),
@@ -281,23 +299,33 @@ export async function createServer(
         }),
       };
     }
-    return { result: redact(result) };
+    return { result: redact(result), ...outcome(body.name, args) };
   };
   app.post('/api/commands', async (request) => {
     humanSession(request, true);
+    return dispatch(request, human);
+  });
+  app.post('/api/artefacts', { bodyLimit: 3145728, onRequest: async (request) => { humanSession(request, true); } }, async (request) => {
+    if ((request.body as { name?: string })?.name !== 'shared_artefact_publish') throw new ConveroomError('invalid_argument', 'Artefact publication required');
     return dispatch(request, human);
   });
   app.post('/agent/commands', async (request) => {
     browserOrigin(request, false);
     const auth = String(request.headers.authorization ?? '');
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-    const principal = token ? runtime.core.store.get<Actor & { scope?: ManagedScope }>('bridge', hash(token)) : undefined;
+    const principal = token ? runtime.core.store.get<Actor & { scope?: ManagedScope; remoteConnectionId?: string }>('bridge', hash(token)) : undefined;
     if (
       !principal ||
       principal.kind !== 'agent' ||
       runtime.core.store.get('revoked', principal.principalId)
     )
       throw new ConveroomError('unauthorised', 'Agent bridge credential required', 401);
+    if (principal.remoteConnectionId) {
+      const body = request.body as { name?: string; args?: ToolArgs };
+      const result = await runtime.core.dispatch({ kind: 'agent', ownerId: principal.ownerId, principalId: principal.principalId },
+        'remote_polling_dispatch', { connectionId: principal.remoteConnectionId, name: body?.name, args: body?.args ?? {} });
+      return { result: redact(result), committed: SHARED_WRITES.has(String(body.name)), retrySafe: SHARED_READS.has(String(body.name)) || typeof body.args?.clientKey === 'string' };
+    }
     if (principal.scope) {
       const scope = principal.scope;
       const body = request.body as { name?: string; args?: ToolArgs };
@@ -316,6 +344,11 @@ export async function createServer(
         (body.args?.attemptId && body.args.attemptId !== scope.attemptId) ||
         (body.args?.seatId && body.args.seatId !== scope.seatId))
         throw new ConveroomError('managed_scope', 'Managed tools are limited to this seat and room', 403);
+      if (scope.remoteConnectionId) {
+        const result = await runtime.core.dispatch({ kind: 'agent', principalId: principal.principalId, ownerId: principal.ownerId },
+          'remote_agent_dispatch', { connectionId: scope.remoteConnectionId, localTurnId: scope.turnId, name: body.name, args: body.args ?? {} });
+        return { result: redact(result), committed: SHARED_WRITES.has(String(body.name)), retrySafe: SHARED_READS.has(String(body.name)) || typeof body.args?.clientKey === 'string' };
+      }
     }
     return dispatch(request, {
       kind: 'agent',
@@ -327,9 +360,9 @@ export async function createServer(
     localAuth(request);
     throw new ConveroomError('human_session_required', 'Pair a human session to issue commands', 403);
   });
-  app.post<{ Body: { product: Product } }>('/local/credentials', async (request) => {
+  app.post<{ Body: { product: Product; remoteConnectionId?: string } }>('/local/credentials', async (request) => {
     localAuth(request);
-    return issueBridgeCredential(runtime, request.body.product);
+    return issueBridgeCredential(runtime, request.body.product, request.body.remoteConnectionId);
   });
   app.post('/local/pair', async (request) => {
     localAuth(request);
@@ -358,13 +391,7 @@ export async function createServer(
   app.get('/api/events', async (request, reply) => {
     humanSession(request);
     const cursor = String(request.headers['last-event-id'] ?? '');
-    let current = allEvents(runtime);
-    if (cursor && !current.some((e) => e.id === cursor))
-      throw new ConveroomError(
-        'cursor_expired',
-        'Refresh the room snapshot before resuming events',
-        409,
-      );
+    runtime.core.store.eventsAfter(cursor, 1);
     reply.hijack();
     reply.raw.writeHead(200, {
       'content-type': 'text/event-stream',
@@ -372,23 +399,27 @@ export async function createServer(
       connection: 'keep-alive',
       'x-content-type-options': 'nosniff',
     });
+    reply.raw.flushHeaders();
     let lastId = cursor;
     let busy = false;
+    let blocked = false;
     const emit = () => {
-      if (busy || reply.raw.destroyed) return;
+      if (busy || blocked || reply.raw.destroyed) return;
       busy = true;
       try {
-        current = allEvents(runtime);
-        const start = lastId ? current.findIndex((e) => e.id === lastId) + 1 : 0;
-        for (const event of current.slice(start)) {
-          if (
-            !reply.raw.write(
+        for (const event of runtime.core.store.eventsAfter(lastId)) {
+          const accepted = reply.raw.write(
               `id: ${event.id}\nevent: room\ndata: ${JSON.stringify(redact(event))}\n\n`,
-            )
-          )
-            break;
+            );
           lastId = event.id;
+          if (!accepted) {
+            blocked = true;
+            reply.raw.once('drain', () => { blocked = false; emit(); });
+            break;
+          }
         }
+      } catch {
+        reply.raw.end('event: resync\ndata: {"reason":"cursor_expired"}\n\n');
       } finally {
         busy = false;
       }

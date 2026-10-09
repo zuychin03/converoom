@@ -9,7 +9,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ConveroomError } from '../../../packages/shared/src/contracts.js';
 import { scopeDigest } from '../../../packages/store/src/index.js';
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 export function dataDirectory() {
   return (
     process.env.CONVEROOM_DATA_DIR ??
@@ -95,12 +95,12 @@ export async function installStable(dataDir: string): Promise<string> {
         )
       ).every(Boolean);
     if (same && valid) return join(target, 'dist', 'cli.js');
-    if (existsSync(join(dataDir, 'runtime.lock')))
-      throw new ConveroomError(
-        'runtime_active',
-        'Stop the runtime before repairing this preview version. Existing payload preserved',
-      );
   }
+  if (existsSync(join(dataDir, 'runtime.lock')))
+    throw new ConveroomError(
+      'runtime_active',
+      'Stop the runtime before repairing this preview version. Existing payload preserved',
+    );
   await mkdir(target, { recursive: true, mode: 0o700 });
   for (const name of [
     'dist',
@@ -108,6 +108,10 @@ export async function installStable(dataDir: string): Promise<string> {
     'native/bin',
     'packages/plugin-content',
     'package.json',
+    'README.md',
+    'docs/WINDOWS_SHARED_PILOT.md',
+    'docs/PREVIEW_ACCEPTANCE.md',
+    'docs/REQUIREMENT_MATRIX.md',
     'LICENSE',
     'NOTICE',
     'RELEASE_MANIFEST.json',

@@ -1935,3 +1935,18 @@ textarea {
     scroll-behavior: auto !important;
   }
 }
+.collaboration { padding: var(--space-6); max-width: 64rem; margin: 0 auto; width: 100%; min-width: 0; overflow-wrap: anywhere; }
+.collaboration > * + * { margin-top: var(--space-4); }
+.collaboration-list { list-style: none; padding: 0; display: grid; gap: var(--space-4); }
+.collaboration .panel { border: 1px solid var(--hairline); margin-top: var(--space-4); }
+.record-id { display: block; overflow-wrap: anywhere; white-space: normal; }
+.consent-form { display: grid; gap: var(--space-4); }
+.consent-form label { display: grid; gap: var(--space-2); }
+.consent-form .checkbox-label { display: flex; align-items: center; gap: var(--space-2); }
+.consent-form .checkbox-label input { width: auto; }
+.collaboration pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.shared-room-layout { grid-template-columns: minmax(0, 1fr) 19rem; }
+.nav { overflow-x: auto; }
+.nav button { flex-shrink: 0; }
+@media (max-width: 1000px) { .shared-room-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) { .collaboration { padding: var(--space-4); } .nav button { flex: 0 0 auto; } }

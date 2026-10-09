@@ -5,6 +5,34 @@ import { join } from 'node:path';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
 import type { Actor, ToolArgs, Turn } from '../packages/shared/src/contracts.js';
 const owner: Actor = { kind: 'human', principalId: 'owner', ownerId: 'owner' };
+it('dispatches retained approved work once after resume and never while paused', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'converoom-pause-'));
+  let started = 0;
+  const runtime = await createRuntime(dir, { tickMs: 10, startSession: async (product) => {
+    started++;
+    return { id: 'pause-fixture', product, capabilities: ['prompt', 'cancel'],
+      prompt: async () => 'Public retained reply', cancel: async () => {}, close: async () => true };
+  } });
+  const call = (name: string, args: ToolArgs) => runtime.core.dispatch(owner, name, args) as Promise<ToolArgs>;
+  try {
+    const room = await call('room_create', { title: 'Pause recovery', objective: 'Retain queued work' });
+    const seat = await call('seat_add', { roomId: room.id, product: 'codex', mode: 'managed', name: 'Worker' });
+    await call('seat_consent', { roomId: room.id, seatId: seat.id, consent: true });
+    const turn = await call('turn_request', { roomId: room.id, seatId: seat.id, prompt: 'Retained work' });
+    await call('room_pause', { roomId: room.id });
+    await call('permission_grant', { requestId: turn.permissionRequestId });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(started).toBe(0);
+    expect(runtime.core.store.get<Turn>('turn', String(turn.id))?.status).toBe('queued');
+    await call('room_resume', { roomId: room.id });
+    await expect.poll(() => runtime.core.store.get<Turn>('turn', String(turn.id))?.status).toBe('completed');
+    await call('room_pause', { roomId: room.id });
+    await call('room_resume', { roomId: room.id });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(started).toBe(1);
+    expect(runtime.core.store.events(String(room.id)).filter((event) => event.type === 'turn.started')).toHaveLength(1);
+  } finally { await runtime.stop(); await rm(dir, { recursive: true, force: true }); }
+});
 it('requires human grants, limits busy seats, records public replies and recovers without replay', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'converoom-scheduler-'));
   let started = 0,

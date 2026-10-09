@@ -48,14 +48,15 @@ it('runs the same stdio room corpus for all four vendor bridge identities', asyn
         clientKey: 'create',
       });
       expect(room.appUrl).toContain('/?room=');
-      if (!firstRoom) firstRoom = String(room.id);
+      let targetId: string;
+      if (!firstRoom) { firstRoom = String(room.id); targetId = String(room.hostSeatId); }
       else
-        await call(c, 'room_join', {
+        targetId = String((await call(c, 'room_join', {
           roomId: firstRoom,
           name: product,
           product,
           clientKey: 'join',
-        });
+        })).id);
       await call(c, 'room_post', {
         roomId: firstRoom,
         text: product + ' public position',
@@ -63,6 +64,11 @@ it('runs the same stdio room corpus for all four vendor bridge identities', asyn
       });
       const read = await call(c, 'room_read', { roomId: firstRoom, cursor: 0 });
       expect(JSON.stringify(read)).toContain(product + ' public position');
+      const turn = await call(clients[0], 'turn_request', { roomId: firstRoom, seatId: targetId,
+        prompt: 'Public polling response', clientKey: 'request-' + product });
+      await call(c, 'turn_claim', { roomId: firstRoom, turnId: turn.id, clientKey: 'claim' });
+      expect(await call(c, 'turn_complete', { roomId: firstRoom, turnId: turn.id,
+        text: product + ' completed polling turn', clientKey: 'complete' })).toMatchObject({ status: 'completed' });
     }
     await call(clients[0], 'room_close', { roomId: firstRoom, clientKey: 'close' });
   } finally {

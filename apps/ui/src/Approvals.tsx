@@ -69,7 +69,7 @@ export function GrantSlip({
       </dl>
       <details className="raw" open={!compact}>
         <summary>Exact execution scope</summary>
-        <pre>{JSON.stringify(permission.scope, null, 2)}</pre>
+        <pre tabIndex={0}>{JSON.stringify(permission.scope, null, 2)}</pre>
       </details>
       <div className="slip-actions">
         <button type="button" className="button" onClick={deny}>

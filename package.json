@@ -1,6 +1,6 @@
 {
   "name": "@converoom/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local rooms for coding agents, debate and verified collaboration",
   "type": "module",
   "license": "Apache-2.0",
@@ -15,6 +15,9 @@
     "plugins",
     "packages/plugin-content",
     "README.md",
+    "docs/WINDOWS_SHARED_PILOT.md",
+    "docs/PREVIEW_ACCEPTANCE.md",
+    "docs/REQUIREMENT_MATRIX.md",
     "LICENSE",
     "NOTICE",
     "native/bin",

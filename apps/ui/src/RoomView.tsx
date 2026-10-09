@@ -36,6 +36,7 @@ import {
   shortId,
   turnKind,
   turnTiming,
+  visibleTurn,
   type Kind,
 } from './model.js';
 
@@ -185,6 +186,7 @@ export function RoomView({
   focusSeq,
   setFocusSeq,
   onAllRooms,
+  shared = false,
 }: {
   room: RecordData;
   state: Snapshot;
@@ -194,6 +196,7 @@ export function RoomView({
   focusSeq: number | null;
   setFocusSeq: (seq: number | null) => void;
   onAllRooms: () => void;
+  shared?: boolean;
 }) {
   const now = useNow(5000);
   const id = string(room, 'id');
@@ -258,12 +261,12 @@ export function RoomView({
     }
   }
   const requestTurn = (seat: RecordData, interactionId?: string) =>
-    openAction(requestTurnAction(id, seat.id, interactionId));
+    openAction(requestTurnAction(id, seat.id, interactionId, shared || seat.ownerId !== room.ownerId));
   const names = {
     seat: (seatId: unknown) =>
       seatId === humanId
         ? 'You'
-        : string(state.seats.find((s) => s.id === seatId) ?? {}, 'name', 'Seat'),
+        : string(state.seats.find((s) => s.id === seatId) ?? {}, 'name', 'Participant'),
     actor: (actorId: unknown) =>
       actorId === humanId
         ? 'You'
@@ -290,7 +293,7 @@ export function RoomView({
           <p className="room-objective">{string(room, 'objective')}</p>
           <div className="room-meta">
             <span>{room.workflow === 'coding' ? 'Coding room' : 'Discussion room'}</span>
-            <span>Host · {host ? string(host, 'name') : 'You'}</span>
+            <span>Host · {host ? string(host, 'name') : shared ? 'Room owner' : 'You'}</span>
             <span>Policy v{num(room, 'policyVersion') ?? 1}</span>
           </div>
           <div className="room-gauges">
@@ -302,7 +305,7 @@ export function RoomView({
             />
             <Gauge label="Turns" value={turns.length} max={num(policy, 'maxMessages') ?? 60} />
           </div>
-          <div className="room-actions">
+          {!shared && <div className="room-actions">
             {!closed &&
               (open ? (
                 <button type="button" className="button" disabled={!!busy} onClick={() => void lifecycle('room_pause')}>
@@ -324,7 +327,7 @@ export function RoomView({
               <Square size={13} aria-hidden="true" />
               Close
             </button>
-          </div>
+          </div>}
           {error && <ErrorNotice dismiss={() => setError('')}>{error}</ErrorNotice>}
         </header>
         <ul className="seat-strip" aria-label="Seats at a glance">
@@ -420,7 +423,7 @@ export function RoomView({
         <section className="panel">
           <div className="panel-head">
             <h2 className="section-label">Seats</h2>
-            <button
+            {!shared && <button
               type="button"
               className="icon-button"
               aria-label="Add agent"
@@ -428,7 +431,7 @@ export function RoomView({
               onClick={() => openAction(addAgentAction(id))}
             >
               <Plus size={17} aria-hidden="true" />
-            </button>
+            </button>}
           </div>
           {seats.length === 0 && (
             <p className="rail-note">
@@ -446,11 +449,14 @@ export function RoomView({
                 selected={selected === seat.id}
                 onSelect={setSelected}
                 requestTurn={() => requestTurn(seat)}
+                shared={shared}
+                remote={seat.ownerId !== room.ownerId}
+                ownerLabel={string(state.members.find((m) => m.ownerId === seat.ownerId) ?? {}, 'displayName', 'Local room owner')}
               />
             ))}
           </ul>
         </section>
-        <RoomControls room={room} state={state} seats={seats} names={names} openAction={openAction} />
+        {!shared && <RoomControls room={room} state={state} seats={seats} names={names} openAction={openAction} />}
       </aside>
     </>
   );
@@ -464,6 +470,9 @@ function SeatRow({
   selected,
   onSelect,
   requestTurn,
+  shared,
+  remote,
+  ownerLabel,
 }: {
   seat: RecordData;
   st: ReturnType<typeof seatState>;
@@ -472,6 +481,9 @@ function SeatRow({
   selected: boolean;
   onSelect: (id: string | undefined) => void;
   requestTurn: () => void;
+  shared?: boolean;
+  remote?: boolean;
+  ownerLabel: string;
 }) {
   const id = string(seat, 'id');
   const managed = seat.mode === 'managed';
@@ -512,12 +524,13 @@ function SeatRow({
         )}
       </Status>
       <p className="seat-meta">
+        Owner · {ownerLabel}<br />
         {string(seat, 'product')} ·{' '}
         {managed ? 'new managed session per turn' : 'polls its inbox, outside runtime control'}
       </p>
-      {managed && (
+      {(managed || shared || remote) && (
         <div className="seat-actions">
-          <button
+          {!shared && !remote && <button
             type="button"
             role="switch"
             aria-checked={consent}
@@ -529,8 +542,8 @@ function SeatRow({
               <i />
             </span>
             Allow turn requests
-          </button>
-          <button type="button" className="button small" disabled={!roomOpen || !consent} onClick={requestTurn}>
+          </button>}
+          <button type="button" className="button small" disabled={!roomOpen || (!shared && !remote && !consent)} onClick={requestTurn}>
             <Play size={12} aria-hidden="true" />
             Request turn
           </button>
@@ -868,7 +881,8 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
     };
   }
   if (type === 'turn.queued') {
-    const turn = state.turns.find((t) => t.id === d.id) ?? d;
+    const turn = visibleTurn(state, string(ctx.room, 'id'), d);
+    const current = state.turns.some((t) => t.id === d.id);
     const seat = state.seats.find((s) => s.id === turn.seatId);
     const tk = turnKind(turn, state, ctx.now);
     const timing = turnTiming(turn, ctx.room, state);
@@ -898,7 +912,7 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
                   </span>
                 </span>
               ))}
-            {OPEN_TURN.includes(statusText) && (
+            {current && OPEN_TURN.includes(statusText) && (
               <button
                 type="button"
                 className="text-button"
@@ -916,7 +930,7 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
                 Cancel turn
               </button>
             )}
-            {statusText === 'cancelling' && (
+            {current && statusText === 'cancelling' && seat?.mode === 'managed' && (
               <button
                 type="button"
                 className="text-button"
@@ -992,7 +1006,7 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
           <Status kind={outcome[0]}>{outcome[1]}</Status>
         </div>
       ),
-      record: <pre className="scope">{JSON.stringify(permission.scope, null, 2)}</pre>,
+      record: <pre className="scope" tabIndex={0}>{JSON.stringify(permission.scope, null, 2)}</pre>,
     };
   }
   return {

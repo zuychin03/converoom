@@ -15,6 +15,7 @@ export const collections = [
   'reviews',
   'candidates',
   'resources',
+  'members', 'invitations', 'ownerConsents', 'remoteConnections', 'remoteProposals', 'sharedArtefacts',
 ] as const;
 export type Snapshot = { [K in (typeof collections)[number]]: RecordData[] };
 export class ApiError extends Error {
@@ -22,6 +23,8 @@ export class ApiError extends Error {
     message: string,
     public status: number,
     public code = 'request_failed',
+    public committed: boolean | null = null,
+    public retrySafe = false,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -42,8 +45,9 @@ export function parseSnapshot(value: unknown): Snapshot {
   ) as Snapshot;
 }
 type Transport = (url: string, init?: RequestInit) => Promise<Response>;
-export function createClient(transport: Transport = (url, init) => fetch(url, init)) {
+export function createClient(transport: Transport = (url, init) => fetch(url, init), shared = false) {
   let csrf = '';
+  let generation = 0, policyVersion = 0, roomId = '';
   async function request(path: string, init?: RequestInit): Promise<unknown> {
     const response = await transport(path, {
       ...init,
@@ -60,33 +64,51 @@ export function createClient(transport: Transport = (url, init) => fetch(url, in
           : `Request failed (${response.status}). Try again.`,
         response.status,
         isRecord(error) && typeof error.code === 'string' ? error.code : undefined,
+        isRecord(error) && typeof error.committed === 'boolean' ? error.committed : null,
+        isRecord(error) && error.retrySafe === true,
       );
     }
     return value;
   }
   return {
+    async join(id: string, code: string, recovery = false) {
+      if (!shared) throw new Error('Shared browser required');
+      await request('/shared/v1/join', { method: 'POST', body: JSON.stringify({ roomId: id, code, ...(recovery ? { recovery: true } : {}) }) });
+    },
     async pair(code: string) {
       await request('/api/pair', { method: 'POST', body: JSON.stringify({ code }) });
     },
     async session() {
-      const value = await request('/api/session');
+      const value = await request(shared ? '/shared/v1/session' : '/api/session');
       if (!isRecord(value) || typeof value.csrf !== 'string' || !value.csrf)
         throw new Error('Invalid browser session. Pair this browser again.');
       csrf = value.csrf;
+      if (shared) { roomId = string(value, 'roomId'); generation = Number(value.generation); }
       return value;
     },
     async state() {
+      if (shared) {
+        const value = await request('/shared/v1/browser/state');
+        if (!isRecord(value) || !isRecord(value.room)) throw new Error('Invalid shared room state');
+        policyVersion = Number(value.room.policyVersion);
+        return parseSnapshot({ rooms: [value.room], seats: value.seats, events: value.events, turns: value.turns, interactions: value.interactions,
+          members: value.members, ownerConsents: value.ownerConsents, sharedArtefacts: value.artefacts });
+      }
       return parseSnapshot(await request('/api/state'));
     },
     async command(name: string, args: RecordData) {
       if (!csrf) throw new ApiError('Pair this browser before making changes.', 401);
-      const value = await request('/api/commands', {
+      if (shared && (!policyVersion || args.roomId && args.roomId !== roomId)) throw new Error('Refresh the current shared room before making changes.');
+      const value = await request(shared ? name === 'shared_artefact_publish' ? '/shared/v1/artefacts' : '/shared/v1/browser/commands' : name === 'shared_artefact_publish' ? '/api/artefacts' : '/api/commands', {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrf },
-        body: JSON.stringify({ name, args }),
+        body: JSON.stringify(shared ? name === 'shared_artefact_publish' ? { ...args, roomId, expectedGeneration: generation, expectedPolicyVersion: policyVersion }
+          : { name, args: { ...args, roomId, expectedGeneration: generation, expectedPolicyVersion: policyVersion } } : { name, args }),
       });
       return isRecord(value) ? value.result : value;
     },
+    async exportPage(cursor = 0) { return request('/shared/v1/export?cursor=' + cursor); },
+    eventsPath: shared ? '/shared/v1/events' : '/api/events',
   };
 }
 export const string = (record: RecordData, key: string, fallback = '') =>

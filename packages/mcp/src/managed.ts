@@ -6,6 +6,7 @@ import type { Core, Seat, Turn } from '../../shared/src/contracts.js';
 export const MANAGED_TOOLS = new Set([
   'room_get', 'room_read', 'room_wait', 'room_inbox', 'room_post', 'room_usage',
   'task_get', 'task_heartbeat', 'artefact_get', 'permission_request', 'runtime_capabilities',
+  'shared_artefact_get', 'shared_artefact_list',
 ]);
 export interface ManagedScope {
   roomId: string;
@@ -13,6 +14,7 @@ export interface ManagedScope {
   turnId: string;
   attemptId?: string;
   generation?: number;
+  remoteConnectionId?: string;
 }
 export interface ManagedMcp {
   name: string;
@@ -26,6 +28,11 @@ export async function managedBridge(core: Core, dataDir: string, cli: string, se
   const key = createHash('sha256').update(token).digest('hex');
   const scope: ManagedScope = { roomId: turn.roomId, seatId: seat.id, turnId: turn.id,
     ...(turn.attemptId ? { attemptId: turn.attemptId, generation } : {}) };
+  if (turn.remoteProposalId) {
+    const proposal = core.store.get<{ connectionId: string }>('remote_proposal', turn.remoteProposalId);
+    if (!proposal) throw new Error('Remote proposal binding missing');
+    scope.remoteConnectionId = proposal.connectionId;
+  }
   const path = join(dataDir, 'bridges', turn.id + '.json');
   await mkdir(join(dataDir, 'bridges'), { recursive: true, mode: 0o700 });
   await writeFile(path, JSON.stringify({ token, principalId: seat.principalId, scope }), { mode: 0o600, flag: 'wx' });

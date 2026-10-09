@@ -9,13 +9,15 @@ import { ACTIVE_TURN, data, num, pad, pendingPermissions, roomEvents, shortId } 
 import { NoRoom, RoomIndex, RoomView } from './RoomView.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import { WorkspaceView } from './WorkspaceView.js';
+import { ArtefactsView, ConnectionsView, MembersView } from './Collaboration.js';
 
 const client = createClient();
-type View = 'room' | 'work' | 'approvals';
+type View = 'room' | 'work' | 'approvals' | 'members' | 'connections' | 'artefacts';
 const VIEWS: Array<[View, string]> = [
   ['room', 'Room'],
   ['work', 'Work'],
   ['approvals', 'Approvals'],
+  ['members', 'Members'], ['connections', 'Connections'], ['artefacts', 'Artefacts'],
 ];
 const INDEXED = new Set(['message', 'agenda', 'decision', 'turn.queued', 'permission.requested']);
 
@@ -31,6 +33,7 @@ function liveRoomId(state: Snapshot) {
 export function App() {
   const [phase, setPhase] = useState<'checking' | 'pair' | 'ready'>('checking');
   const [humanId, setHumanId] = useState('');
+  const [ownerId, setOwnerId] = useState('');
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [roomId, setRoomId] = useState(() => new URL(window.location.href).searchParams.get('room') ?? '');
   const [view, setView] = useState<View>('room');
@@ -77,6 +80,7 @@ export function App() {
   const adoptSession = (value: unknown) => {
     const actor = isRecord(value) && isRecord(value.actor) ? value.actor : {};
     setHumanId(string(actor, 'principalId'));
+    setOwnerId(string(actor, 'ownerId'));
     setPhase('ready');
   };
   useEffect(() => {
@@ -99,13 +103,18 @@ export function App() {
   useEffect(() => {
     if (phase !== 'ready') return;
     void refresh();
-    const events = new EventSource('/api/events');
-    events.onopen = () => {
-      setConnection('live');
-      void refresh();
+    let events: EventSource;
+    const subscribe = () => {
+      events = new EventSource('/api/events');
+      events.onopen = () => {
+        setConnection('live');
+        void refresh();
+      };
+      events.onerror = () => setConnection('reconnecting');
+      events.addEventListener('room', () => void refresh());
+      events.addEventListener('resync', () => { events.close(); void refresh(); subscribe(); });
     };
-    events.onerror = () => setConnection('reconnecting');
-    events.addEventListener('room', () => void refresh());
+    subscribe();
     const poll = setInterval(() => void refresh(), 12000);
     const online = () => void refresh();
     const offline = () => setConnection('offline');
@@ -392,7 +401,10 @@ export function App() {
               <NoRoom hasRooms={snapshot.rooms.length > 0} createRoom={createRoom} />
             )}
           </div>
-        ) : view === 'work' ? (
+        ) : view === 'members' ? <MembersView key={roomId} room={room} state={snapshot} ownerId={ownerId} run={run} openAction={setAction} />
+          : view === 'connections' ? <ConnectionsView state={snapshot} run={run} openAction={setAction} />
+          : view === 'artefacts' ? <ArtefactsView key={roomId} room={room} state={snapshot} run={run} openAction={setAction} />
+          : view === 'work' ? (
           <WorkspaceView
             state={snapshot}
             room={room}
@@ -417,7 +429,7 @@ export function App() {
   );
 }
 
-function Brand() {
+export function Brand() {
   return (
     <div className="brand">
       <span className="mark" aria-hidden="true">
@@ -434,7 +446,7 @@ const THEMES: Array<[ThemeChoice, string, React.ReactNode]> = [
   ['system', 'System', <Monitor key="s" size={14} aria-hidden="true" />],
 ];
 
-function ThemeSwitch({ choice, setChoice }: { choice: ThemeChoice; setChoice: (c: ThemeChoice) => void }) {
+export function ThemeSwitch({ choice, setChoice }: { choice: ThemeChoice; setChoice: (c: ThemeChoice) => void }) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
   const index = THEMES.findIndex(([value]) => value === choice);
   function key(event: React.KeyboardEvent) {

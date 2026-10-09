@@ -226,6 +226,22 @@ describe('room authority and interactions', () => {
       call('turn_request', { roomId: r.id, seatId: s.id, prompt: 'Run' }, agent),
     ).rejects.toThrow(/paused/i);
   });
+  it('preserves queued turns and approvals across pause and resume', async () => {
+    const r = await room();
+    const target = await seat(r.id);
+    await call('seat_consent', { roomId: r.id, seatId: target.id, consent: true });
+    const turn = await call<Turn>('turn_request', { roomId: r.id, seatId: target.id, prompt: 'Retain this work' });
+    const permission = store.get<ToolArgs>('permission', turn.permissionRequestId!)!;
+    await call('room_pause', { roomId: r.id });
+    expect(store.get<Turn>('turn', turn.id)).toEqual(turn);
+    expect(store.get('permission', String(permission.id))).toEqual(permission);
+    await call('room_resume', { roomId: r.id });
+    expect(store.get<Turn>('turn', turn.id)).toEqual(turn);
+    await call('permission_grant', { requestId: permission.id });
+    expect(store.get<Turn>('turn', turn.id)?.status).toBe('queued');
+    await call('room_close', { roomId: r.id });
+    expect(store.get<Turn>('turn', turn.id)?.status).toBe('cancelled');
+  });
   it('requires a human confirmation for host transfer', async () => {
     const r = await room();
     const s = await seat(r.id, 'polling');

@@ -51,10 +51,9 @@ export const pendingPermissions = (state: Snapshot, now: number, roomId?: string
       (!roomId || p.roomId === roomId),
   );
 
-// The runtime stops waiting for a native tool approval two minutes after asking.
 export const agentWaitEnds = (permission: RecordData) => {
   const expires = num(permission, 'expiresAt');
-  return permission.action === 'vendor_tool' && expires ? expires - 3600000 + 120000 : undefined;
+  return permission.action === 'vendor_tool' ? expires : undefined;
 };
 
 export function failureLabel(turn: RecordData) {
@@ -106,8 +105,17 @@ export function seatState(seat: RecordData, state: Snapshot, now: number): SeatS
   return { kind: 'idle', label: seat.consent ? 'Ready' : 'Requests off' };
 }
 
+export function visibleTurn(state: Snapshot, roomId: string, queued: RecordData): RecordData {
+  const current = state.turns.find((t) => t.id === queued.id && t.roomId === roomId);
+  if (current) return current;
+  const lifecycle = roomEvents(state, roomId).filter((e) => data(e).turnId === queued.id &&
+    ['turn.started', 'turn.completed', 'turn.failed', 'turn.cancelled', 'turn.uncertain'].includes(string(e, 'type'))).at(-1);
+  return { ...queued, status: lifecycle ? string(lifecycle, 'type').replace('turn.', '').replace('started', 'running') : 'unavailable' };
+}
+
 export function turnKind(turn: RecordData, state: Snapshot, now: number): { kind: Kind; label: string } {
   const status = string(turn, 'status');
+  if (status === 'unavailable') return { kind: 'idle', label: 'Current status unavailable' };
   if (status === 'running') return { kind: 'live', label: 'Running' };
   if (status === 'dispatching') return { kind: 'live', label: 'Starting' };
   if (status === 'cancelling') return { kind: 'warn', label: 'Cancelling' };

@@ -59,7 +59,7 @@ export function JsonDetails({ value, title = 'Raw record' }: { value: unknown; t
   return (
     <details className="raw">
       <summary>{title}</summary>
-      <pre>{JSON.stringify(value, null, 2)}</pre>
+      <pre tabIndex={0}>{JSON.stringify(value, null, 2)}</pre>
     </details>
   );
 }
@@ -200,9 +200,11 @@ export function ActionDialog({
   );
   useEffect(() => {
     const dialog = ref.current;
+    const previous = document.activeElement;
     dialog?.showModal();
     return () => {
       dialog?.close();
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
   }, []);
   async function submit(event: React.FormEvent) {

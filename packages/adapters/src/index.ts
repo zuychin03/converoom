@@ -99,7 +99,7 @@ export async function startManaged(
     };
     try {
       await rpc.request('initialize', {
-        clientInfo: { name: 'converoom', version: '0.1.0' },
+        clientInfo: { name: 'converoom', version: '0.2.0' },
         capabilities: { experimentalApi: false },
       });
       rpc.notify('initialized');
@@ -217,7 +217,7 @@ export async function startManaged(
       await bounded(
         connection.agent.request(acp.methods.agent.initialize, {
           protocolVersion: acp.PROTOCOL_VERSION,
-          clientInfo: { name: 'converoom', version: '0.1.0' },
+          clientInfo: { name: 'converoom', version: '0.2.0' },
           clientCapabilities: {},
         }),
         30000,

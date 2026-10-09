@@ -139,8 +139,11 @@ it('awaits in-flight session initialisation before closing the store on shutdown
     expect(closed).toBe(true);
     expect(prompts).toBe(0);
     const recovered = await createRuntime(dir, { noScheduler: true });
-    expect(recovered.core.store.get<Turn>('turn', String(turn.id))?.status).toBe('cancelled');
-    await recovered.stop();
+    try {
+      expect(recovered.core.store.get<Turn>('turn', String(turn.id))?.status).toBe('cancelled');
+    } finally {
+      await recovered.stop();
+    }
   } finally {
     await runtime.stop();
     await rm(dir, { recursive: true, force: true });

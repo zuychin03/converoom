@@ -52,12 +52,12 @@ export const closeRoomAction = (roomId: string): Action => ({
   danger: true,
 });
 
-export const requestTurnAction = (roomId: string, seatId: unknown, interactionId?: string): Action => ({
-  title: interactionId ? 'Request linked reply' : 'Request managed turn',
+export const requestTurnAction = (roomId: string, seatId: unknown, interactionId?: string, remote = false): Action => ({
+  title: interactionId ? 'Request linked reply' : remote ? 'Request participant turn' : 'Request managed turn',
   command: 'turn_request',
   args: { roomId, seatId, ...(interactionId ? { interactionId } : {}) },
   description:
-    'This creates an execution request. Grant it from the pinned slip or the Approvals queue before the new session runs.',
+    remote ? 'This queues a public request for the participant. Their local Converoom requires their separate acceptance and execution grant.' : 'This creates an execution request. Grant it from the pinned slip or the Approvals queue before the new session runs.',
   fields: [
     {
       key: 'prompt',

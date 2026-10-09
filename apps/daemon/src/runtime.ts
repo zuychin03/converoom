@@ -8,6 +8,7 @@ import {
   allRoomEvents,
   scopeDigest,
   redactPublic,
+  redactTransport,
 } from '../../../packages/store/src/index.js';
 import {
   createCore,
@@ -28,6 +29,9 @@ import {
 } from '../../../packages/adapters/src/index.js';
 import { canonicalRoot } from '../../../packages/adapters/src/process.js';
 import { managedBridge } from '../../../packages/mcp/src/managed.js';
+import { mountParticipant, type RemoteTransportFactory } from '../../../packages/remote/src/client.js';
+import { currentTurnAuthority } from '../../../packages/core/src/membership.js';
+import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
   ConveroomError,
   type Runtime,
@@ -41,6 +45,9 @@ export interface RuntimeOptions {
   tickMs?: number;
   startSession?: typeof startManaged;
   noScheduler?: boolean;
+  remoteTickMs?: number;
+  remoteTransport?: RemoteTransportFactory;
+  remoteFetch?: FetchLike;
 }
 export async function createRuntime(
   dataDir: string,
@@ -49,7 +56,8 @@ export async function createRuntime(
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   const store = createStore(join(dataDir, 'converoom.sqlite')),
     core = createCore(store),
-    workspace = mountWorkspace(core, dataDir);
+    workspace = mountWorkspace(core, dataDir),
+    participant = mountParticipant(core, dataDir, options.remoteTransport, options.remoteFetch);
   const active = new Map<string, { session?: ManagedSession; turn: Turn; cancelAt?: number }>(),
     executions = new Set<Promise<void>>();
   let stopped = false,
@@ -59,10 +67,10 @@ export async function createRuntime(
     store.append(turn.roomId, type, 'runtime', data);
   const grant = (t: Turn) => {
     const current = store.get<Turn>('turn', t.id);
-    if (!current) return false;
+    if (!current || !currentTurnAuthority(store, current)) return false;
     const p = store.get<Permission>('permission', current.permissionRequestId ?? '');
     const g = store
-      .list<Grant>('grant')
+      .list<Grant>('grant', { requestId: p?.id ?? '' })
       .find(
         (g) =>
           g.requestId === p?.id &&
@@ -88,13 +96,13 @@ export async function createRuntime(
       summary: 'Native ' + s.product + ' tool needs approval',
       clientKey: randomUUID(),
     })) as Permission;
-    const until = Date.now() + 120000;
+    const until = request.expiresAt;
     while (!stopped && Date.now() < until && store.get<Turn>('turn', t.id)?.status === 'running') {
       const p = store.get<Permission>('permission', request.id)!;
-      if (p.status === 'denied' || p.expiresAt < Date.now()) return false;
+      if (!['pending', 'granted'].includes(p.status) || p.expiresAt <= Date.now()) break;
       if (
-        store
-          .list<Grant>('grant')
+        p.status === 'granted' && store
+          .list<Grant>('grant', { requestId: p.id })
           .some(
             (g) =>
               g.requestId === p.id &&
@@ -105,6 +113,13 @@ export async function createRuntime(
         return true;
       await new Promise((r) => setTimeout(r, 250));
     }
+    store.transaction(() => {
+      const current = store.get<Permission>('permission', request.id);
+      if (current?.status !== 'pending') return;
+      const status = current.expiresAt <= Date.now() ? 'expired' : 'cancelled';
+      store.put('permission', current.id, { ...current, status });
+      emit(t, 'permission.' + status, { requestId: current.id });
+    });
     return false;
   };
   const execute = async (t: Turn, s: Seat) => {
@@ -115,6 +130,7 @@ export async function createRuntime(
     try {
       let cwd = join(dataDir, 'sessions', s.id);
       await mkdir(cwd, { recursive: true });
+      if (t.remoteProposalId) await participant.admit(t);
       if (t.attemptId) {
         attempt = store.get<Attempt>('attempt', t.attemptId);
         if (
@@ -148,6 +164,10 @@ export async function createRuntime(
       const cli = [join(here, 'cli.js'), resolve(here, '../../../dist/cli.js')].find(existsSync);
       if (!cli) throw new ConveroomError('runtime_missing', 'Build or repair the compiled room bridge');
       bridge = await managedBridge(core, dataDir, cli, s, t, attempt?.generation);
+      if (stopped || !grant(t) || store.get<Room>('room', t.roomId)?.status !== 'open' ||
+        !store.get<Seat>('seat', s.id)?.consent || store.get<Turn>('turn', t.id)?.status !== 'dispatching' ||
+        (t.requestedBy && store.get('revoked', t.requestedBy)))
+        throw new ConveroomError('local_admission', 'Local execution approval changed before native startup', 409);
       nativeStartupBegan = true;
       const session = await (options.startSession ?? startManaged)(
         s.product,
@@ -172,7 +192,8 @@ export async function createRuntime(
           admittedAttempt.generation !== attempt.generation ||
           store.get<ToolArgs>('task', attempt.roomId + ':' + attempt.taskId)?.generation !== attempt.generation))
       ) {
-        store.put('turn', t.id, { ...store.get<Turn>('turn', t.id)!, status: 'cancelled' });
+        const current = store.get<Turn>('turn', t.id)!;
+        if (['dispatching', 'cancelling'].includes(current.status)) store.put('turn', t.id, { ...current, status: 'cancelled' });
         return;
       }
       store.put('seat', s.id, {
@@ -218,7 +239,7 @@ export async function createRuntime(
       )!.policy;
       const max = attempt
         ? Math.min(1800000, attempt.wallDeadline - Date.now())
-        : Number(frozen.maxTurnMs);
+        : Math.min(Number(frozen.maxTurnMs), t.maxTurnMs ?? Number(frozen.maxTurnMs));
       let timer: NodeJS.Timeout | undefined;
       const answer = await Promise.race([
         session.prompt(prompt),
@@ -233,8 +254,8 @@ export async function createRuntime(
       if (current.status === 'cancelling') {
         store.put('turn', t.id, { ...current, status: 'cancelled' });
         emit(t, 'turn.cancelled', { turnId: t.id });
-      } else {
-        await core.dispatch(
+      } else if (current.status === 'running' && currentTurnAuthority(store, current) && store.get<Room>('room', t.roomId)?.status === 'open') {
+        const response = await core.dispatch(
           { kind: 'agent', principalId: s.principalId, ownerId: s.ownerId },
           'room_post',
           {
@@ -243,15 +264,18 @@ export async function createRuntime(
             ...(t.interactionId ? { replyToId: t.interactionId } : {}),
             clientKey: 'turn-reply:' + t.id,
           },
-        );
-        store.put('turn', t.id, { ...current, status: 'completed', completedAt: Date.now() });
+        ) as { id: string };
+        store.put('turn', t.id, { ...current, status: 'completed', completedAt: Date.now(), responseEventId: response.id });
         emit(t, 'turn.completed', { turnId: t.id });
+      } else if (current.status === 'running') {
+        store.put('turn', t.id, { ...current, status: 'uncertain', error: 'Turn authority withdrawn before publication' });
+        emit(t, 'turn.uncertain', { turnId: t.id });
       }
     } catch (e) {
       const current = store.get<Turn>('turn', t.id)!;
       const message = redactPublic(e instanceof Error ? e.message : 'Vendor failure');
       const status =
-        current.status === 'cancelling' && e instanceof ConveroomError && e.code === 'cancelled'
+        current.status === 'uncertain' ? 'uncertain' : current.status === 'cancelled' || (current.status === 'cancelling' && (!nativeStartupBegan || (e instanceof ConveroomError && e.code === 'cancelled')))
           ? 'cancelled'
           : 'failed';
       const failure = /quota|rate.limit|usage.limit/i.test(message)
@@ -282,7 +306,7 @@ export async function createRuntime(
       try { await bridge?.revoke(); } catch { credentialCleanupFailed = true; }
       const confirmed = entry.session ? await entry.session.close().catch(() => false) : !nativeStartupBegan;
       const seat = store.get<Seat>('seat', s.id)!;
-      store.put('seat', s.id, { ...seat, status: confirmed ? 'idle' : 'degraded' });
+      store.put('seat', s.id, { ...seat, status: seat.status === 'left' ? 'left' : confirmed ? 'idle' : 'degraded' });
       if (attempt && confirmed) {
         const current = store.get<Attempt>('attempt', attempt.id)!;
         const completed = store.get<Turn>('turn', t.id)?.status === 'completed';
@@ -315,9 +339,9 @@ export async function createRuntime(
     if (stopped || ticking) return;
     ticking = true;
     try {
-      for (const at of store.list<Attempt>('attempt'))
+      for (const at of store.list<Attempt>('attempt', { status: ['quarantined', 'uncertain'] }))
         if (['quarantined', 'uncertain'].includes(at.status)) await workspace.revoke(at.id);
-      for (const at of store.list<Attempt>('attempt'))
+      for (const at of store.list<Attempt>('attempt', { status: ['ready', 'running'] }))
         if (['ready', 'running'].includes(at.status)) {
           const running = [...active.values()].some((v) => v.turn.attemptId === at.id);
           if (running && at.wallDeadline > Date.now())
@@ -334,8 +358,13 @@ export async function createRuntime(
             await workspace.revoke(at.id);
           }
         }
-      for (const entry of active.values())
-        if (store.get<Turn>('turn', entry.turn.id)?.status === 'cancelling' && entry.session) {
+      for (const entry of active.values()) {
+        const current = store.get<Turn>('turn', entry.turn.id);
+        if (current && !currentTurnAuthority(store, current) && ['dispatching', 'running'].includes(current.status)) {
+          store.put('turn', current.id, { ...current, status: 'uncertain', error: 'Turn authority withdrawn; process stop unconfirmed' });
+          emit(current, 'turn.uncertain', { turnId: current.id });
+        }
+        if (current && (['cancelling', 'uncertain', 'cancelled'].includes(current.status) || !currentTurnAuthority(store, current)) && entry.session) {
           if (!entry.cancelAt) {
             entry.cancelAt = Date.now();
             void entry.session.cancel().catch(() => {});
@@ -345,8 +374,9 @@ export async function createRuntime(
               status: 'degraded',
             });
         }
-      for (const t of store.list<Turn>('turn').filter((t) => t.status === 'queued')) {
-        if (!t.requestedBy || store.get('revoked', t.requestedBy)) {
+      }
+      for (const t of store.list<Turn>('turn', { status: ['queued'] })) {
+        if (!currentTurnAuthority(store, t)) {
           store.put('turn', t.id, {
             ...t,
             status: 'cancelled',
@@ -372,15 +402,18 @@ export async function createRuntime(
             store.get<ToolArgs>('task', t.roomId + ':' + attempt.taskId)?.generation !== attempt.generation)
             continue;
         }
+        const polling = store.list<Turn>('turn', { status: ['running', 'cancelling'] }).filter((v) =>
+          store.get<Seat>('seat', v.seatId)?.mode === 'polling');
         if (
-          active.size >= 2 ||
-          active.size >= Number(room.policy.maxActiveTurns) ||
+          active.size + polling.length >= 2 ||
+          [...active.values()].filter((v) => v.turn.roomId === room.id).length +
+            polling.filter((v) => v.roomId === room.id).length >= Number(room.policy.maxActiveTurns) ||
           [...active.values()].some((v) => v.turn.seatId === seat.id)
         )
           continue;
         const previous = store
-          .list<ToolArgs>('turn')
-          .filter((v) => v.seatId === seat.id && v.completedAt)
+          .list<ToolArgs>('turn', { seatId: seat.id })
+          .filter((v) => v.completedAt)
           .reduce((last, v) => Math.max(last, Number(v.completedAt)), 0);
         if (Date.now() - previous < Number(room.policy.cooldownMs)) continue;
         if (Date.now() - room.createdAt > Number(room.policy.maxDurationMs)) {
@@ -437,11 +470,11 @@ export async function createRuntime(
               : kind === 'policy'
                 ? roomId + ':' + r.version
                 : String(r.id),
-          value: redactPublic(r),
+          value: redactTransport(r),
         })),
     );
     store.put('exported', roomId, { at: Date.now() });
-    const events = allRoomEvents(store, roomId);
+    const events = redactTransport(allRoomEvents(store, roomId));
     return { schemaVersion: 2, digest: scopeDigest({ records, events }), records, events };
   });
   core.register('backup_request', async (a, x) => {
@@ -483,6 +516,11 @@ export async function createRuntime(
   const timer = options.noScheduler
     ? undefined
     : setInterval(() => void tick(), options.tickMs ?? 250);
+  let remoteTicking = false;
+  const remoteTimer = options.noScheduler || options.remoteTickMs === 0 ? undefined : setInterval(() => {
+    if (remoteTicking || stopped) return;
+    remoteTicking = true; void participant.tick().finally(() => { remoteTicking = false; });
+  }, options.remoteTickMs ?? 1000);
   return {
     core,
     dataDir,
@@ -490,6 +528,8 @@ export async function createRuntime(
       (stopping ??= (async () => {
         stopped = true;
         clearInterval(timer);
+        clearInterval(remoteTimer);
+        await participant.close();
         for (const e of active.values()) {
           const t = store.get<Turn>('turn', e.turn.id)!;
           if (['dispatching', 'running', 'cancelling'].includes(t.status)) {

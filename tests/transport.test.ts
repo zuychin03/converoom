@@ -19,6 +19,8 @@ function memoryRuntime(dataDir: string): Runtime {
     list: (k: string) => [...records].filter(([key]) => key.startsWith(`${k}:`)).map(([, v]) => v),
     remove: (k: string, id: string) => records.delete(`${k}:${id}`),
     events: () => [],
+    recentEvents: () => [],
+    eventsAfter: () => [],
     close: () => {},
   } as unknown as Store;
   return {
@@ -45,6 +47,28 @@ async function fixture(onPairingCode?: (code: string) => void) {
   return { runtime, server, headers };
 }
 describe('local identity boundary', () => {
+  it('returns the prepared OAuth navigation only to the paired human without credentials', async () => {
+    const { server, runtime, headers } = await fixture();
+    runtime.core.dispatch = async () => ({ authorizationUrl: 'https://room.example.ts.net/authorize?client_id=participant-bridge', accessToken: 'fixture-private-token', connectionId: 'connection' });
+    const pair = await server.app.inject({ method: 'POST', url: '/api/pair', headers, payload: { code: 'local-pair-code' } });
+    const cookie = String(pair.headers['set-cookie']).split(';')[0];
+    const session = await server.app.inject({ method: 'GET', url: '/api/session', headers: { ...headers, cookie } });
+    const response = await server.app.inject({ method: 'POST', url: '/api/commands', headers: { ...headers, cookie, 'x-csrf-token': session.json().csrf }, payload: { name: 'remote_connection_prepare', args: {} } });
+    expect(response.json()).toMatchObject({ result: { authorizationUrl: 'https://room.example.ts.net/authorize?client_id=participant-bridge' }, committed: true, retrySafe: false });
+    expect(response.body).not.toContain('fixture-private-token');
+    const credential = issueBridgeCredential(runtime, 'codex');
+    expect((await server.app.inject({ method: 'POST', url: '/agent/commands', headers: { host: headers.host, authorization: 'Bearer ' + credential.token }, payload: { name: 'remote_connection_prepare', args: {} } })).statusCode).toBe(400);
+  });
+  it('accepts bounded human artefacts on a dedicated route with authentication before body parsing', async () => {
+    const { server, headers } = await fixture();
+    const pair = await server.app.inject({ method: 'POST', url: '/api/pair', headers, payload: { code: 'local-pair-code' } });
+    const cookie = String(pair.headers['set-cookie']).split(';')[0];
+    const session = await server.app.inject({ method: 'GET', url: '/api/session', headers: { ...headers, cookie } });
+    const payload = { name: 'shared_artefact_publish', args: { roomId: 'room', content: 'x'.repeat(1048576) } };
+    expect((await server.app.inject({ method: 'POST', url: '/api/artefacts', headers: { ...headers, cookie, 'x-csrf-token': session.json().csrf }, payload })).statusCode).toBe(200);
+    expect((await server.app.inject({ method: 'POST', url: '/api/artefacts', headers, payload })).statusCode).toBe(401);
+    expect((await server.app.inject({ method: 'POST', url: '/api/commands', headers: { ...headers, cookie, 'x-csrf-token': session.json().csrf }, payload })).statusCode).toBe(413);
+  });
   it('does not let the on-disk installation token act as a human or obtain a pairing code', async () => {
     let terminalCode = '';
     const { server, headers } = await fixture((code) => { terminalCode = code; });

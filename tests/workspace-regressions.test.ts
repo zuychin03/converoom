@@ -6,6 +6,7 @@ import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { run } from '../packages/adapters/src/process.js';
 import type { Actor, Runtime, ToolArgs, Turn } from '../packages/shared/src/contracts.js';
 import * as content from '../packages/workspace/src/content.js';
+import { attemptEnvironment } from '../packages/workspace/src/index.js';
 
 const owner: Actor = { kind: 'human', principalId: 'owner', ownerId: 'owner' };
 let root: string, donor: string, runtime: Runtime, room: ToolArgs, seat: ToolArgs;
@@ -52,12 +53,13 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function claim(claimActor = owner, scopePaths = ['README.md']) {
+async function claim(claimActor = owner, scopePaths = ['README.md'], fixture?: ToolArgs) {
   const repo = await call('repo_register', { path: donor });
   const profile = await call('profile_register', {
     name: 'Fixture checks',
     commands: [{ executable: process.execPath, args: ['-e', 'process.exit(0)'], timeoutMs: 5000 }],
     scopePaths, generatedPaths: [],
+    ...(fixture ? { fixture } : {}),
   });
   await call('task_plan', { roomId: room.id, repoId: repo.id, tasks: [{
     id: 'change', title: 'Change', acceptance: 'Reviewed exact content',
@@ -68,6 +70,14 @@ async function claim(claimActor = owner, scopePaths = ['README.md']) {
   }) as ToolArgs;
   return { repo, profile, attempt };
 }
+it('revokes a quarantined fixture endpoint through the indexed scheduler lookup', async () => {
+  const { attempt } = await claim(owner, ['README.md'], { provider: 'local-kv', seed: { value: 'fixture' } });
+  const url = attemptEnvironment(String(attempt.id)).CONVEROOM_FIXTURE_URL;
+  expect(url).toBeDefined();
+  expect((await fetch(url!)).status).toBe(401);
+  runtime.core.store.put('attempt', String(attempt.id), { ...attempt, status: 'quarantined' });
+  await expect.poll(() => fetch(url!).then(() => true, () => false), { timeout: 2000 }).toBe(false);
+});
 
 it('admits managed coding on a repository with mixed-case filenames', async () => {
   const { attempt } = await claim();

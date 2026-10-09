@@ -1,6 +1,8 @@
 # Requirement acceptance matrix
 
-09/10/2026. All 80 requirements are retained. Automated fixtures, available live vendor checks and package tests provide bounded evidence, not blanket acceptance. The full V1 gates stay open for the Windows preview. Update this matrix requirement by requirement when each full acceptance condition has evidence. The complete implementation specification is local-only.
+10/10/2026. All 80 requirements are retained. Automated fixtures, available live vendor checks and package tests provide bounded evidence, not blanket acceptance. The full V1 gates stay open for the Windows preview. Update this matrix requirement by requirement when each full acceptance condition has evidence. The complete implementation specification is local-only.
+
+Current release scope is Windows x64 only, as directed on 09/10/2026. macOS/Linux requirements are retained for future verification, but do not block the Windows-only preview. V1.1 private shared discussion is locally implemented in the 0.2.0 preview. Membership/owner isolation, PKCE, participant-local approvals, scoped state/streams, reviewed artefacts and recovery have fixture evidence. The real two-Windows pilot and applicable V1 gates remain open; implementation does not imply full acceptance.
 
 | ID | Release gate | Contract |
 |---|---|---|
@@ -62,8 +64,8 @@
 | NFR-02 | Open V1 acceptance | Pause/revocation prevents new local dispatch within 1 second. Cooperative cancellation is separately timed; after 10 seconds without confirmation show degraded status and offer managed-worker stop. |
 | NFR-03 | Open V1 acceptance | Committed acknowledged events survive process-crash fixtures. Backup/restore yields a consistent store; power-loss guarantees remain bounded by SQLite/OS/storage behaviour. |
 | NFR-04 | Open V1 acceptance | Runtime restarts and presents recoverable state within 10 seconds under reference load; provider session resume may take longer and is shown separately. |
-| NFR-05 | Open V1 acceptance | Idle daemon plus one browser UI target ≤300 MiB combined resident memory, excluding agent processes/browser baseline; measure on Windows and ARM64 macOS before accepting the target. |
-| NFR-06 | Open V1 acceptance | Windows 11 x64 is the primary platform; ARM64 macOS is the second release target. Every advertised managed profile passes its platform acceptance. WSL-specific support is labelled. Linux starts as best effort unless separately verified. |
+| NFR-05 | Open Windows acceptance; other platforms deferred | Idle daemon plus one browser UI target ≤300 MiB combined resident memory, excluding agent processes/browser baseline. Measure on Windows for the current release and separately on future platforms before advertising their target. |
+| NFR-06 | Open Windows acceptance; other platforms deferred | Windows 11 x64 is the only current release target. macOS and Linux support is deferred until verified. Every advertised managed profile passes Windows acceptance; WSL-specific support requires its own labelled evidence. |
 | NFR-07 | Open V1 acceptance | Keyboard and screen-reader access across create/join/room/permissions/tasks/handoff; usable layout at 360 px and desktop width; target WCAG 2.2 AA in relevant flows. |
 | NFR-08 | Open V1 acceptance | No credentials in URLs, transcripts, exports or logs. Pairing/rotation, agent-to-human impersonation, Auth/Origin/CSRF/replay fixtures pass. Credential storage is OS-protected or explicitly degraded to user-only files. |
 | NFR-09 | Open V1 acceptance | Every authority-changing action records human actor, action digest, scope, expiry and policy. Audit history cannot be rewritten through agent tools. |
@@ -71,7 +73,7 @@
 | NFR-11 | Open V1 acceptance | Bounded queues, payloads, context packets, retries and worker concurrency hold under exhaustion/adversarial tests. No indefinite permission wait or self-trigger loop. |
 | NFR-12 | Open V1 acceptance | npm/npx onboarding target ≤10 minutes with prerequisites installed/authenticated; test at least 3 fresh users, both bootstrap paths and a partial-install recovery. Record time, manual steps, failures and managed/polling outcomes. |
 | NFR-13 | Open V1 acceptance | No mandatory hosted database/model service beyond users’ chosen agents. Missing optional UI/relay/push integrations degrade without blocking local room tools. |
-| NFR-14 | Future phase | TLS, principal-scoped access, rate limiting, resource revocation and authenticated reconnect pass remote multi-owner tests. No second authoritative room writer. |
+| NFR-14 | Local V1.1 fixtures; real pilot open | TLS, principal-scoped access, rate limiting, resource revocation and authenticated reconnect pass remote multi-owner tests. No second authoritative room writer. |
 | NFR-15 | Future phase | Remote reconnect deduplicates messages/artefacts and flags uncertain execution; network partitions do not authorise duplicate consequential work. |
 | NFR-16 | Open V1 acceptance | Provisioning, readiness, allocation waits and cleanup have finite profile limits and visible timeout outcomes. Proposed defaults: 120-second provisioning/readiness, at most 3 approved port attempts, 5-minute resource wait and 10-minute retained preview. Cleanup timeout quarantines resources rather than treating them as released. Fault fixtures demonstrate no silent indefinite wait. These are targets to validate, not measured results. |
 | NFR-17 | Open V1 acceptance | Capacity admission counts agent workers, check/service descendants, retained previews, quarantined resources and disk requirements. Start with one active coding worker on an 8 GB machine; raise limits only after target-hardware benchmarks. Configured count/disk limits block new work with diagnostics; memory/CPU pressure triggers bounded degradation. Reservations do not claim to prevent native-process resource exhaustion. |

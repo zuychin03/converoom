@@ -6,8 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { humanCommand } from './human.js';
+import { restoreHistory } from './history.js';
 import { createRuntime } from '../../daemon/src/runtime.js';
 import { createServer } from '../../daemon/src/server.js';
+import { createSharedServer } from '../../daemon/src/shared-server.js';
+import { sharedStartOptions } from './shared.js';
 import { serveMcp } from '../../../packages/mcp/src/index.js';
 import {
   dataDirectory,
@@ -22,7 +25,7 @@ import {
   VERSION,
 } from './support.js';
 import { probeProduct } from '../../../packages/adapters/src/index.js';
-import { scopeDigest, redactPublic } from '../../../packages/store/src/index.js';
+import { redactPublic } from '../../../packages/store/src/index.js';
 import type { Product, ToolArgs, Event } from '../../../packages/shared/src/contracts.js';
 interface Metadata {
   url: string;
@@ -30,6 +33,8 @@ interface Metadata {
   controlToken: string;
   version: string;
   startedAt: number;
+  sharedOrigin?: string;
+  sharedPort?: number;
 }
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const command = argv[0] ?? 'help',
@@ -93,7 +98,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     console.log(
       'Converoom ' +
         VERSION +
-        '\nstart [--port 0] [--data-dir PATH]\npair | status | stop\nsetup | doctor\nconnect PRODUCT [--config PATH] | disconnect PRODUCT\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup --attempt ID --confirm\n\nNative subscription sign-in remains with vendors. No model API fallback.',
+        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor\nconnect PRODUCT [--config PATH] [--remote-connection ID] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup --attempt ID --confirm\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
     );
     return;
   }
@@ -120,6 +125,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === 'start') {
+    const sharedOptions = sharedStartOptions(argv);
+    let running: Metadata | undefined;
     if (existsSync(metaPath))
       try {
         const m = await metadata();
@@ -127,12 +134,17 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           await fetch(m.url + '/health', { signal: AbortSignal.timeout(1500) })
         ).json()) as ToolArgs;
         if (health.name === 'converoom' && health.pid === m.pid) {
-          console.log('Converoom running at ' + m.url);
-          return;
+          running = m;
         }
       } catch {
         /* Never terminate a PID from stale metadata. */
       }
+    if (running) {
+      if (sharedOptions && (running.sharedOrigin !== sharedOptions.origin || running.sharedPort !== sharedOptions.port))
+        throw new Error('Stop the existing runtime before changing shared listener configuration.');
+      console.log('Converoom running at ' + running.url);
+      return;
+    }
     const lockPath = join(dataDir, 'runtime.lock');
     if (existsSync(lockPath)) {
       const previous = await json<{ pid: number }>(lockPath).catch(() => undefined);
@@ -160,10 +172,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       controlToken = secret(),
       pairingCode = secret().slice(0, 12);
     let server: Awaited<ReturnType<typeof createServer>> | undefined,
+      sharedServer: Awaited<ReturnType<typeof createSharedServer>>,
       closing = false;
     const close = async () => {
       if (closing) return;
       closing = true;
+      await sharedServer?.close();
       await server?.close();
       await runtime.stop();
       await lock.close();
@@ -178,12 +192,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         onPairingCode: (code) => console.log('Browser or CLI pairing code: ' + code),
         onStop: close,
       });
+      if (sharedOptions) sharedServer = await createSharedServer(runtime.core, { ...sharedOptions,
+        uiDir: resolve(fileURLToPath(new URL('./ui', import.meta.url))) });
       await privateJson(metaPath, {
         url: server.url,
         pid: process.pid,
         controlToken,
         version: VERSION,
         startedAt: Date.now(),
+        ...(sharedOptions ? { sharedOrigin: sharedOptions.origin, sharedPort: sharedOptions.port } : {}),
       });
       await lock.writeFile(JSON.stringify({ pid: process.pid, startedAt: Date.now() }));
       console.log(
@@ -195,6 +212,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           pairingCode +
           '\nCredential storage: user files, OS keystore unavailable.\nCtrl+C stops the runtime.',
       );
+      if (sharedOptions) console.log('Shared listener at ' + sharedServer!.url + '\nExpected private origin: ' + sharedOptions.origin +
+        '\nConfigure Tailscale Serve explicitly for this shared listener only. No Tailscale, firewall or public exposure was changed. Shared room UI: ' + sharedOptions.origin + '/shared');
       process.once('SIGINT', () => void close());
       process.once('SIGTERM', () => void close());
     } catch (e) {
@@ -272,13 +291,25 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       const previous = await json<{ principalId: string }>(clientFile);
       await local('/local/revoke', { principalId: previous.principalId });
     }
-    await privateJson(clientFile, { ...(await local('/local/credentials', { product })), skill });
+    await privateJson(clientFile, { ...(await local('/local/credentials', { product,
+      ...(flag('--remote-connection') ? { remoteConnectionId: flag('--remote-connection') } : {}) })), skill });
     await editConfig(path, product, {
       command: process.execPath,
       args: [stable, 'mcp', '--client', product, '--data-dir', dataDir],
     });
     console.log('Connected ' + product + '. Restart its MCP connection.');
     return;
+  }
+  if (command === 'remote-connect') {
+    const result = await call('remote_connection_prepare', { origin: flag('--origin'), remoteRoomId: flag('--room'), product: flag('--product') }) as ToolArgs;
+    console.log('Open this private authorisation URL in your browser:\n' + result.authorizationUrl + '\nConnection: ' + result.connectionId);
+    console.log('After approval, use connect PRODUCT --remote-connection ID. Native execution requires separate local approval.');
+    return;
+  }
+  if (command === 'remote-disconnect' || command === 'remote-enable') {
+    console.log(JSON.stringify(await call(command === 'remote-disconnect' ? 'remote_connection_disconnect' : 'remote_connection_enable', {
+      connectionId: argv[1], ...(command === 'remote-enable' ? { maxTurns: Number(flag('--max-turns')), maxTurnMs: Number(flag('--max-turn-ms')) } : {}),
+    }))); return;
   }
   if (command === 'export') {
     if (!argv[1]) throw new Error('Room ID required');
@@ -317,59 +348,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const input = flag('--input');
     if (!input || existsSync(join(dataDir, 'converoom.sqlite')))
       throw new Error('Restore requires --input and an empty data directory');
-    const e = await json<{
-      schemaVersion: number;
-      digest: string;
-      records: { kind: string; id: string; value: ToolArgs }[];
-      events: Event[];
-    }>(resolve(input));
-    if (
-      e.schemaVersion !== 2 ||
-      !Array.isArray(e.events) ||
-      e.events.length > 50000 ||
-      scopeDigest({ records: e.records, events: e.events }) !== e.digest ||
-      e.records.some(
-        (r) =>
-          ![
-            'room',
-            'seat',
-            'interaction',
-            'turn',
-            'policy',
-            'permission',
-            'manifest',
-            'verification',
-            'review',
-            'candidate',
-            'task',
-          ].includes(r.kind),
-      )
-    )
-      throw new Error('Export digest/schema invalid');
-    const runtime = await createRuntime(dataDir, { noScheduler: true });
-    for (const r of e.records) {
-      const v = { ...r.value };
-      for (const k of ['path', 'dataPath', 'basePath', 'workspace', 'foundationPath']) delete v[k];
-      if (r.kind === 'turn') v.status = 'uncertain';
-      if (r.kind === 'room') v.status = 'closed';
-      if (r.kind === 'seat') {
-        v.consent = false;
-        v.status = 'left';
-      }
-      if (r.kind === 'permission') v.status = 'denied';
-      runtime.core.store.put(r.kind, r.id, v);
-    }
-    runtime.core.store.importEvents(e.events);
-    const owners = [
-      ...new Set(e.records.filter((r) => r.kind === 'room').map((r) => r.value.ownerId)),
-    ];
-    if (owners.length !== 1) throw new Error('History requires exactly one local owner');
-    runtime.core.store.put('identity', 'human', {
-      kind: 'human',
-      principalId: owners[0],
-      ownerId: owners[0],
-    });
-    await runtime.stop();
+    await restoreHistory(resolve(input), dataDir);
     console.log('Read-only history restored. Re-register local execution resources.');
     return;
   }
