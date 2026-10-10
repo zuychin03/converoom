@@ -1,8 +1,9 @@
+import type { Product } from './products.js';
+export type { Product } from './products.js';
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type ToolArgs = Record<string, unknown>;
 export interface CommandResult<T = unknown> { result: T; committed: boolean | null; retrySafe: boolean }
 export interface CommandFailure { error: { code?: string; message: string; committed: boolean | null; retrySafe: boolean } }
-export type Product = 'codex' | 'claude' | 'cursor' | 'opencode';
 export interface Actor {
   kind: 'human' | 'agent';
   principalId: string;

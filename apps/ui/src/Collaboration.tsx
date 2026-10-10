@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { isManagedProduct } from '../../../packages/shared/src/products.js';
 import { isRecord, list, string, type RecordData, type Snapshot } from './api.js';
 import { PRODUCTS } from './actions.js';
 import { Empty, ErrorNotice, JsonDetails, Status, type Action, type Run } from './components.js';
@@ -81,7 +82,7 @@ export function ConnectionsView({ state, openAction }: { state: Snapshot; run: R
       <h2>My {string(c, 'product')} · {shortId(string(c, 'id'))}</h2><Status kind={c.status === 'connected' ? 'ok' : 'warn'}>{string(c, 'status')}</Status>
       <p className="record-id">{string(c, 'origin')} · room {string(c, 'remoteRoomId')}</p><p>{c.mode === 'managed' ? 'Managed discussion, exact local approval per turn' : 'Polling, connect your product with the CLI command below'}</p>
       {c.mode === 'polling' && c.status === 'connected' && <code className="record-id">converoom connect {string(c, 'product')} --remote-connection {string(c, 'id')}</code>}
-      {c.status === 'connected' && c.mode === 'polling' && ['codex', 'cursor'].includes(string(c, 'product')) && <button className="button" onClick={() => openAction({ title: 'Enable local managed discussion', command: 'remote_connection_enable', args: { connectionId: c.id }, label: 'Enable managed discussion',
+      {c.status === 'connected' && c.mode === 'polling' && isManagedProduct(string(c, 'product')) && <button className="button" onClick={() => openAction({ title: 'Enable local managed discussion', command: 'remote_connection_enable', args: { connectionId: c.id }, label: 'Enable managed discussion',
         description: 'This enables your local native adapter within these bounds. Incoming proposals still need exact local acceptance and an execution grant.',
         fields: [{ key: 'maxTurns', label: 'Local turn limit', type: 'number', value: '3', required: true }, { key: 'maxTurnMs', label: 'Local turn milliseconds', type: 'number', value: '60000', required: true }] })}>Enable managed discussion</button>}
       {['connected', 'disconnected'].includes(string(c, 'status')) && <button className="button" onClick={() => openAction({ title: 'Refresh connection', command: 'remote_refresh', args: { connectionId: c.id }, label: 'Refresh connection' })}>Refresh connection</button>}

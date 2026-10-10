@@ -111,6 +111,10 @@ export async function installStable(dataDir: string): Promise<string> {
     'README.md',
     'docs/WINDOWS_SHARED_PILOT.md',
     'docs/PREVIEW_ACCEPTANCE.md',
+    'docs/AGENT_SUPPORT.md',
+    'docs/WINDOWS_INSTALL.md',
+    'scripts/install-windows.ps1',
+    'scripts/windows-install.psm1',
     'docs/REQUIREMENT_MATRIX.md',
     'LICENSE',
     'NOTICE',
@@ -169,7 +173,7 @@ export async function editConfig(
   remove = false,
 ): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  if (product === 'codex') {
+  if (product === 'codex' || product === 'grok') {
     let text = '';
     try {
       text = await readFile(path, 'utf8');

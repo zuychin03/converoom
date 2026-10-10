@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { humanCommand } from './human.js';
 import { restoreHistory } from './history.js';
+import { onboard, parseOnboardProducts } from './onboard.js';
 import { createRuntime } from '../../daemon/src/runtime.js';
 import { createServer } from '../../daemon/src/server.js';
 import { createSharedServer } from '../../daemon/src/shared-server.js';
@@ -25,6 +26,7 @@ import {
   VERSION,
 } from './support.js';
 import { probeProduct } from '../../../packages/adapters/src/index.js';
+import { PRODUCT_IDS, PRODUCT_PROFILES, isProduct } from '../../../packages/shared/src/products.js';
 import { redactPublic } from '../../../packages/store/src/index.js';
 import type { Product, ToolArgs, Event } from '../../../packages/shared/src/contracts.js';
 interface Metadata {
@@ -53,7 +55,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const dataDir = resolve(flag('--data-dir') ?? dataDirectory());
   await privateDirectory(dataDir);
   const metaPath = join(dataDir, 'runtime.json'),
-    products = ['codex', 'cursor', 'claude', 'opencode'] as const;
+    products = PRODUCT_IDS;
   const metadata = () => json<Metadata>(metaPath);
   const local = async (path: string, body?: unknown) => {
     const m = await metadata();
@@ -82,14 +84,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     }
     return humanCommand((await metadata()).url, code, name, args);
   };
-  const config = (p: string) =>
-    p === 'codex'
-      ? join(homedir(), '.codex', 'config.toml')
-      : p === 'claude'
-        ? join(homedir(), '.claude.json')
-        : p === 'cursor'
-          ? join(homedir(), '.cursor', 'mcp.json')
-          : join(homedir(), '.config', 'opencode', 'opencode.json');
+  const config = (p: Product) => join(homedir(), ...PRODUCT_PROFILES[p].config);
   if (command === 'version') {
     console.log(VERSION);
     return;
@@ -98,7 +93,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     console.log(
       'Converoom ' +
         VERSION +
-        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor\nconnect PRODUCT [--config PATH] [--remote-connection ID] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup --attempt ID --confirm\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
+        '\nProducts: ' + products.join(', ') +
+        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor\nonboard --products codex,cursor [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup --attempt ID --confirm\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
     );
     return;
   }
@@ -252,13 +248,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     console.log(
       'Installed stable runtime: ' +
         (await installStable(dataDir)) +
-        '\nRun doctor; sign in with codex login or agent login; start the runtime; connect a product; pair the browser; create and close a bounded smoke room.',
+        '\nRun doctor; sign in through your native agent client; start the runtime; connect a product; pair the browser; create and close a bounded smoke room. Agent setup: docs/AGENT_SUPPORT.md',
     );
+    return;
+  }
+  if (command === 'onboard') {
+    const selected = parseOnboardProducts(flag('--products') ?? 'codex');
+    await onboard(await installStable(dataDir), dataDir, selected, !argv.includes('--no-open'));
     return;
   }
   if (command === 'connect' || command === 'disconnect') {
     const product = argv[1] as Product;
-    if (!products.includes(product)) throw new Error('Choose codex, cursor, claude or opencode');
+    if (!isProduct(product)) throw new Error('Choose ' + products.join(', '));
     const path = resolve(flag('--config') ?? config(product)),
       clientFile = join(dataDir, 'clients', product + '.json');
     if (command === 'disconnect') {
@@ -279,12 +280,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       flag('--skills-dir') ??
         (flag('--config')
           ? join(resolve(path, '..'), 'skills', 'converoom-room')
-          : join(
-              homedir(),
-              product === 'opencode' ? '.config/opencode' : '.' + product,
-              'skills',
-              'converoom-room',
-            )),
+          : join(homedir(), ...PRODUCT_PROFILES[product].skills)),
     );
     const skill = await installSkill(skills);
     if (existsSync(clientFile)) {

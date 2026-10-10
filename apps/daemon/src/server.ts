@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import { isProduct } from '../../../packages/shared/src/products.js';
 import fastifyStatic from '@fastify/static';
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -46,7 +47,7 @@ export function issueBridgeCredential(
   product: Product,
   remoteConnectionId?: string,
 ): { token: string; principalId: string; remoteConnectionId?: string } {
-  if (!['codex', 'claude', 'cursor', 'opencode'].includes(product))
+  if (!isProduct(product))
     throw new ConveroomError('invalid_product', 'Choose a supported product');
   const token = secret();
   const principalId = crypto.randomUUID();

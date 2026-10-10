@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isProduct } from '../../shared/src/products.js';
 import { mountSharedArtefacts } from './shared-artefacts.js';
 import {
   ConveroomError as E,
@@ -170,7 +171,7 @@ export function createCore(store: Store): Core {
     )
       throw new E('seat_limit', 'Seat limit reached', 409);
     const product = (x.product ?? 'codex') as Seat['product'];
-    if (!['codex', 'claude', 'cursor', 'opencode'].includes(product))
+    if (!isProduct(product))
       throw new E('product', 'Unsupported product');
     const mode = x.mode === 'managed' ? 'managed' : 'polling';
     const membership = activeMembership(store, r.id, a.ownerId);

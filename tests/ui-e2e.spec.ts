@@ -100,6 +100,9 @@ test('complete human room lifecycle at desktop and mobile', async ({ page, reque
   await page.getByRole('button', { name: 'Post message' }).click();
   await expect(page.getByText('Public opening position', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Add agent', exact: true }).click();
+  for (const label of ['Codex', 'Cursor', 'Claude Code', 'OpenCode', 'Antigravity', 'Kiro', 'Qoder', 'Grok Build'])
+    await expect(page.getByLabel('Product').getByRole('option', { name: label, exact: true })).toHaveCount(1);
+  await page.getByLabel('Product').selectOption(info.project.name === 'mobile' ? 'grok' : 'kiro');
   await page.getByLabel('Agent name').fill('Codex reviewer');
   await page.getByRole('button', { name: 'Add agent', exact: true }).last().click();
   const agents = page.getByRole('complementary', { name: 'Agents and turns' });

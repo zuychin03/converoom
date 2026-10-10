@@ -7,7 +7,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { createServer, issueBridgeCredential } from '../apps/daemon/src/server.js';
 import type { ToolArgs } from '../packages/shared/src/contracts.js';
-it('runs the same stdio room corpus for all four vendor bridge identities', async () => {
+it('runs the same stdio room corpus for all eight vendor bridge identities', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'converoom-mcp-')),
     runtime = await createRuntime(dir, { noScheduler: true }),
     server = await createServer(runtime, { port: 0 });
@@ -21,7 +21,7 @@ it('runs the same stdio room corpus for all four vendor bridge identities', asyn
     await writeFile(join(dir, 'runtime.json'), JSON.stringify({ url: server.url }));
     await mkdir(join(dir, 'clients'));
     let firstRoom = '';
-    for (const product of ['codex', 'cursor', 'claude', 'opencode'] as const) {
+    for (const product of ['codex', 'cursor', 'claude', 'opencode', 'antigravity', 'kiro', 'qoder', 'grok'] as const) {
       const credential = issueBridgeCredential(runtime, product);
       await writeFile(join(dir, 'clients', product + '.json'), JSON.stringify(credential));
       const c = new Client({ name: 'fixture-' + product, version: '1.0' }, { capabilities: {} });
@@ -69,6 +69,7 @@ it('runs the same stdio room corpus for all four vendor bridge identities', asyn
       await call(c, 'turn_claim', { roomId: firstRoom, turnId: turn.id, clientKey: 'claim' });
       expect(await call(c, 'turn_complete', { roomId: firstRoom, turnId: turn.id,
         text: product + ' completed polling turn', clientKey: 'complete' })).toMatchObject({ status: 'completed' });
+      if (product !== 'codex') await call(c, 'room_leave', { roomId: firstRoom, clientKey: 'leave' });
     }
     await call(clients[0], 'room_close', { roomId: firstRoom, clientKey: 'close' });
   } finally {

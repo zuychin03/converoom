@@ -23,3 +23,16 @@ jobs:
       - run: npx playwright install chromium
       - run: npm run test:e2e
       - run: npm run pack:check
+      - run: npm run release:manifest
+      - run: npm run bundle:windows
+      - run: npm run bundle:smoke
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: converoom-windows-x64
+          path: |
+            .artifacts/windows-bundle/build-*/converoom-*-windows-x64.zip
+            .artifacts/windows-bundle/latest.json
+            .artifacts/windows-bundle/smoke.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30

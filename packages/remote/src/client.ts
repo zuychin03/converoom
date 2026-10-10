@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isProduct, isManagedProduct } from '../../shared/src/products.js';
 import { createServer as callbackServer, type Server as CallbackServer } from 'node:http';
 import { readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -178,8 +179,8 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
   };
   core.register('remote_connection_attach', async (a, x) => {
     human(a); const origin = privateOrigin(str(x, 'origin', 2048));
-    if (store.count('remote_connection') >= 20 || !['codex', 'cursor', 'claude', 'opencode'].includes(String(x.product)) ||
-      (x.mode === 'managed' && !['codex', 'cursor'].includes(String(x.product))) ||
+    if (store.count('remote_connection') >= 20 || !isProduct(String(x.product)) ||
+      (x.mode === 'managed' && !isManagedProduct(String(x.product))) ||
       !Number.isSafeInteger(x.maxTurns) || Number(x.maxTurns) < 1 || Number(x.maxTurns) > 60 ||
       !Number.isSafeInteger(x.maxTurnMs) || Number(x.maxTurnMs) < 1000 || Number(x.maxTurnMs) > 600000)
       throw new E('remote_profile', 'Bounded local native discussion profile required');
@@ -212,7 +213,7 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
   core.register('remote_connection_prepare', async (a, x) => {
     human(a);
     const origin = privateOrigin(str(x, 'origin', 2048)), roomId = str(x, 'remoteRoomId', 256), product = str(x, 'product', 256);
-    if (!['codex', 'cursor', 'claude', 'opencode'].includes(product) || store.count('remote_connection') >= 20)
+    if (!isProduct(product) || store.count('remote_connection') >= 20)
       throw new E('remote_setup', 'Supported product and available connection capacity required');
     const id = randomUUID(), clientId = 'participant-bridge', provider = new RoomOAuthClient(origin, roomId, clientId, 'http://127.0.0.1:50181/oauth/callback');
     if (!callback) {
@@ -274,7 +275,7 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
   });
   core.register('remote_connection_enable', async (a, x) => {
     human(a); const c = connection(str(x, 'connectionId', 256));
-    if (c.localOwnerId !== a.ownerId || c.status !== 'connected' || c.mode !== 'polling' || !['codex', 'cursor'].includes(c.product) ||
+    if (c.localOwnerId !== a.ownerId || c.status !== 'connected' || c.mode !== 'polling' || !isManagedProduct(c.product) ||
       !Number.isSafeInteger(x.maxTurns) || Number(x.maxTurns) < 1 || Number(x.maxTurns) > 60 ||
       !Number.isSafeInteger(x.maxTurnMs) || Number(x.maxTurnMs) < 1000 || Number(x.maxTurnMs) > 600000)
       throw new E('remote_profile', 'Own connected native product and bounded profile required', 403);

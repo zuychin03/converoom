@@ -1,4 +1,5 @@
 import { ConveroomError } from '../../shared/src/contracts.js';
+import { PRODUCT_IDS } from '../../shared/src/products.js';
 type Schema = {
   type: string;
   properties?: Record<string, unknown>;
@@ -63,7 +64,7 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
       title: small,
       objective: string,
       workflow: { type: 'string', enum: ['discussion', 'coding'] },
-      product: { type: 'string', enum: ['claude', 'codex', 'cursor', 'opencode'] },
+      product: { type: 'string', enum: [...PRODUCT_IDS] },
       name: small,
     },
   },

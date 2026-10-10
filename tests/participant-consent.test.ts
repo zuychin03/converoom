@@ -246,12 +246,11 @@ it('binds the local grant and native wall time to the smaller remote owner budge
   const turn = participant.core.store.get<Turn>('turn', String(accepted.localTurnId))!;
   expect(turn.maxTurnMs).toBe(1000);
 });
-it('keeps remote polling stdio usable for all four product identities without local authority', async () => {
+it.each(['codex', 'cursor', 'claude', 'opencode', 'antigravity', 'kiro', 'qoder', 'grok'] as const)('keeps %s remote polling stdio usable without local authority', async (product) => {
   localServer = await createServer(participant, { port: 0 });
   const participantDir = join(dir, 'participant');
   await writeFile(join(participantDir, 'runtime.json'), JSON.stringify({ url: localServer.url }));
   await mkdir(join(participantDir, 'clients'));
-  for (const product of ['codex', 'cursor', 'claude', 'opencode'] as const) {
     if (product !== 'codex') await call(host, 'seat_add', { roomId: room.id, product, name: product }, remoteB);
     const c = await call(participant, 'remote_connection_attach', { origin: connection.origin, remoteRoomId: room.id,
       clientId: 'participant-bridge', accessToken: 'fixture', product, mode: 'polling', maxTurns: 2, maxTurnMs: 60000 }, localB) as RemoteConnection;
@@ -268,9 +267,28 @@ it('keeps remote polling stdio usable for all four product identities without lo
       expect((await sdk.listResources()).resources.some((r) => r.uri.endsWith('/state'))).toBe(true);
       expect(JSON.stringify(await sdk.readResource({ uri: 'converoom://rooms/' + room.id + '/events' }))).toContain(product + ' scoped bridge position');
     } finally { await sdk.close(); }
-  }
   expect(started).toBe(0);
 }, 30000);
+it.each(['antigravity', 'kiro', 'qoder', 'grok'] as const)('requires participant-local acceptance and execution approval for managed %s', async (product) => {
+  const remoteSeat = await call(host, 'seat_add', { roomId: room.id, product, name: product }, remoteB) as Seat;
+  await call(host, 'owner_consent_update', { roomId: room.id, seatId: remoteSeat.id, allowedSenderOwnerIds: [a.ownerId], maxTurns: 2, maxTurnMs: 60000 }, remoteB);
+  const remote = await call(participant, 'remote_connection_attach', { origin: connection.origin, remoteRoomId: room.id,
+    clientId: 'participant-bridge', accessToken: 'fixture', product, mode: 'polling', maxTurns: 2, maxTurnMs: 60000 }, localB) as RemoteConnection;
+  await call(participant, 'remote_connection_enable', { connectionId: remote.id, maxTurns: 2, maxTurnMs: 60000 }, localB);
+  const remoteTurn = await call(host, 'turn_request', { roomId: room.id, seatId: remoteSeat.id, prompt: 'Bounded public review' }) as Turn;
+  await call(participant, 'remote_refresh', { connectionId: remote.id }, localB);
+  const pending = participant.core.store.list<RemoteProposal>('remote_proposal').find((p) => p.connectionId === remote.id)!;
+  expect(started).toBe(0);
+  const accepted = await call(participant, 'remote_turn_accept', { proposalId: pending.id, digest: pending.digest }, localB) as ToolArgs;
+  const turn = participant.core.store.get<Turn>('turn', String(accepted.localTurnId))!;
+  expect(started).toBe(0);
+  await call(participant, 'permission_grant', { requestId: turn.permissionRequestId }, localB);
+  await expect.poll(() => participant.core.store.get<Turn>('turn', turn.id)?.status).toBe('completed');
+  await expect.poll(() => participant.core.store.get<Seat>('seat', turn.seatId)?.status).toBe('idle');
+  await call(participant, 'remote_refresh', { connectionId: remote.id }, localB);
+  expect(host.core.store.get<Turn>('turn', remoteTurn.id)?.status).toBe('completed');
+  expect(started).toBe(1);
+});
 it('fences an acknowledged remote claim if the local connection ends while awaiting it', async () => {
   const pending = await proposal(), accepted = await call(participant, 'remote_turn_accept', { proposalId: pending.id, digest: pending.digest }, localB) as ToolArgs;
   disconnectDuringClaim = true;

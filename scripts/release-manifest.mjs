@@ -79,6 +79,11 @@ function asset(path) {
   }
 }
 for (const dir of ['dist', 'plugins', 'packages/plugin-content', 'native/bin']) asset(dir);
+for (const path of ['README.md', 'docs/WINDOWS_SHARED_PILOT.md', 'docs/PREVIEW_ACCEPTANCE.md',
+  'docs/AGENT_SUPPORT.md', 'docs/REQUIREMENT_MATRIX.md', 'docs/WINDOWS_INSTALL.md',
+  'scripts/install-windows.ps1', 'scripts/windows-install.psm1']) {
+  assets.push({ path, sha256: digest(readFileSync(path)) });
+}
 writeFileSync(
   'RELEASE_MANIFEST.json',
   JSON.stringify(

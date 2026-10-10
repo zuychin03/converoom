@@ -1,4 +1,5 @@
 import { mkdir, cp, writeFile } from 'node:fs/promises';
+import { PRODUCT_IDS } from '../../../packages/shared/src/products.js';
 import { join, dirname, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -439,7 +440,7 @@ export async function createRuntime(
   core.register('adapter_status', async (a) => {
     core.requireOwner(a);
     return Promise.all(
-      (['codex', 'cursor', 'claude', 'opencode'] as const).map((p) => probeProduct(p, dataDir)),
+      PRODUCT_IDS.map((p) => probeProduct(p, dataDir)),
     );
   });
   core.register('room_export', (a, x) => {

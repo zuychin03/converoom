@@ -17,6 +17,10 @@
     "README.md",
     "docs/WINDOWS_SHARED_PILOT.md",
     "docs/PREVIEW_ACCEPTANCE.md",
+    "docs/AGENT_SUPPORT.md",
+    "docs/WINDOWS_INSTALL.md",
+    "scripts/install-windows.ps1",
+    "scripts/windows-install.psm1",
     "docs/REQUIREMENT_MATRIX.md",
     "LICENSE",
     "NOTICE",
@@ -36,7 +40,9 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "pack:check": "npm pack --dry-run",
-    "release:manifest": "node scripts/release-manifest.mjs"
+    "release:manifest": "node scripts/release-manifest.mjs",
+    "bundle:windows": "node scripts/build-windows-bundle.mjs",
+    "bundle:smoke": "node scripts/verify-windows-bundle.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.7.0",

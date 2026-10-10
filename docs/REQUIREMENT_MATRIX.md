@@ -4,6 +4,8 @@
 
 Current release scope is Windows x64 only, as directed on 09/10/2026. macOS/Linux requirements are retained for future verification, but do not block the Windows-only preview. V1.1 private shared discussion is locally implemented in the 0.2.0 preview. Membership/owner isolation, PKCE, participant-local approvals, scoped state/streams, reviewed artefacts and recovery have fixture evidence. The real two-Windows pilot and applicable V1 gates remain open; implementation does not imply full acceptance.
 
+The agent expansion adds Antigravity, Kiro, Qoder and Grok Build to FR-01/05/11/28/29/30/32/33. All eight MCP identities and the six managed wire profiles have local fixture coverage. This retains the existing roster/authority limits and does not close those requirements' vendor acceptance gates. See [agent support](AGENT_SUPPORT.md) for the implemented routes and pending live checks.
+
 | ID | Release gate | Contract |
 |---|---|---|
 | FR-01 | Open V1 acceptance | Each target coding product shall create and participate in a room through the same core MCP schemas. |
@@ -56,7 +58,7 @@ Current release scope is Windows x64 only, as directed on 09/10/2026. macOS/Linu
 | FR-48 | Conditional, previews disabled | Preview services shall have owned lifetimes, bounded retention and tested separation from human approval credentials. |
 | FR-49 | Open V1 acceptance | Every execution profile shall distinguish verified configuration from enforced containment. |
 | FR-50 | Open V1 acceptance | A public open-source release shall support local npm and npx installation from versioned compiled packages. |
-| FR-51 | Open V1 acceptance | Guided setup shall detect prerequisites, select subscription profiles, register vendor tools/skills and verify a first room. |
+| FR-51 | Windows bundle locally implemented; fresh-user acceptance open | Guided setup shall detect prerequisites, select subscription profiles, register vendor tools/skills and verify a first room. |
 | FR-52 | Open V1 acceptance | Runtime, plugin assets and persistent room data shall survive npm/npx bootstrap cache loss and version changes. |
 | FR-53 | Open V1 acceptance | Managed V1 profiles shall use supported native subscription access, leaving vendor sign-in/credentials with their owning client. |
 | FR-54 | Open V1 acceptance | Quota/auth failures shall preserve work, respect shared account allowance and avoid implicit billing/provider changes. |
@@ -77,7 +79,7 @@ Current release scope is Windows x64 only, as directed on 09/10/2026. macOS/Linu
 | NFR-15 | Future phase | Remote reconnect deduplicates messages/artefacts and flags uncertain execution; network partitions do not authorise duplicate consequential work. |
 | NFR-16 | Open V1 acceptance | Provisioning, readiness, allocation waits and cleanup have finite profile limits and visible timeout outcomes. Proposed defaults: 120-second provisioning/readiness, at most 3 approved port attempts, 5-minute resource wait and 10-minute retained preview. Cleanup timeout quarantines resources rather than treating them as released. Fault fixtures demonstrate no silent indefinite wait. These are targets to validate, not measured results. |
 | NFR-17 | Open V1 acceptance | Capacity admission counts agent workers, check/service descendants, retained previews, quarantined resources and disk requirements. Start with one active coding worker on an 8 GB machine; raise limits only after target-hardware benchmarks. Configured count/disk limits block new work with diagnostics; memory/CPU pressure triggers bounded degradation. Reservations do not claim to prevent native-process resource exhaustion. |
-| NFR-18 | Open V1 acceptance | Every advertised package/Node/OS/architecture combination passes packed-payload install, start, MCP exchange, bootstrap-cache loss, upgrade and uninstall acceptance. End users need no repository build, pnpm, native compiler or mandatory administrator/service installation. Unsupported native profiles fail before a ready claim; publication checks bind evidence to the exact package digest. |
+| NFR-18 | Open V1 acceptance | Every advertised package/Node/OS/architecture combination passes packed-payload install, start, MCP exchange, bootstrap-cache loss, upgrade and uninstall acceptance. End users need no repository build, pnpm or native compiler. The default Windows bundle installs missing Git/Tailscale and may require Windows administrator approval; local-only installation can skip Tailscale. Unsupported native profiles fail before a ready claim; publication checks bind evidence to the exact package digest. |
 | IF-01 | Open V1 acceptance | MCP exposes versioned tool/resource schemas, role checks and bounded payloads. Private remote authentication requires advertised-client acceptance; cloud release requires compatible OAuth and public HTTPS. |
 | IF-02 | Open V1 acceptance | ACP negotiates initialise/auth/session/prompt/update/cancel and optional resume/mode support. Unsupported features return explicit capability results. |
 | IF-03 | Open V1 acceptance | Native adapter modules provide equivalent prompt/cancel/event contracts with dated vendor API tests. The baseline uses no terminal keystroke injection. |

@@ -1,12 +1,8 @@
 import { isRecord, string } from './api.js';
+import { PRODUCT_IDS, PRODUCT_PROFILES } from '../../../packages/shared/src/products.js';
 import type { Action } from './components.js';
 
-export const PRODUCTS = [
-  { value: 'codex', label: 'Codex' },
-  { value: 'cursor', label: 'Cursor' },
-  { value: 'claude', label: 'Claude Code' },
-  { value: 'opencode', label: 'OpenCode' },
-];
+export const PRODUCTS = PRODUCT_IDS.map((value) => ({ value, label: PRODUCT_PROFILES[value].label }));
 
 const roomIdOf = (result: unknown) => (isRecord(result) ? string(result, 'id') : '');
 

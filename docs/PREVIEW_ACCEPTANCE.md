@@ -2,7 +2,17 @@
 
 10/10/2026. Converoom 0.2.0 is the Windows V1.1 preview. It is not full V1/V1.1 certification. The public [requirement matrix](REQUIREMENT_MATRIX.md) preserves all 80 requirements and the remaining gates. The full implementation specification is local-only.
 
-## Current V1.1 local evidence
+## Agent and installation expansion evidence
+
+The expansion adds Antigravity, Kiro, Qoder and Grok Build to MCP registration, diagnostics, tool schemas, UI selection and participant-owned connections. All eight products support MCP participation; six have managed native routes. The four new managed profiles use official ACP entry points and native authentication. Coding sessions implement separately approved, bounded workspace file and terminal callbacks; discussion keeps those capabilities disabled. The Windows bundle adds pinned Node, the compiled production closure, missing Git/Tailscale installation, supported native npm clients, launchers and guided MCP/browser onboarding. See [agent setup](AGENT_SUPPORT.md) and [Windows installation](WINDOWS_INSTALL.md).
+
+On Windows x64 and Node 24.21.0, all 275 natural tests in 35 files passed with one local worker in 287.86 seconds. Typecheck, lint and compiled CLI/UI builds pass. Default two-worker local reruns hit Windows fixture startup/cleanup timing and file locks; the affected 31 authority/workspace cases also passed together. CI retains its normal configuration. Protocol fixtures cover native argv, scoped MCP injection, public-session filtering, Kiro consent metadata, one-time permission allow/deny, protocol mismatch, auth/quota failures, cancellation, coding callbacks, allocated terminal resources, junction denial, UTF-8 byte limits and descendant termination. Installer regressions cover prerequisite reuse/failure, locked data, digest/path validation, legitimate dependency filenames and literal Windows argv. The actual PowerShell 5.1 entry point is exercised without an agent selection. Eight polling identities pass local and remote stdio behaviour; participant-local acceptance and execution approval remain separate.
+
+All four desktop/360 px browser flows passed in 1.6 minutes at the agent expansion checkpoint, including all eight product options and Kiro/Grok managed selection, with axe and overflow checks. Screenshots were inspected. The browser tests and changed UI/runtime/server files still match that checkpoint's source hashes. OneDrive discovery used a byte-identical local test copy and the repository fixture server. The current 36-file package dry-run includes the agent/installer guides and scripts and excludes private paths. The release manifest covers 27 assets. Exact source CI and the extracted-bundle smoke run separately; local fixture results do not establish remote or live vendor acceptance.
+
+Antigravity's normal CLI is available on this machine, but its separate official ACP server and the Kiro/Qoder/Grok native executables were not found. Actual vendor MCP loading, account entitlement, coding, permission/cancel/recovery/quota behaviour and the existing two-Windows pilot remain pending. No vendor credential inspection or inference ran for this expansion.
+
+## Published V1.1 local evidence
 
 The 0.2.0 implementation passes 191 natural Vitest tests in 33 files under Node 24.21.0 on Windows x64. The latest source-status check on 10/10/2026 passed in 106.04 seconds. Publication preparation reran type checking, lint, compiled CLI/UI builds and all four desktop/mobile browser flows successfully. One independent read-only review found five actionable issues. Red/green regressions cover managed consent/requester withdrawal, exact remote sender/budget binding, public read receipts, interrupted OAuth setup and identity recovery. A shutdown regression exposed an intermediate cancellation-state error; that was fixed before the complete natural gate passed.
 
@@ -52,7 +62,7 @@ Both desktop and 360 px mobile browser lifecycle cases pass, including retained-
 
 Actual Claude Code and OpenCode MCP acceptance remains unverified. As directed on 09/10/2026, Windows x64 is the only current verification/release target. ARM64 macOS and Linux acceptance are deferred until hardware is available, and their support is not advertised. The current CLI refuses unsupported preview platforms. Full managed permission, cooperative cancellation, provider/session recovery and quota exhaustion still require Windows live evidence.
 
-Setup is an explicit guided command sequence, with native login remaining in the vendor client. A fully interactive setup wizard and three fresh-user onboarding timings remain open. Local npm/npx, upgrade/downgrade and partial-install fixture results are recorded separately from fresh-machine acceptance. npm registry publication has not been requested.
+The Windows bundle provides one-run prerequisite installation and guided local onboarding, with native login remaining in the vendor clients. A fully interactive account/setup wizard and three fresh-user onboarding timings remain open. Installer fixtures, local npm/npx, upgrade/downgrade and partial-install results are recorded separately from fresh-machine acceptance. npm registry publication has not been requested.
 
 Capacity admission, disk/memory/CPU pressure, reference-load acknowledgement/update latency and combined resident-memory targets remain open. Source executable-mode behaviour on Windows, path-transition races, read-only private-backup restoration, complete authority audit coverage and adversarial resource-exhaustion acceptance need broader tests.
 
@@ -71,6 +81,8 @@ npm test
 npx playwright install chromium
 npm run test:e2e
 npm run release:manifest
+npm run bundle:windows
+npm run bundle:smoke
 npm pack
 ```
 

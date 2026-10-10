@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Added a Windows installation bundle with a checksum-pinned Node runtime, compiled app, production dependencies, SQLite/supervisor prebuilds and licence notices. One installer installs missing Git and Tailscale plus selected supported native clients, creates durable launchers and starts guided local MCP/skill registration. Account sign-in and shared HTTPS activation remain explicit. CI builds and smoke-tests the extracted bundle before making it available as an artefact.
+
+Added Antigravity, Kiro, Qoder and Grok Build across MCP registration, room schemas, product selection, diagnostics and participant-local connections. Added managed ACP profiles using official native entry points and native authentication, with scoped room tools, one-time approvals and cancellation. Grok API-only authentication is rejected; Antigravity requires Google's separate ACP server. Live acceptance for the new vendors remains pending.
+
+Managed ACP coding supports approved file read/write and literal-argv terminals in the assigned workspace. Client operations check canonical paths, bind writes to content digests, bound file/output size and stop owned terminals on completion or cancellation. Discussion sessions keep these capabilities disabled.
+
+Fixed ACP replies accepting other sessions' public messages. ACP adapters now check the negotiated protocol version, retain Kiro consent metadata, bound public output and reject overlapping prompts. Native processes also clear the new vendors' API-key environment variables. Added agent setup documentation and protocol/configuration regressions.
+
 ## 0.2.0 (Windows V1.1 preview, 10/10/2026)
 
 Updated architecture, setup and progress documentation for the implemented P0 through P5 workflow, P6 package evidence and remaining acceptance gates. Documented the separate shared listener, participant-owned execution approval, recovery and actual environment/CLI configuration.
