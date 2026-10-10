@@ -21,7 +21,9 @@ it('opens an idle SSE connection promptly and streams every retained event after
     const idle = await fetch(server.url + '/api/events', { headers: { cookie, 'last-event-id': first.id }, signal: AbortSignal.timeout(1200) });
     expect(idle.status).toBe(200);
     await idle.body!.cancel();
-    for (let i = 0; i < 1100; i++) runtime.core.store.append(String(room.id), 'fixture', 'owner', { i });
+    runtime.core.store.transaction(() => {
+      for (let i = 0; i < 1100; i++) runtime.core.store.append(String(room.id), 'fixture', 'owner', { i });
+    });
     const events = await fetch(server.url + '/api/events', { headers: { cookie, 'last-event-id': first.id }, signal: abort.signal });
     const reader = events.body!.getReader(), decoder = new TextDecoder();
     let buffer = '';

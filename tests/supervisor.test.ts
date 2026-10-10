@@ -46,7 +46,7 @@ it('supervises child trees and preserves literal argv', async () => {
     }
     expect(alive).toBe(false);
   } finally {
-    await rm(cwd, { recursive: true, force: true });
+    await rm(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 it('terminates owned descendants when the runtime parent dies', async () => {
@@ -88,6 +88,6 @@ it('terminates owned descendants when the runtime parent dies', async () => {
     expect(alive).toBe(false);
   } finally {
     parent.kill();
-    await rm(cwd, { recursive: true, force: true });
+    await rm(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

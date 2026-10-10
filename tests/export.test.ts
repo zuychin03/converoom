@@ -14,8 +14,9 @@ it('exports every ordered event and binds event provenance to the export digest'
       title: 'Export',
       objective: 'History',
     })) as ToolArgs;
-    for (let i = 0; i < 1100; i++)
-      runtime.core.store.append(String(room.id), 'fixture', 'owner', { i });
+    runtime.core.store.transaction(() => {
+      for (let i = 0; i < 1100; i++) runtime.core.store.append(String(room.id), 'fixture', 'owner', { i });
+    });
     const e = (await runtime.core.dispatch(owner, 'room_export', { roomId: room.id })) as {
       schemaVersion: number;
       digest: string;
@@ -65,8 +66,9 @@ it('enforces message budgets after more than one event page', async () => {
       title: 'Budget',
       objective: 'Paged history',
     })) as ToolArgs;
-    for (let i = 0; i < 1001; i++)
-      runtime.core.store.append(String(room.id), 'permission.fixture', 'owner', { i });
+    runtime.core.store.transaction(() => {
+      for (let i = 0; i < 1001; i++) runtime.core.store.append(String(room.id), 'permission.fixture', 'owner', { i });
+    });
     for (let i = 0; i < 60; i++)
       await runtime.core.dispatch(owner, 'room_post', { roomId: room.id, text: 'Message ' + i });
     await expect(

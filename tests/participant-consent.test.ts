@@ -18,6 +18,7 @@ let stopPromise: Promise<boolean> | undefined, resolveStop: ((value: boolean) =>
 let localServer: Awaited<ReturnType<typeof createServer>> | undefined, readThroughMcp: boolean, mcpResult: unknown;
 let promptPromise: Promise<string> | undefined, resolvePrompt: ((value: string) => void) | undefined;
 let tamperInbox: 'senderOwnerId' | 'maxTurnMs' | undefined;
+let slowClaim: boolean;
 const call = (runtime: Runtime, name: string, args: ToolArgs, actor = a) => runtime.core.dispatch(actor, name, args);
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'converoom-participant-')); started = 0; dropClaim = false; dropReply = false;
@@ -27,6 +28,7 @@ beforeEach(async () => {
   localServer = undefined; readThroughMcp = false; mcpResult = undefined;
   promptPromise = undefined; resolvePrompt = undefined;
   tamperInbox = undefined;
+  slowClaim = false;
   host = await createRuntime(join(dir, 'host'), { noScheduler: true });
   room = await call(host, 'room_create', { title: 'Shared review', objective: 'Participant-local authority' }) as Room;
   const invitation = await call(host, 'membership_invite', { roomId: room.id, displayName: 'B', role: 'participant', clientKey: 'invite' }) as { code: string };
@@ -40,6 +42,7 @@ beforeEach(async () => {
       return {
       identity: async () => ({ actor: { kind: 'agent', principalId: bound.principalId, ownerId: bound.ownerId, seatId: bound.id }, roomId: room.id, generation: member.generation }),
       command: async (name, args) => {
+        if (name === 'turn_claim' && slowClaim) await new Promise((resolve) => setTimeout(resolve, 200));
         const result = await sharedCommand(host.core, { kind: 'agent', principalId: bound.principalId, ownerId: bound.ownerId }, room.id,
           member.generation, name, args);
         if (name === 'turn_claim' && cancelDuringClaim) {
@@ -113,11 +116,12 @@ it('requires an independent local grant, runs once and returns only the public a
   expect(JSON.stringify(host.core.store.events(room.id))).not.toContain('Private reasoning');
 });
 it('does not launch or replay after an ambiguous claim acknowledgement', async () => {
-  const pending = await proposal(); dropClaim = true;
+  const pending = await proposal(); dropClaim = true; slowClaim = true;
   const accepted = await call(participant, 'remote_turn_accept', { proposalId: pending.id, digest: pending.digest }, localB) as ToolArgs;
   const turn = participant.core.store.get<Turn>('turn', String(accepted.localTurnId))!;
   await call(participant, 'permission_grant', { requestId: turn.permissionRequestId }, localB);
-  await expect.poll(() => participant.core.store.get<RemoteProposal>('remote_proposal', pending.id)?.status).toBe('uncertain');
+  await expect.poll(() => participant.core.store.get<Turn & { failure?: string }>('turn', turn.id)?.failure, { timeout: 10000 }).toBe('remote_delivery_uncertain');
+  expect(participant.core.store.get<RemoteProposal>('remote_proposal', pending.id)?.status).toBe('uncertain');
   expect(started).toBe(0); expect(host.core.store.get<Turn>('turn', pending.remoteTurnId)?.status).toBe('running');
   await call(participant, 'remote_refresh', { connectionId: connection.id }, localB); expect(started).toBe(0);
 });
