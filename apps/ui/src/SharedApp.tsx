@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ApiError, createClient, isRecord, string, type RecordData, type Snapshot } from './api.js';
 import { Brand, ThemeSwitch } from './App.js';
 import { ArtefactsView, MembersView } from './Collaboration.js';
 import { ActionDialog, ErrorNotice, type Action } from './components.js';
 import { RoomView } from './RoomView.js';
 import { useTheme } from './theme.js';
+import { coalesce } from './refresh.js';
 
 const client = createClient(undefined, true);
 export function SharedApp() {
@@ -15,9 +16,8 @@ export function SharedApp() {
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
   const [view, setView] = useState<'room' | 'members' | 'artefacts'>('room'), [action, setAction] = useState<Action>();
   const [focusSeq, setFocusSeq] = useState<number | null>(null), [connected, setConnected] = useState(false);
-  const inFlight = useRef(false), theme = useTheme();
-  const refresh = useCallback(async () => {
-    if (inFlight.current) return; inFlight.current = true;
+  const theme = useTheme();
+  const refresh = useMemo(() => coalesce(async () => {
     try {
       const current = await client.session(); setSession(current); setRoomId(string(current, 'roomId'));
       if (current.membershipStatus !== 'active') { setPhase('pending'); setSnapshot(undefined); return; }
@@ -27,8 +27,8 @@ export function SharedApp() {
       else if (phase === 'checking') setPhase('join');
       if (!(e instanceof ApiError && e.status === 401 && phase === 'checking')) setError(e instanceof Error ? e.message : 'Private room unavailable');
       setConnected(false);
-    } finally { inFlight.current = false; }
-  }, [phase]);
+    }
+  }), [phase]);
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
     if (phase !== 'pending' && phase !== 'ready') return;

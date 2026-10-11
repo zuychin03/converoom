@@ -34,6 +34,20 @@ it('exports every ordered event and binds event provenance to the export digest'
     await rm(dir, { recursive: true, force: true });
   }
 });
+it('reruns an export under a reused client key instead of storing and replaying its history', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'converoom-export-key-')),
+    runtime = await createRuntime(dir, { noScheduler: true });
+  try {
+    const room = (await runtime.core.dispatch(owner, 'room_create', { title: 'Export', objective: 'Fresh history' })) as ToolArgs;
+    const exported = async () => ((await runtime.core.dispatch(owner, 'room_export', { roomId: room.id, clientKey: 'export-key' })) as { events: Event[] }).events;
+    const before = (await exported()).length;
+    await runtime.core.dispatch(owner, 'room_post', { roomId: room.id, text: 'Added after the first export' });
+    expect(await exported()).toHaveLength(before + 1);
+  } finally {
+    await runtime.stop();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 it('backs up a consistent database and immutable content files together', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'converoom-backup-')),
     runtime = await createRuntime(dir, { noScheduler: true });

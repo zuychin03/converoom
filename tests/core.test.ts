@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from '../packages/store/src/index.js';
 import { createCore } from '../packages/core/src/index.js';
 import type {
@@ -36,7 +36,40 @@ beforeEach(() => {
   store = createStore(':memory:');
   core = createCore(store);
 });
-afterEach(() => store?.close());
+afterEach(() => { vi.restoreAllMocks(); store?.close(); });
+it('forgets stored read results at startup but keeps mutation results for safe retries', () => {
+  const previous = createStore(':memory:');
+  try {
+    previous.idempotent('owner', 'room_export', 'export-key', { roomId: 'room' }, () => ({ events: ['Retained history copy'] }));
+    previous.idempotent('owner', 'room_post', 'post-key', { roomId: 'room', text: 'Hello' }, () => ({ id: 'event' }));
+    createCore(previous);
+    expect(previous.idempotent('owner', 'room_export', 'export-key', { roomId: 'room', rerun: true }, () => 'rerun')).toBe('rerun');
+    expect(() => previous.idempotent('owner', 'room_post', 'post-key', { roomId: 'room', text: 'Changed' }, () => 'duplicate'))
+      .toThrow(/different payload/i);
+  } finally { previous.close(); }
+});
+it('removes stored mutation results a week after a later startup pass, so expired keys run again', async () => {
+  let now = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const create = () => call<Room>('room_create', { title: 'Room', objective: 'Retry later', clientKey: 'create-key' });
+  const first = await create();
+  now += 3600000; createCore(store);
+  expect((await create()).id).toBe(first.id);
+  now += 7 * 86400000; createCore(store);
+  expect((await create()).id).not.toBe(first.id);
+});
+it('applies the discussion duration to ordinary rooms but not to a remote connection’s local room', async () => {
+  let now = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const ordinary = await room(human), local = await room(human);
+  store.put('room', local.id, { ...store.get<Room>('room', local.id)!, remoteConnectionId: 'connection' });
+  const first = await seat(ordinary.id, 'polling'), second = await seat(local.id, 'polling');
+  now += 5400001;
+  await expect(call('turn_request', { roomId: ordinary.id, seatId: first.id, prompt: 'Late' })).rejects.toThrow(/budget/i);
+  await expect(call('room_post', { roomId: ordinary.id, text: 'Late' })).rejects.toThrow(/budget/i);
+  const turn = await call<Turn>('turn_request', { roomId: local.id, seatId: second.id, prompt: 'Still bounded by turns' });
+  expect(await call('turn_claim', { roomId: local.id, turnId: turn.id }, { kind: 'agent', principalId: second.principalId, ownerId: second.ownerId }))
+    .toMatchObject({ status: 'running' });
+  expect(await call('room_post', { roomId: local.id, text: 'Still bounded by messages' })).toMatchObject({ type: 'message' });
+});
 
 describe('room authority and interactions', () => {
   it('creates a polling host for agents and deduplicates 100 create retries', async () => {

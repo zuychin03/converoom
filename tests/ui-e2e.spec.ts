@@ -140,6 +140,17 @@ test('complete human room lifecycle at desktop and mobile', async ({ page, reque
   await expect(page.getByRole('button', { name: 'Inspect reservation' })).toBeHidden();
   await expect(page.getByText('Rework requested', { exact: true })).toBeVisible();
   await axe(page);
+  const interrupted = page.getByRole('region', { name: 'Interrupted commands' });
+  await expect(interrupted.getByText('Submit work', { exact: true })).toBeVisible();
+  await interrupted.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-interrupted-section.png' });
+  await interrupted.getByRole('button', { name: 'Inspect and clear' }).click();
+  const clearing = page.getByRole('dialog', { name: 'Clear interrupted command' });
+  await expect(clearing).toBeVisible();
+  expect(await clearing.evaluate((dialog) => dialog.scrollWidth <= dialog.clientWidth)).toBe(true);
+  await axe(page);
+  await page.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-interrupted.png', fullPage: true });
+  await clearing.getByRole('button', { name: 'Clear', exact: true }).click();
+  await expect(interrupted).toBeHidden();
   await page.getByRole('button', { name: 'Room', exact: true }).click();
   await page.getByText('Room controls', { exact: true }).click();
   await expect(page.getByRole('button', { name: 'Set agenda' })).toBeVisible();

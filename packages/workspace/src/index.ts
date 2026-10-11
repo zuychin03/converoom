@@ -11,6 +11,7 @@ import {
   type Turn,
 } from '../../shared/src/contracts.js';
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
+import { RESULT_EXPIRY_BATCH, RESULT_RETENTION_MS } from '../../core/src/index.js';
 import { run, canonicalRoot, inside } from '../../adapters/src/process.js';
 import {
   snapshot,
@@ -132,7 +133,7 @@ interface Verification {
 export function mountWorkspace(
   core: Core,
   dataDir: string,
-): { close(): Promise<void>; revoke(id: string): Promise<void> } {
+): { close(): Promise<void>; revoke(id: string): Promise<void>; expireJournal(before: number, limit: number): number } {
   const s = core.store;
   const workspaceAccess = (a: Actor, id: string) => {
     const room = core.requireRoom(a, id);
@@ -200,6 +201,12 @@ export function mountWorkspace(
     await writeFile(path, JSON.stringify(content), { mode: 0o600 });
     return path;
   };
+  // Entries this daemon is still running; any other working entry was interrupted.
+  const running = new Set<string>();
+  // Bounded identifiers from the request, enough to inspect an interrupted entry.
+  const requestSummary = (x: ToolArgs) => Object.fromEntries(Object.entries(redactPublic(x)).filter(([key, value]) => key !== 'clientKey' &&
+    (typeof value === 'number' || typeof value === 'boolean' || (typeof value === 'string' && value.length <= 1024) ||
+      (Array.isArray(value) && value.length <= 100 && value.every((item) => typeof item === 'string' && item.length <= 256)))));
   const journal = async (a: Actor, n: string, x: ToolArgs, fn: () => Promise<unknown>) => {
     const key = a.principalId + ':' + n + ':' + String(x.clientKey ?? randomUUID()),
       hash = scopeDigest(x),
@@ -214,20 +221,51 @@ export function mountWorkspace(
         409,
       );
     }
-    s.put('command', key, { hash, status: 'working' });
+    s.put('command', key, { hash, status: 'working', startedAt: Date.now(), args: requestSummary(x) });
+    running.add(key);
     try {
       const result = await fn();
-      s.put('command', key, { hash, status: 'done', result });
+      s.put('command', key, { hash, status: 'done', result, at: Date.now() });
       return result;
     } catch (e) {
       s.put('command', key, {
         hash,
         status: 'failed',
         error: e instanceof E ? e.code : 'execution_failure',
+        at: Date.now(),
       });
       throw e;
+    } finally {
+      running.delete(key);
     }
   };
+  // A working entry's outcome is unknown, so its key stays fenced until inspected rather than expiring.
+  const expireJournal = (before: number, limit: number) => s.expireRecords('command', ['done', 'failed'], before, limit);
+  const interruptedEntry = (id: string, entry: { startedAt?: number; args?: ToolArgs }, seats: Seat[]) => {
+    const [principalId, command] = id.split(':', 2), seat = seats.find((x) => x.principalId === principalId);
+    return { id, command, principalId, clientKey: id.slice(principalId.length + command.length + 2),
+      ...(entry.startedAt === undefined ? {} : { startedAt: entry.startedAt }), ...(entry.args ? { args: entry.args } : {}),
+      ...(seat ? { seat: { id: seat.id, roomId: seat.roomId, name: seat.name, product: seat.product } } : {}) };
+  };
+  core.register('interrupted_command_list', (a) => {
+    core.requireOwner(a);
+    const seats = s.list<Seat>('seat');
+    return s.entries<{ startedAt?: number; args?: ToolArgs }>('command', { status: ['working'] })
+      .filter((e) => !running.has(e.id)).map((e) => interruptedEntry(e.id, e.value, seats));
+  });
+  core.register('interrupted_command_clear', (a, x) => {
+    core.requireOwner(a);
+    const id = str(x, 'entryId', 1024), entry = s.get<{ status: string; startedAt?: number; args?: ToolArgs }>('command', id);
+    if (entry?.status !== 'working') throw new E('not_found', 'Interrupted command not found', 404);
+    if (running.has(id)) throw new E('active_command', 'Command is still running; wait for it to finish', 409);
+    const cleared = interruptedEntry(id, entry, s.list<Seat>('seat')), roomId = entry.args?.roomId;
+    s.transaction(() => {
+      s.remove('command', id);
+      if (typeof roomId === 'string' && s.get('room', roomId))
+        ev(a, roomId, 'command.cleared', { command: cleared.command, clientKey: cleared.clientKey });
+    });
+    return { cleared: id, command: cleared.command, principalId: cleared.principalId, clientKey: cleared.clientKey };
+  });
   const repoAccess = (a: Actor, id: string) => {
     const r = get<Repo>('repo', id);
     if (r.ownerId !== a.ownerId) throw new E('forbidden', 'Repository owner mismatch', 403);
@@ -1179,7 +1217,9 @@ export function mountWorkspace(
         status: 'quarantined',
       });
     }
+  expireJournal(Date.now() - RESULT_RETENTION_MS, RESULT_EXPIRY_BATCH);
   return {
+    expireJournal,
     revoke: async (id) => {
       await brokers.get(id)?.close();
       brokers.delete(id);

@@ -20,6 +20,7 @@ import { TOOL_DEFINITIONS, validateToolArgs } from '../../../packages/mcp/src/to
 import { redactTransport } from '../../../packages/store/src/index.js';
 import { MANAGED_TOOLS, type ManagedScope } from '../../../packages/mcp/src/managed.js';
 import { SHARED_READS, SHARED_WRITES } from '../../../packages/core/src/membership.js';
+import { READ_COMMANDS } from '../../../packages/core/src/index.js';
 import { artefactMetadata } from '../../../packages/core/src/shared-artefacts.js';
 import type { SharedArtefact } from '../../../packages/shared/src/contracts.js';
 
@@ -28,9 +29,7 @@ const secret = () => randomBytes(32).toString('base64url');
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const equal = (a: string, b: string) =>
   a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-const readCommands = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_get', 'repo_list',
-  'resource_profile_list', 'adapter_status', 'room_export']);
-const outcome = (name: string, args: ToolArgs) => ({ committed: !readCommands.has(name), retrySafe: readCommands.has(name) ||
+const outcome = (name: string, args: ToolArgs) => ({ committed: !READ_COMMANDS.has(name), retrySafe: READ_COMMANDS.has(name) ||
   (typeof args.clientKey === 'string' && TOOL_DEFINITIONS.some((t) => t.name === name) &&
     !['task_claim', 'task_submit', 'verification_request', 'integration_prepare'].includes(name)) });
 export function humanIdentity(runtime: Runtime): Actor {
@@ -138,13 +137,21 @@ export async function createServer(
     )
       throw new ConveroomError('invalid_origin', 'Browser origin rejected', 403);
   };
+  const sessionCookie = (request: FastifyRequest) => String(request.headers.cookie ?? '')
+    .split(';')
+    .map((s) => s.trim())
+    .find((s) => s.startsWith('converoom_session='))
+    ?.slice(18);
+  // Every local client is loopback, so buckets key on the agent credential or browser session, not the address.
+  const requester = (request: FastifyRequest) => {
+    const auth = String(request.headers.authorization ?? ''), cookie = sessionCookie(request);
+    const bridge = auth.startsWith('Bearer ') ? runtime.core.store.get<Actor>('bridge', hash(auth.slice(7))) : undefined;
+    if (bridge?.principalId) return 'agent:' + bridge.principalId;
+    return cookie && sessions.has(hash(cookie)) ? 'browser:' + hash(cookie) : 'anonymous';
+  };
   const humanSession = (request: FastifyRequest, mutation = false) => {
     browserOrigin(request, mutation);
-    const cookie = String(request.headers.cookie ?? '')
-      .split(';')
-      .map((s) => s.trim())
-      .find((s) => s.startsWith('converoom_session='))
-      ?.slice(18);
+    const cookie = sessionCookie(request);
     const session = cookie ? sessions.get(hash(cookie)) : undefined;
     if (!session || session.expiresAt <= Date.now())
       throw new ConveroomError(
@@ -175,7 +182,7 @@ export async function createServer(
       .header('cache-control', 'no-store');
     if (request.headers.host !== new URL(url).host)
       throw new ConveroomError('invalid_host', 'Host rejected', 403);
-    const rateKey = `${request.ip}:${request.url.split('?')[0]}`;
+    const rateKey = `${requester(request)}:${request.url.split('?')[0]}`;
     const prior = rates.get(rateKey);
     const rate = prior && prior.at > Date.now() - 60000 ? prior : { at: Date.now(), count: 0 };
     rates.set(rateKey, rate);
@@ -237,7 +244,7 @@ export async function createServer(
   app.get('/api/session', async (request) => ({ csrf: humanSession(request).csrf, actor: human }));
   app.get('/api/state', async (request) => {
     humanSession(request);
-    return snapshot(runtime);
+    return { ...snapshot(runtime), interruptedCommands: redact(await runtime.core.dispatch(human, 'interrupted_command_list', {})) };
   });
   const humanCommands = new Set([
     'seat_add',
@@ -256,6 +263,8 @@ export async function createServer(
     'candidate_apply',
     'workspace_cleanup',
     'attempt_release',
+    'interrupted_command_list',
+    'interrupted_command_clear',
     'managed_stop',
     'adapter_status',
     'room_export',

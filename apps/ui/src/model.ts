@@ -63,6 +63,7 @@ export function failureLabel(turn: RecordData) {
     return 'Failed · sign-in';
   if (failure === 'turn_timeout') return 'Failed · timed out';
   if (failure === 'worker_binding') return 'Failed · workspace';
+  if (failure === 'budget') return 'Failed · budget';
   return 'Failed';
 }
 
@@ -239,3 +240,23 @@ export function acceptedOrder(state: Snapshot, roomId: string): string[] {
   tasks.forEach(visit);
   return order;
 }
+
+const COMMAND_LABELS: Record<string, string> = {
+  repo_register: 'Register repository',
+  task_claim: 'Claim task',
+  task_submit: 'Submit work',
+  verification_request: 'Run checks',
+  integration_prepare: 'Prepare candidate',
+  candidate_apply: 'Apply candidate',
+  attempt_release: 'Release reservation',
+};
+export const commandLabel = (command: string) => COMMAND_LABELS[command] ?? command.replaceAll('_', ' ');
+const requestRoom = (entry: RecordData) => (isRecord(entry.args) ? string(entry.args, 'roomId') : '');
+// Commands without a room, such as repository registration, belong to every room's view.
+export const interruptedFor = (state: Snapshot, roomId: string) =>
+  state.interruptedCommands.filter((entry) => !roomId || !requestRoom(entry) || requestRoom(entry) === roomId);
+export const requestDetails = (args: unknown, roomId: string) =>
+  Object.entries(isRecord(args) ? args : {})
+    .filter(([key, value]) => !(key === 'roomId' && value === roomId))
+    .map(([key, value]) => key + ' ' + (Array.isArray(value) ? value.join(', ') : String(value)))
+    .join(' · ');

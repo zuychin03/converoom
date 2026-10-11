@@ -94,7 +94,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'Converoom ' +
         VERSION +
         '\nProducts: ' + products.join(', ') +
-        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor\nonboard --products codex,cursor [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup --attempt ID --confirm\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
+        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor\nonboard --products codex,cursor [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
     );
     return;
   }
@@ -357,6 +357,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         }),
       ),
     );
+    return;
+  }
+  if (command === 'interrupted') {
+    console.log(JSON.stringify(await call('interrupted_command_list')));
+    return;
+  }
+  if (command === 'interrupted-clear') {
+    if (!argv[1]) throw new Error('Interrupted command ID required');
+    console.log(JSON.stringify(await call('interrupted_command_clear', { entryId: argv[1] })));
     return;
   }
   throw new Error('Unknown command. Run converoom help.');

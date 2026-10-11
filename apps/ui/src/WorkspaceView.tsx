@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { list, string, type RecordData, type Snapshot } from './api.js';
+import { isRecord, list, string, type RecordData, type Snapshot } from './api.js';
 import {
   Countdown,
   Elapsed,
@@ -12,7 +12,7 @@ import {
   type Action,
   type Run,
 } from './components.js';
-import { STAGES, acceptedOrder, num, shortId, taskProgress, type Kind } from './model.js';
+import { STAGES, acceptedOrder, commandLabel, interruptedFor, num, requestDetails, shortId, taskProgress, type Kind } from './model.js';
 
 export function WorkspaceView({
   state,
@@ -62,6 +62,7 @@ export function WorkspaceView({
           ))}
         </ul>
       )}
+      <InterruptedCommands entries={interruptedFor(state, roomId)} roomId={roomId} openAction={openAction} />
       {room && (
         <>
           <section className="work-section" aria-labelledby="tasks-title">
@@ -291,6 +292,69 @@ export function WorkspaceView({
         </ul>
       </details>
     </div>
+  );
+}
+
+function InterruptedCommands({
+  entries,
+  roomId,
+  openAction,
+}: {
+  entries: RecordData[];
+  roomId: string;
+  openAction: (action: Action) => void;
+}) {
+  if (!entries.length) return null;
+  return (
+    <section className="work-section" aria-labelledby="interrupted-title">
+      <div className="section-head">
+        <h2 id="interrupted-title" className="section-label">
+          Interrupted commands
+        </h2>
+      </div>
+      <p className="rail-note">
+        These stopped when Converoom did, so whether they took effect is unknown. A request with the same
+        client key stays blocked until you check the work and clear it.
+      </p>
+      <ul className="sources">
+        {entries.map((entry) => {
+          const id = string(entry, 'id'),
+            label = commandLabel(string(entry, 'command')),
+            startedAt = num(entry, 'startedAt'),
+            seat = isRecord(entry.seat) ? entry.seat : undefined;
+          const details = [requestDetails(entry.args, roomId), 'key ' + string(entry, 'clientKey')].filter(Boolean).join(' · ');
+          return (
+            <li key={id} className="source">
+              <span className="source-kind">Interrupted</span>
+              <span className="source-name">{label}</span>
+              <code className="source-path">{details}</code>
+              <span className="source-end">
+                <span className="source-meta">
+                  {startedAt ? `started ${new Date(startedAt).toLocaleString('en-AU')}` : 'start time not recorded'} · by{' '}
+                  {seat ? string(seat, 'name') : 'you'}
+                </span>
+                <button
+                  type="button"
+                  className="button small"
+                  onClick={() =>
+                    openAction({
+                      title: 'Clear interrupted command',
+                      command: 'interrupted_command_clear',
+                      args: { entryId: id },
+                      label: 'Clear',
+                      description: `${label} stopped before Converoom recorded its outcome. Check whether it took effect, for example under Tasks, Combined candidates or Repositories. Clearing does not undo or repeat anything.`,
+                      confirm: 'Clear this entry so a request with the same client key runs again.',
+                    })
+                  }
+                >
+                  Inspect and clear
+                </button>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

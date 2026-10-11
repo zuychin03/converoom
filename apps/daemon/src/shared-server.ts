@@ -49,6 +49,20 @@ export async function createSharedServer(core: Core, options: SharedServerOption
     }
     done(null, result);
   });
+  // Every Serve request arrives from loopback, so buckets key on stored application credentials, never forwarded headers.
+  const holder = (kind: string, credential: unknown) => {
+    const record = typeof credential === 'string' && credential ? core.store.get<{ actor?: Actor; expiresAt?: number }>(kind, hash(credential)) : undefined;
+    return record?.actor?.principalId && Number(record.expiresAt) > Date.now() ? 'principal:' + record.actor.principalId : 'anonymous';
+  };
+  const requester = (request: FastifyRequest) => {
+    const header = String(request.headers.authorization ?? '');
+    return header.startsWith('Bearer ') ? holder('shared_oauth_access', header.slice(7)) : holder('shared_browser_session', browserCookie(request));
+  };
+  const limit = (key: string, max: number, message: string) => {
+    const previous = rates.get(key), rate = previous && previous.at > Date.now() - 60000 ? previous : { at: Date.now(), count: 0 };
+    rates.set(key, rate);
+    if (++rate.count > max) throw new E('rate_limited', message, 429);
+  };
   app.addHook('onRequest', async (request, reply) => {
     reply.header('cache-control', 'no-store').header('x-content-type-options', 'nosniff').header('referrer-policy', 'no-referrer')
       .header('content-security-policy', "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
@@ -57,15 +71,12 @@ export async function createSharedServer(core: Core, options: SharedServerOption
       (request.headers['x-forwarded-proto'] && request.headers['x-forwarded-proto'] !== 'https') ||
       request.headers.forwarded || request.headers['tailscale-funnel-request'])
       throw new E('origin', 'Configured private Host and Origin required', 403);
-    const group = /^\/(?:shared\/v1\/(?:join|login)|authorize|token|revoke)/.test(request.url) ? 'auth' : request.url.startsWith('/mcp') ? 'mcp' : 'other';
-    const previous = rates.get(group), rate = previous && previous.at > Date.now() - 60000 ? previous : { at: Date.now(), count: 0 };
-    rates.set(group, rate);
-    if (++rate.count > (group === 'auth' ? 60 : 240)) throw new E('rate_limited', 'Retry after one minute', 429);
-    if (request.url.startsWith('/shared/v1/join')) {
-      const previous = rates.get('join'), rate = previous && previous.at > Date.now() - 60000 ? previous : { at: Date.now(), count: 0 };
-      rates.set('join', rate);
-      if (++rate.count > 10) throw new E('rate_limited', 'Invitation attempt limit reached', 429);
-    }
+    // A token request names its holder only in the form body, so its handler applies the limit.
+    const group = request.method === 'POST' && request.url.split('?')[0] === '/token' ? undefined
+      : /^\/(?:shared\/v1\/(?:join|login)|authorize|token|revoke)/.test(request.url) ? 'auth' : request.url.startsWith('/mcp') ? 'mcp' : 'other';
+    if (rates.size > 1000) for (const [key, value] of rates) if (value.at < Date.now() - 60000) rates.delete(key);
+    if (group) limit(group + ':' + requester(request), group === 'auth' ? 60 : 240, 'Retry after one minute');
+    if (request.url.startsWith('/shared/v1/join')) limit('join', 10, 'Invitation attempt limit reached');
   });
   app.setErrorHandler((error: Error & { statusCode?: number; committed?: boolean; retrySafe?: boolean }, _request, reply) => {
     if (error instanceof OAuthError) {
@@ -154,8 +165,10 @@ export async function createSharedServer(core: Core, options: SharedServerOption
   app.post<{ Body: ToolArgs }>('/shared/v1/authorize', async (request) => {
     const record = session(request, true); return { redirect: auth.approve(str(request.body, 'requestId', 256), record.actor) };
   });
-  app.post<{ Body: ToolArgs }>('/token', async (request) => {
-    const x = request.body, client = await auth.clientsStore.getClient(str(x, 'client_id', 256));
+  app.post<{ Body: ToolArgs | undefined }>('/token', async (request) => {
+    const x = request.body ?? {}, refresh = x.grant_type === 'refresh_token';
+    limit('auth:' + holder(refresh ? 'shared_oauth_refresh' : 'shared_oauth_code', refresh ? x.refresh_token : x.code), 60, 'Retry after one minute');
+    const client = await auth.clientsStore.getClient(str(x, 'client_id', 256));
     if (!client) throw new E('oauth_client', 'Registered bridge required', 401);
     const resource = new URL(str(x, 'resource', 2048));
     if (x.grant_type === 'authorization_code') return auth.exchangeAuthorizationCode(client, str(x, 'code', 256),

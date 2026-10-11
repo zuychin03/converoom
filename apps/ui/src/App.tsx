@@ -8,6 +8,7 @@ import { ActionDialog, ErrorNotice, Status, useNow, type Action } from './compon
 import { ACTIVE_TURN, data, num, pad, pendingPermissions, roomEvents, shortId } from './model.js';
 import { NoRoom, RoomIndex, RoomView } from './RoomView.js';
 import { useTheme, type ThemeChoice } from './theme.js';
+import { coalesce } from './refresh.js';
 import { WorkspaceView } from './WorkspaceView.js';
 import { ArtefactsView, ConnectionsView, MembersView } from './Collaboration.js';
 
@@ -45,7 +46,6 @@ export function App() {
   const [focusSeq, setFocusSeq] = useState<number | null>(null);
   const [code, setCode] = useState('');
   const [pairing, setPairing] = useState(false);
-  const inFlight = useRef(false);
   const autoPicked = useRef(false);
   const theme = useTheme();
   const now = useNow(5000);
@@ -63,9 +63,7 @@ export function App() {
     setAction(undefined);
     setPhase('pair');
   }, []);
-  const refresh = useCallback(async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
+  const refresh = useMemo(() => coalesce(async () => {
     try {
       setSnapshot(await client.state());
       setError('');
@@ -73,10 +71,8 @@ export function App() {
       if (cause instanceof ApiError && cause.status === 401) resetSession();
       setError(cause instanceof Error ? cause.message : 'Cannot reach Converoom. Check that the local server is running.');
       setConnection('offline');
-    } finally {
-      inFlight.current = false;
     }
-  }, [resetSession]);
+  }), [resetSession]);
   const adoptSession = (value: unknown) => {
     const actor = isRecord(value) && isRecord(value.actor) ? value.actor : {};
     setHumanId(string(actor, 'principalId'));

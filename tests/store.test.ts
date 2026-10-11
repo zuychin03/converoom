@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +17,7 @@ function open() {
   return { store, path, dir };
 }
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const s of stores.splice(0)) s.close();
   for (const d of directories.splice(0)) rmSync(d, { recursive: true, force: true });
 });
@@ -60,6 +61,73 @@ describe('durable store', () => {
     expect(store.idempotent('actor', 'post', 'key', { a: 1, b: 2 }, () => null)).toEqual(
       results[0],
     );
+  });
+  it('expires stored results a week after a later pass without changing the 0.2.0 table', () => {
+    let now = 1_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { store, path } = open(), week = 7 * 86400000;
+    const run = (key: string, value: string) => store.idempotent('actor', 'post', key, { key }, () => value);
+    run('old', 'first');
+    expect(store.expireResults(now - week, 1000)).toBe(0);
+    now += 3600000;
+    run('new', 'second');
+    expect(store.expireResults(now - week, 1000)).toBe(0);
+    now += week - 3600000;
+    expect(store.expireResults(now - week, 1000)).toBe(1);
+    expect(run('old', 'rerun')).toBe('rerun');
+    expect(run('new', 'duplicate')).toBe('second');
+    store.close();
+    const db = new Database(path);
+    expect(db.pragma('user_version', { simple: true })).toBe(1);
+    expect(db.prepare("SELECT name FROM pragma_table_info('idempotency')").pluck().all())
+      .toEqual(['actor_id', 'command', 'client_key', 'payload_hash', 'result']);
+    db.close();
+  });
+  it('expires a backlog in bounded batches and keeps the mark until its rows are gone', () => {
+    let now = 1_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { store } = open(), week = 7 * 86400000;
+    for (const key of ['a', 'b', 'c']) store.idempotent('actor', 'post', key, { key }, () => key);
+    store.expireResults(now - week, 2);
+    now += week;
+    expect(store.expireResults(now - week, 2)).toBe(2);
+    expect(store.expireResults(now - week, 2)).toBe(1);
+    expect(store.expireResults(now - week, 2)).toBe(0);
+  });
+  it('expires finished records of one kind a period after they finish, timing older records from first sight', () => {
+    let now = 1_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { store } = open(), day = 86400000, week = 7 * day;
+    const expire = (limit = 1000) => store.expireRecords('command', ['done', 'failed'], now - week, limit);
+    for (const id of ['done-1', 'done-2']) store.put('command', id, { status: 'done', at: now });
+    store.put('command', 'failed', { status: 'failed', at: now });
+    store.put('command', 'working', { status: 'working' });
+    store.put('other', 'done', { status: 'done', at: now });
+    now += day;
+    store.put('command', 'earlier-version', { status: 'done' });
+    expect(expire()).toBe(0);
+    now += week - day;
+    expect(expire(2)).toBe(2);
+    expect(expire(2)).toBe(1);
+    expect(store.get('command', 'earlier-version')).toMatchObject({ status: 'done' });
+    now += day;
+    expect(expire()).toBe(1);
+    expect(store.get('command', 'working')).toEqual({ status: 'working' });
+    expect(store.get('other', 'done')).toBeDefined();
+  });
+  it('drops a mark whose row has gone instead of expiring a newer row that reuses its rowid', () => {
+    let now = 1_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { store } = open(), week = 7 * 86400000;
+    const run = (key: string, value: string) => store.idempotent('actor', 'post', key, { key }, () => value);
+    run('first', 'one');
+    store.expireResults(now - week, 1000);
+    store.forgetResults(['post']);
+    now += 60000;
+    run('second', 'two');
+    now += week;
+    expect(store.expireResults(now - week, 1000)).toBe(0);
+    expect(run('second', 'duplicate')).toBe('two');
   });
   it('backups contain a consistent committed event projection', async () => {
     const { store, dir } = open();

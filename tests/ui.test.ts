@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClient, ApiError, parseSnapshot } from '../apps/ui/src/api.js';
-import { visibleTurn } from '../apps/ui/src/model.js';
+import { commandLabel, failureLabel, interruptedFor, requestDetails, visibleTurn } from '../apps/ui/src/model.js';
+import { coalesce } from '../apps/ui/src/refresh.js';
 
 describe('browser command boundary', () => {
   it('uses public lifecycle evidence rather than presenting a historical request as still queued', () => {
@@ -9,6 +10,42 @@ describe('browser command boundary', () => {
     expect(visibleTurn(state, 'room', queued)).toMatchObject({ status: 'cancelled' });
     expect(visibleTurn(parseSnapshot({}), 'room', queued)).toMatchObject({ status: 'unavailable' });
     expect(visibleTurn(parseSnapshot({ turns: [{ ...queued, roomId: 'room', status: 'running' }] }), 'room', queued)).toMatchObject({ status: 'running' });
+  });
+  it('shows interrupted commands for the open room plus room-less ones, with readable labels and identifiers', () => {
+    const state = parseSnapshot({ interruptedCommands: [
+      { id: 'a', command: 'task_submit', args: { roomId: 'room', attemptId: 'attempt-1' } },
+      { id: 'b', command: 'repo_register', args: { path: 'C:/repo', name: 'repo' } },
+      { id: 'c', command: 'task_claim', args: { roomId: 'other', taskId: 'task-2' } },
+      { id: 'd', command: 'custom_step' },
+    ] });
+    expect(interruptedFor(state, 'room').map((entry) => entry.id)).toEqual(['a', 'b', 'd']);
+    expect(interruptedFor(state, '').map((entry) => entry.id)).toEqual(['a', 'b', 'c', 'd']);
+    expect(commandLabel('task_submit')).toBe('Submit work');
+    expect(commandLabel('custom_step')).toBe('custom step');
+    expect(requestDetails({ roomId: 'room', attemptId: 'attempt-1', manifestIds: ['m1', 'm2'], confirm: true }, 'room'))
+      .toBe('attemptId attempt-1 · manifestIds m1, m2 · confirm true');
+    expect(requestDetails(undefined, 'room')).toBe('');
+  });
+  it('follows refreshes requested mid-load with exactly one trailing load', async () => {
+    const releases: Array<() => void> = [];
+    const refresh = coalesce(() => new Promise<void>((resolve) => { releases.push(resolve); }));
+    const requests = [refresh(), refresh(), refresh()];
+    expect(releases).toHaveLength(1);
+    releases[0]!();
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    let settled = false;
+    void Promise.all(requests).then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    releases[1]!();
+    await Promise.all(requests);
+    expect(releases).toHaveLength(2);
+    void refresh();
+    expect(releases).toHaveLength(3);
+    releases[2]!();
+  });
+  it('names a room budget refusal instead of a generic failure', () => {
+    expect(failureLabel({ status: 'failed', failure: 'budget' })).toBe('Failed · budget');
   });
   it('keeps shared browser commands on their scoped routes and freezes current authority', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];

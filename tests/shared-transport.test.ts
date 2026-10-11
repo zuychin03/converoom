@@ -34,11 +34,11 @@ async function tlsFetch(input: string | URL | Request, options: RequestInit = {}
     if (body) request.write(body); request.end();
   });
 }
-async function token() {
+async function token(actor = b) {
   const verifier = 'v'.repeat(64), resource = new URL(origin + '/mcp');
   const request = server!.auth.begin(client.client_id, { redirectUri: client.redirect_uris[0], state: 's'.repeat(32),
     codeChallenge: createHash('sha256').update(verifier).digest('base64url'), scopes: ['room:' + room.id], resource });
-  const code = new URL(server!.auth.approve(request.id, b)).searchParams.get('code')!;
+  const code = new URL(server!.auth.approve(request.id, actor)).searchParams.get('code')!;
   return (await server!.auth.exchangeAuthorizationCode(client, code, verifier, client.redirect_uris[0], resource)).access_token;
 }
 beforeEach(async () => {
@@ -266,12 +266,23 @@ it('completes durable participant OAuth and agent registration over verified TLS
     const renewed = JSON.parse(await readFile(credentialPath, 'utf8'));
     expect(renewed.refreshToken).not.toBe(credentials.refreshToken);
     await expect(server!.auth.verifyAccessToken(credentials.accessToken)).rejects.toThrow();
-    loseRefresh = true;
+    for (let i = 0; i < 1000; i++) core.store.put('shared_oauth_access', 'capacity-' + i, { id: 'capacity-' + i, expiresAt: Date.now() + 60000 });
     await writeFile(credentialPath, JSON.stringify({ ...renewed, accessExpiresAt: 0 }));
+    await participant.core.dispatch(local, 'remote_refresh', { connectionId: prepared.connectionId });
+    expect(participant.core.store.get<Record<string, unknown>>('remote_connection', prepared.connectionId)?.status).toBe('disconnected');
+    const kept = JSON.parse(await readFile(credentialPath, 'utf8'));
+    expect(kept.refreshToken).toBe(renewed.refreshToken); expect(kept.refreshPending).toBeUndefined();
+    for (let i = 0; i < 1000; i++) core.store.remove('shared_oauth_access', 'capacity-' + i);
+    await participant.core.dispatch(local, 'remote_refresh', { connectionId: prepared.connectionId });
+    expect(participant.core.store.get<Record<string, unknown>>('remote_connection', prepared.connectionId)?.status).toBe('connected');
+    const current = JSON.parse(await readFile(credentialPath, 'utf8'));
+    expect(current.refreshToken).not.toBe(renewed.refreshToken);
+    loseRefresh = true;
+    await writeFile(credentialPath, JSON.stringify({ ...current, accessExpiresAt: 0 }));
     await participant.core.dispatch(local, 'remote_refresh', { connectionId: prepared.connectionId });
     expect(participant.core.store.get<Record<string, unknown>>('remote_connection', prepared.connectionId)?.status).toBe('uncertain');
     await participant.core.dispatch(local, 'remote_refresh', { connectionId: prepared.connectionId });
-    expect(renewals).toBe(2);
+    expect(renewals).toBe(4);
   } finally { await participant.stop(); await rm(dir, { recursive: true, force: true }); }
 });
 it('serves scoped MCP resources and read-only review prompts without arbitrary identifiers', async () => {
@@ -336,6 +347,34 @@ it('keeps browser state, Markdown export and live events scoped through removal'
   });
   expect(buffer).toContain('Public stream message'); expect(buffer).not.toContain('private-fixture');
   expect((await tlsFetch(origin + '/shared/v1/browser/state', { headers: { cookie } })).status).not.toBe(200);
+});
+it('limits shared requests per authenticated principal so one participant or anonymous traffic cannot starve another', async () => {
+  const c: Actor = { kind: 'human', principalId: 'human-c', ownerId: 'owner-c' };
+  const invitation = await call('membership_invite', { roomId: room.id, displayName: 'C', role: 'participant', clientKey: 'rate-c' }) as { code: string };
+  const joined = await call('membership_redeem', { roomId: room.id, code: invitation.code }, c) as HumanMembership;
+  await call('membership_confirm', { roomId: room.id, memberId: joined.id, expectedGeneration: joined.generation });
+  const first = 'Bearer ' + await token(), second = 'Bearer ' + await token(c);
+  const mcp = (authorization?: string) => server!.app.inject({ method: 'POST', url: '/mcp', payload: '{}',
+    headers: { host: new URL(origin).host, 'content-type': 'application/json', ...(authorization ? { authorization } : {}) } });
+  for (let i = 0; i < 240; i++) await mcp();
+  expect((await mcp()).statusCode).toBe(429);
+  for (let i = 0; i < 240; i++) expect((await mcp(first)).statusCode).not.toBe(429);
+  expect((await mcp(first)).statusCode).toBe(429);
+  expect((await mcp(second)).statusCode).not.toBe(429);
+});
+it('limits token requests per credential holder so anonymous traffic cannot block exchange or renewal', async () => {
+  const resource = origin + '/mcp', verifier = 'v'.repeat(64);
+  const request = server!.auth.begin(client.client_id, { redirectUri: client.redirect_uris[0], state: 's'.repeat(32),
+    codeChallenge: createHash('sha256').update(verifier).digest('base64url'), scopes: ['room:' + room.id], resource: new URL(resource) });
+  const code = new URL(server!.auth.approve(request.id, b)).searchParams.get('code')!;
+  const tokens = (fields: Record<string, string>) => server!.app.inject({ method: 'POST', url: '/token',
+    headers: { host: new URL(origin).host, 'content-type': 'application/x-www-form-urlencoded' },
+    payload: new URLSearchParams({ client_id: client.client_id, resource, ...fields }).toString() });
+  for (let i = 0; i < 60; i++) await tokens({ grant_type: 'refresh_token', refresh_token: 'guess-' + i });
+  expect((await tokens({ grant_type: 'refresh_token', refresh_token: 'guess' })).statusCode).toBe(429);
+  const issued = await tokens({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: client.redirect_uris[0] });
+  expect(issued.statusCode).toBe(200);
+  expect((await tokens({ grant_type: 'refresh_token', refresh_token: issued.json().refresh_token })).statusCode).toBe(200);
 });
 it('reports committed registration honestly when credential provisioning fails afterwards', async () => {
   await server!.close(); server = await createSharedServer(core, { enabled: true, origin, clients: [client], port: 0, roomTools: true });

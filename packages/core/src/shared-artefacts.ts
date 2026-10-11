@@ -4,6 +4,19 @@ import { redactPublic } from '../../store/src/index.js';
 import { requireHumanParticipant } from './membership.js';
 
 export const textDigest = (content: string) => createHash('sha256').update(content).digest('hex');
+// Markdown renderers may pass raw HTML through and decode character references in link targets.
+const ACTIVE_TAGS = new Set(['script', 'style', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'svg', 'math', 'link', 'meta',
+  'base', 'form', 'input', 'button', 'textarea', 'select', 'template', 'noscript', 'xmp', 'plaintext', 'listing', 'portal']);
+const SCRIPT_URL = /(?:(?:\]\(|\]:|=)\s*(?:["'<]\s*)?|<)(?:j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t|v\s*b\s*s\s*c\s*r\s*i\s*p\s*t|d\s*a\s*t\s*a)\s*:/i;
+const codePoint = (n: number) => n <= 0x10ffff ? String.fromCodePoint(n) : '';
+const decodeReferences = (text: string) => text.replace(/&#x0*([0-9a-f]{1,6});?/gi, (_, hex: string) => codePoint(parseInt(hex, 16)))
+  .replace(/&#0*(\d{1,7});?/g, (_, dec: string) => codePoint(Number(dec)))
+  .replace(/&(colon|tab|newline);/gi, (_, name: string) => ({ colon: ':', tab: '\t', newline: '\n' })[name.toLowerCase()]!);
+function activeContent(content: string) {
+  for (const [, name, rest] of content.matchAll(/<\/?([a-z][a-z0-9-]*)([^<>]*>?)/gi))
+    if (ACTIVE_TAGS.has(name.toLowerCase()) || /[\s/](?:on[a-z]+|style)\s*=(?!>)/i.test(rest)) return true;
+  return SCRIPT_URL.test(decodeReferences(content));
+}
 export const artefactMetadata = (a: SharedArtefact) => ({ id: a.id, roomId: a.roomId, ownerId: a.ownerId, name: a.name,
   mimeType: a.mimeType, digest: a.digest, bytes: a.bytes, visibility: a.visibility, sharedAt: a.sharedAt, provenance: a.provenance });
 export function readSharedArtefact(c: Core, actor: Actor, roomId: string, id: string) {
@@ -23,8 +36,10 @@ export function mountSharedArtefacts(c: Core) {
     if (!/^[\p{L}\p{N} _.-]+\.(?:md|txt)$/u.test(name) || name.includes('..')) throw new E('artefact_name', 'A plain text or Markdown name without a path is required');
     if (!['text/plain', 'text/markdown'].includes(mimeType) || Buffer.from(content).toString('utf8') !== content ||
       // eslint-disable-next-line no-control-regex -- Reject binary control bytes in text uploads.
-      /[\x00-\x08\x0b\x0c\x0e-\x1f]|<\/?[!a-z][^>]*>|(?:javascript|vbscript|data):/i.test(content) || redactPublic(content) !== content)
-      throw new E('artefact_content', 'Only public UTF-8 plain text or Markdown without active content is supported');
+      /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(content) || activeContent(content))
+      throw new E('artefact_content', 'Only UTF-8 text or Markdown without scripts, frames, forms, event or style attributes or script links is supported');
+    if (redactPublic(content) !== content)
+      throw new E('artefact_content', 'Remove credentials and private reasoning before sharing');
     if (!/^[a-f0-9]{64}$/.test(digest) || textDigest(content) !== digest) throw new E('artefact_digest', 'Exact reviewed content digest required');
     const existing = c.store.list<SharedArtefact>('shared_artefact', { roomId }), bytes = Buffer.byteLength(content);
     if (existing.length >= 100 || existing.reduce((sum, item) => sum + item.bytes, 0) + bytes > 10485760)

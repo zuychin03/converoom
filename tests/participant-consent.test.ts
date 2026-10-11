@@ -2,12 +2,14 @@ import { beforeEach, afterEach, it, expect } from 'vitest';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { sharedCommand } from '../packages/core/src/membership.js';
 import { createServer, issueBridgeCredential } from '../apps/daemon/src/server.js';
+import { REMOTE_PUBLICATION_MARGIN_MS } from '../packages/remote/src/client.js';
 import type { Actor, Runtime, Room, Seat, HumanMembership, RemoteConnection, RemoteProposal, ToolArgs, Turn, Event } from '../packages/shared/src/contracts.js';
 const a: Actor = { kind: 'human', principalId: 'human-a', ownerId: 'owner-a' };
 const remoteB: Actor = { kind: 'human', principalId: 'remote-human-b', ownerId: 'remote-owner-b' };
@@ -18,7 +20,7 @@ let stopPromise: Promise<boolean> | undefined, resolveStop: ((value: boolean) =>
 let localServer: Awaited<ReturnType<typeof createServer>> | undefined, readThroughMcp: boolean, mcpResult: unknown;
 let promptPromise: Promise<string> | undefined, resolvePrompt: ((value: string) => void) | undefined;
 let tamperInbox: 'senderOwnerId' | 'maxTurnMs' | undefined;
-let slowClaim: boolean;
+let slowClaim: boolean, promptError: string | undefined, rateLimited: Set<string> | undefined, prompts: string[];
 const call = (runtime: Runtime, name: string, args: ToolArgs, actor = a) => runtime.core.dispatch(actor, name, args);
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'converoom-participant-')); started = 0; dropClaim = false; dropReply = false;
@@ -28,7 +30,7 @@ beforeEach(async () => {
   localServer = undefined; readThroughMcp = false; mcpResult = undefined;
   promptPromise = undefined; resolvePrompt = undefined;
   tamperInbox = undefined;
-  slowClaim = false;
+  slowClaim = false; promptError = undefined; rateLimited = undefined; prompts = [];
   host = await createRuntime(join(dir, 'host'), { noScheduler: true });
   room = await call(host, 'room_create', { title: 'Shared review', objective: 'Participant-local authority' }) as Room;
   const invitation = await call(host, 'membership_invite', { roomId: room.id, displayName: 'B', role: 'participant', clientKey: 'invite' }) as { code: string };
@@ -42,6 +44,7 @@ beforeEach(async () => {
       return {
       identity: async () => ({ actor: { kind: 'agent', principalId: bound.principalId, ownerId: bound.ownerId, seatId: bound.id }, roomId: room.id, generation: member.generation }),
       command: async (name, args) => {
+        if (rateLimited?.has(name)) throw new StreamableHTTPError(429, 'Error POSTing to endpoint: rate limited');
         if (name === 'turn_claim' && slowClaim) await new Promise((resolve) => setTimeout(resolve, 200));
         const result = await sharedCommand(host.core, { kind: 'agent', principalId: bound.principalId, ownerId: bound.ownerId }, room.id,
           member.generation, name, args);
@@ -65,7 +68,11 @@ beforeEach(async () => {
           body: JSON.stringify({ name: 'room_read', args: { roomId: connection.localRoomId, cursor: 0, limit: 20 } }) });
         expect(response.status).toBe(200); mcpResult = await response.json();
       }
-      started++; return { id: 'participant-fixture', product, capabilities: ['prompt', 'cancel'], prompt: async () => promptPromise ?? '<thinking>Private reasoning</thinking>Public B answer',
+      started++; return { id: 'participant-fixture', product, capabilities: ['prompt', 'cancel'], prompt: async (text: string) => {
+        prompts.push(text);
+        if (promptError) throw new Error(promptError);
+        return promptPromise ?? '<thinking>Private reasoning</thinking>Public B answer';
+      },
         cancel: async () => {}, close: async () => stopPromise ?? true };
     } });
   participant.core.store.put('identity', 'human', localB);
@@ -292,6 +299,102 @@ it.each(['antigravity', 'kiro', 'qoder', 'grok'] as const)('requires participant
   await call(participant, 'remote_refresh', { connectionId: remote.id }, localB);
   expect(host.core.store.get<Turn>('turn', remoteTurn.id)?.status).toBe('completed');
   expect(started).toBe(1);
+});
+async function admitted() {
+  const pending = await proposal(), accepted = await call(participant, 'remote_turn_accept', { proposalId: pending.id, digest: pending.digest }, localB) as ToolArgs;
+  const turn = participant.core.store.get<Turn>('turn', String(accepted.localTurnId))!;
+  await call(participant, 'permission_grant', { requestId: turn.permissionRequestId }, localB);
+  return { pending, turn };
+}
+const localStatus = (id: string) => participant.core.store.get<Turn & { failure?: string }>('turn', id);
+const nativeIdle = () => expect.poll(() => participant.core.store.get<{ status: string }>('seat', connection.localSeatId!)?.status).toBe('idle');
+it('reports a failed local turn so the host stops counting the claimed seat', async () => {
+  promptError = 'Native quota exhausted';
+  const { pending, turn } = await admitted();
+  await expect.poll(() => localStatus(turn.id)?.status).toBe('failed'); await nativeIdle();
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  expect(host.core.store.get<Turn>('turn', pending.remoteTurnId)).toMatchObject({ status: 'failed', error: expect.stringContaining('quota_exhausted') });
+  expect(participant.core.store.get<RemoteProposal>('remote_proposal', pending.id)?.status).toBe('failed');
+  expect(host.core.store.eventCount(room.id, 'message')).toBe(0);
+});
+it('carries host cancellation of a claimed turn to the local session and acknowledges it', async () => {
+  promptPromise = new Promise<string>((resolve) => { resolvePrompt = resolve; });
+  const { pending, turn } = await admitted();
+  await expect.poll(() => localStatus(turn.id)?.status).toBe('running');
+  await call(host, 'turn_cancel', { roomId: room.id, turnId: pending.remoteTurnId });
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  expect(localStatus(turn.id)?.status).toBe('cancelling');
+  resolvePrompt!('Answer after cancellation');
+  await expect.poll(() => localStatus(turn.id)?.status).toBe('cancelled'); await nativeIdle();
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  expect(host.core.store.get<Turn>('turn', pending.remoteTurnId)?.status).toBe('cancelled');
+  expect(participant.core.store.get<RemoteProposal>('remote_proposal', pending.id)?.status).toBe('cancelled');
+  expect(host.core.store.eventCount(room.id, 'message')).toBe(0);
+});
+it('ends native work early enough for the host to receive the outcome within its claim budget', async () => {
+  await call(host, 'owner_consent_update', { roomId: room.id, seatId: seat.id, allowedSenderOwnerIds: [a.ownerId], maxTurns: 3,
+    maxTurnMs: REMOTE_PUBLICATION_MARGIN_MS + 500 }, remoteB);
+  promptPromise = new Promise<string>((resolve) => { resolvePrompt = resolve; });
+  const { pending, turn } = await admitted();
+  await expect.poll(() => localStatus(turn.id)?.failure, { timeout: 5000 }).toBe('turn_timeout'); await nativeIdle();
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  expect(host.core.store.get<Turn>('turn', pending.remoteTurnId)).toMatchObject({ status: 'failed', error: expect.stringContaining('turn_timeout') });
+});
+it('keeps accepted native work through a rate-limited poll and delivers it once the host answers', async () => {
+  promptPromise = new Promise<string>((resolve) => { resolvePrompt = resolve; });
+  const { pending, turn } = await admitted();
+  await expect.poll(() => localStatus(turn.id)?.status).toBe('running');
+  rateLimited = new Set(['room_inbox']);
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  expect(participant.core.store.get<RemoteConnection>('remote_connection', connection.id)?.status).toBe('disconnected');
+  expect(localStatus(turn.id)?.status).toBe('running');
+  expect(participant.core.store.get<RemoteProposal>('remote_proposal', pending.id)?.status).toBe('claimed');
+  rateLimited = undefined;
+  resolvePrompt!('Answer after a rate-limited poll');
+  await expect.poll(() => localStatus(turn.id)?.status).toBe('completed'); await nativeIdle();
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  expect(participant.core.store.get<RemoteConnection>('remote_connection', connection.id)?.status).toBe('connected');
+  expect(host.core.store.get<Turn>('turn', pending.remoteTurnId)?.status).toBe('completed');
+  expect(JSON.stringify(host.core.store.events(room.id))).toContain('Answer after a rate-limited poll');
+});
+it('retries a completion report the host rejected before processing', async () => {
+  const { pending, turn } = await admitted();
+  await expect.poll(() => localStatus(turn.id)?.status).toBe('completed'); await nativeIdle();
+  rateLimited = new Set(['turn_complete']);
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  expect(participant.core.store.get<RemoteProposal>('remote_proposal', pending.id)?.status).toBe('claimed');
+  expect(host.core.store.get<Turn>('turn', pending.remoteTurnId)?.status).toBe('running');
+  rateLimited = undefined;
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  expect(participant.core.store.get<RemoteProposal>('remote_proposal', pending.id)?.status).toBe('completed');
+  expect(host.core.store.get<Turn>('turn', pending.remoteTurnId)?.status).toBe('completed');
+  expect(host.core.store.eventCount(room.id, 'message')).toBe(1);
+});
+it('keeps accepting remote proposals after the local proxy room outlives the discussion duration', async () => {
+  const proxy = participant.core.store.get<Room>('room', connection.localRoomId!)!;
+  participant.core.store.put('room', proxy.id, { ...proxy, createdAt: Date.now() - 91 * 60000 });
+  const { pending, turn } = await admitted();
+  await expect.poll(() => localStatus(turn.id)?.status).toBe('completed'); await nativeIdle();
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  expect(host.core.store.get<Turn>('turn', pending.remoteTurnId)?.status).toBe('completed');
+});
+it('repairs a proxy room created before the duration exemption when the daemon restarts', async () => {
+  const proxy = participant.core.store.get<Room>('room', connection.localRoomId!)!;
+  participant.core.store.put('room', proxy.id, { ...proxy, remoteConnectionId: undefined });
+  await participant.stop();
+  participant = await createRuntime(join(dir, 'participant'), { noScheduler: true });
+  expect(participant.core.store.get<Room>('room', proxy.id)?.remoteConnectionId).toBe(connection.id);
+});
+it('gives a remote proposal the shared objective and recent conversation instead of the local proxy room', async () => {
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  await call(host, 'room_post', { roomId: room.id, text: 'Earlier host position on the review' });
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  const { pending, turn } = await admitted();
+  expect(pending.publicContext).toContain('Participant-local authority');
+  expect(pending.publicContext).toContain('Earlier host position on the review');
+  await expect.poll(() => localStatus(turn.id)?.status).toBe('completed');
+  expect(prompts.at(-1)).toContain('Earlier host position on the review');
+  expect(prompts.at(-1)).not.toContain('Locally approved remote discussion only');
 });
 it('fences an acknowledged remote claim if the local connection ends while awaiting it', async () => {
   const pending = await proposal(), accepted = await call(participant, 'remote_turn_accept', { proposalId: pending.id, digest: pending.digest }, localB) as ToolArgs;

@@ -292,17 +292,19 @@ export function RoomView({
           </div>
           <p className="room-objective">{string(room, 'objective')}</p>
           <div className="room-meta">
-            <span>{room.workflow === 'coding' ? 'Coding room' : 'Discussion room'}</span>
+            <span>{typeof room.remoteConnectionId === 'string' ? 'Remote agent room' : room.workflow === 'coding' ? 'Coding room' : 'Discussion room'}</span>
             <span>Host · {host ? string(host, 'name') : shared ? 'Room owner' : 'You'}</span>
             <span>Policy v{num(room, 'policyVersion') ?? 1}</span>
           </div>
           <div className="room-gauges">
             <Gauge label="Messages" value={messages} max={num(policy, 'maxMessages') ?? 60} />
-            <Gauge
-              label="Minutes"
-              value={Math.min((now - (num(room, 'createdAt') ?? now)) / 60000, (num(policy, 'maxDurationMs') ?? 5400000) / 60000)}
-              max={Math.round((num(policy, 'maxDurationMs') ?? 5400000) / 60000)}
-            />
+            {typeof room.remoteConnectionId !== 'string' && (
+              <Gauge
+                label="Minutes"
+                value={Math.min((now - (num(room, 'createdAt') ?? now)) / 60000, (num(policy, 'maxDurationMs') ?? 5400000) / 60000)}
+                max={Math.round((num(policy, 'maxDurationMs') ?? 5400000) / 60000)}
+              />
+            )}
             <Gauge label="Turns" value={turns.length} max={num(policy, 'maxMessages') ?? 60} />
           </div>
           {!shared && <div className="room-actions">
@@ -953,32 +955,41 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
         </>
       ),
       record: (
-        <dl className="record-list">
-          <div>
-            <dt>Lifecycle</dt>
-            <dd>
-              {lifecycle.map((e) => `${string(e, 'type').replace('turn.', '')} ${fmtClock(num(e, 'at') ?? 0)}`).join(' · ')}
-            </dd>
-          </div>
-          <div>
-            <dt>Requested by</dt>
-            <dd>{names.actor(turn.requestedBy)}</dd>
-          </div>
-          {request && (
+        <>
+          <dl className="record-list">
             <div>
-              <dt>Grant</dt>
+              <dt>Lifecycle</dt>
               <dd>
-                {string(request, 'status')} · <code>{string(request, 'scopeDigest').slice(0, 16)}</code>
+                {lifecycle.map((e) => `${string(e, 'type').replace('turn.', '')} ${fmtClock(num(e, 'at') ?? 0)}`).join(' · ')}
               </dd>
             </div>
-          )}
-          {typeof turn.repair === 'string' && (
             <div>
-              <dt>Recovery</dt>
-              <dd>{string(turn, 'repair')}</dd>
+              <dt>Requested by</dt>
+              <dd>{names.actor(turn.requestedBy)}</dd>
+            </div>
+            {request && (
+              <div>
+                <dt>Grant</dt>
+                <dd>
+                  {string(request, 'status')} · <code>{string(request, 'scopeDigest').slice(0, 16)}</code>
+                </dd>
+              </div>
+            )}
+            {typeof turn.repair === 'string' && (
+              <div>
+                <dt>Recovery</dt>
+                <dd>{string(turn, 'repair')}</dd>
+              </div>
+            )}
+          </dl>
+          {isRecord(turn.retainedAnswer) && (
+            <div>
+              <span className="list-label">Answer not posted</span>
+              <p className="entry-text">{string(turn.retainedAnswer, 'text')}</p>
+              {turn.retainedAnswer.truncated === true && <p className="entry-text system">Only the first 1 MiB was kept.</p>}
             </div>
           )}
-        </dl>
+        </>
       ),
     };
   }
@@ -1067,6 +1078,8 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `Final candidate accepted · ${string(d, 'resultDigest').slice(0, 12)}`;
     case 'candidate.applied':
       return `Candidate applied to the checkout · ${string(d, 'resultDigest').slice(0, 12)}`;
+    case 'command.cleared':
+      return `Interrupted ${string(d, 'command')} cleared · its client key can run again`;
     default:
       return type.replaceAll('.', ' ').replaceAll('_', ' ');
   }

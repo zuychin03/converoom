@@ -61,6 +61,9 @@ const fixtureControl = createHttpServer(async (request, response) => {
       status: 'quarantined', generation: 1, leaseExpiresAt: 0, wallDeadline: 0, resourceId: id, path });
     runtime.core.store.put('resource', id, { id, roomId, status: 'quarantined' });
     runtime.core.store.append(roomId, 'attempt.quarantined', 'fixture', { attemptId: id });
+    const human = runtime.core.store.get<{ principalId: string }>('identity', 'human')!;
+    runtime.core.store.put('command', human.principalId + ':task_submit:browser-' + id, { hash: 'browser-fixture', status: 'working',
+      startedAt: Date.now() - 90000, args: { roomId, attemptId: id } });
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ attemptId: id }));
     return;

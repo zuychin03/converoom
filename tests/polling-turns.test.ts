@@ -1,13 +1,13 @@
-import { beforeEach, afterEach, it, expect } from 'vitest';
+import { beforeEach, afterEach, it, expect, vi } from 'vitest';
 import { createStore } from '../packages/store/src/index.js';
-import { createCore } from '../packages/core/src/index.js';
+import { createCore, POLLING_CANCEL_ACK_MS } from '../packages/core/src/index.js';
 import { TOOL_DEFINITIONS, validateToolArgs } from '../packages/mcp/src/tools.js';
 import type { Actor, Core, Event, Seat, Store, ToolArgs, Turn } from '../packages/shared/src/contracts.js';
 const owner: Actor = { kind: 'human', principalId: 'owner', ownerId: 'owner' };
 let store: Store, core: Core;
 const call = <T = ToolArgs>(name: string, args: ToolArgs, actor = owner) => core.dispatch(actor, name, args) as Promise<T>;
 beforeEach(() => { store = createStore(':memory:'); core = createCore(store); });
-afterEach(() => store.close());
+afterEach(() => { vi.restoreAllMocks(); store.close(); });
 async function fixture() {
   const room = await call('room_create', { title: 'Polling turn', objective: 'Complete an explicit manual turn' });
   const seat = await call<Seat>('seat_add', { roomId: room.id, product: 'claude', mode: 'polling', name: 'Reviewer' });
@@ -67,6 +67,37 @@ it('bounds all active polling claims and does not replay a claim after restart',
   expect(store.get('turn', first.turn.id)).toMatchObject({ status: 'uncertain' });
   await expect(call('turn_claim', first.args, first.actor)).rejects.toThrow();
   await expect(call('turn_complete', { ...first.args, text: 'Replay' }, first.actor)).rejects.toThrow();
+});
+it('releases abandoned claims as uncertain at the turn deadline instead of holding capacity until restart', async () => {
+  let now = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const first = await fixture(), second = await fixture(), third = await fixture();
+  await call('turn_claim', first.args, first.actor);
+  await call('turn_claim', second.args, second.actor);
+  await expect(call('turn_claim', third.args, third.actor)).rejects.toThrow(/capacity/i);
+  now += 599999;
+  await expect(call('turn_claim', third.args, third.actor)).rejects.toThrow(/capacity/i);
+  now += 1;
+  await expect(call('turn_complete', { ...first.args, text: 'Late answer' }, first.actor)).rejects.toThrow(/budget/i);
+  expect(await call('turn_claim', third.args, third.actor)).toMatchObject({ status: 'running' });
+  for (const { turn, room } of [first, second]) {
+    expect(store.get('turn', turn.id)).toMatchObject({ status: 'uncertain' });
+    expect(store.events(String(room.id)).filter((e) => e.type === 'turn.uncertain')).toHaveLength(1);
+  }
+  await expect(call('turn_complete', { ...first.args, outcome: 'failed', reason: 'Too late' }, first.actor)).rejects.toThrow();
+});
+it('releases a cancellation the external agent never acknowledges after its window', async () => {
+  let now = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const first = await fixture(), second = await fixture(), third = await fixture();
+  await call('turn_claim', first.args, first.actor);
+  await call('turn_claim', second.args, second.actor);
+  await call('turn_cancel', first.args);
+  now += POLLING_CANCEL_ACK_MS - 1;
+  await expect(call('turn_claim', third.args, third.actor)).rejects.toThrow(/capacity/i);
+  now += 1;
+  expect(await call('turn_claim', third.args, third.actor)).toMatchObject({ status: 'running' });
+  expect(store.get('turn', first.turn.id)).toMatchObject({ status: 'uncertain' });
+  expect(store.get('turn', second.turn.id)).toMatchObject({ status: 'running' });
+  await expect(call('turn_complete', { ...first.args, outcome: 'cancelled' }, first.actor)).rejects.toThrow();
 });
 it('rolls back completion when publishing the reply exceeds its message budget', async () => {
   const { room, actor, args, turn } = await fixture();

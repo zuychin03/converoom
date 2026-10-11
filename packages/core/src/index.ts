@@ -15,7 +15,10 @@ import {
   type OwnerConsent,
 } from '../../shared/src/contracts.js';
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
-import { activeMembership, currentSeat, currentTurnAuthority, mountMembership, requireHumanParticipant, requireSeatOwner } from './membership.js';
+import { activeMembership, currentSeat, currentTurnAuthority, mountMembership, requireHumanParticipant, requireSeatOwner, SHARED_READS } from './membership.js';
+// Reads rerun on retry, so their results are never stored under a client key.
+export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
+  'resource_profile_list', 'adapter_status', 'room_export', 'interrupted_command_list']);
 const limits = {
   maxActiveTurns: 2,
   maxRounds: 6,
@@ -26,6 +29,29 @@ const limits = {
   cooldownMs: 5000,
   maxTurnMs: 600000,
 };
+export const POLLING_CANCEL_ACK_MS = 60000;
+// Retries arrive within minutes; a week also covers an agent session resumed after a weekend.
+export const RESULT_RETENTION_MS = 7 * 86400000;
+// About 20 ms for 1 KiB results, so expiring a large backlog never stalls the daemon for long.
+export const RESULT_EXPIRY_BATCH = 1000;
+// A remote connection's local room is bounded by its turn budget and per-turn time, not discussion duration.
+export function roomTimeExhausted(r: Room, now = Date.now()): boolean {
+  return !r.remoteConnectionId && now - r.createdAt > Number(r.policy.maxDurationMs);
+}
+function pollingDeadline(store: Store, t: Turn): number {
+  const frozen = store.get<{ policy: ToolArgs }>('policy', t.roomId + ':' + t.policyVersion)?.policy;
+  const end = Number(t.startedAt ?? t.createdAt) + (t.maxTurnMs ?? Number(frozen?.maxTurnMs ?? limits.maxTurnMs));
+  return t.status === 'cancelling' && t.cancelRequestedAt ? Math.min(end, t.cancelRequestedAt + POLLING_CANCEL_ACK_MS) : end;
+}
+// External agents cannot be stopped, so an expired claim becomes uncertain instead of cancelled.
+export function expirePollingTurns(store: Store, now = Date.now()): void {
+  for (const t of store.list<Turn>('turn', { status: ['running', 'cancelling'] })) {
+    if (store.get<Seat>('seat', t.seatId)?.mode !== 'polling' || now < pollingDeadline(store, t)) continue;
+    store.put('turn', t.id, { ...t, status: 'uncertain', error: (t.status === 'cancelling'
+      ? 'Cancellation was not acknowledged' : 'Claim expired without completion') + '; the external agent is outside process control' });
+    store.append(t.roomId, 'turn.uncertain', 'runtime', { turnId: t.id, externalPolling: true });
+  }
+}
 export interface Permission {
   id: string;
   roomId: string;
@@ -246,25 +272,7 @@ export function createCore(store: Store): Core {
         'remote_connection_disconnect',
         'remote_connection_enable',
       ];
-      if (
-        typeof x.clientKey === 'string' &&
-        !external.includes(n) &&
-        ![
-          'room_get',
-          'room_list',
-          'room_read',
-          'room_wait',
-          'room_inbox',
-          'runtime_capabilities',
-          'room_usage',
-          'task_get',
-          'artefact_get',
-          'repo_list',
-          'resource_profile_list',
-          'adapter_status',
-          'room_members',
-        ].includes(n)
-      )
+      if (typeof x.clientKey === 'string' && !external.includes(n) && !READ_COMMANDS.has(n))
         return store.idempotent(a.principalId, n, x.clientKey, x, () => h(a, x));
       return h(a, x);
     },
@@ -364,11 +372,7 @@ export function createCore(store: Store): Core {
     const r = write(a, str(x, 'roomId')),
       text = str(x, 'text'),
       sender = a.kind === 'human' ? a.principalId : member(a, r.id).id;
-    if (
-      store.eventCount(r.id, 'message') >=
-        Number(r.policy.maxMessages) ||
-      Date.now() - r.createdAt > Number(r.policy.maxDurationMs)
-    )
+    if (store.eventCount(r.id, 'message') >= Number(r.policy.maxMessages) || roomTimeExhausted(r))
       throw new E('budget', 'Message/time budget exhausted; prepare handoff', 409);
     const mentions = (x.mentions ?? []) as { seatId: string; intent: string }[];
     if (!Array.isArray(mentions) || mentions.length > 5)
@@ -565,10 +569,8 @@ export function createCore(store: Store): Core {
         for (const t of store.list<Turn>('turn'))
           if (t.roomId === r.id && (t.status === 'running' || t.status === 'dispatching' ||
             (status === 'closed' && t.status === 'queued')))
-            store.put('turn', t.id, {
-              ...t,
-              status: t.status === 'queued' ? 'cancelled' : 'cancelling',
-            });
+            store.put('turn', t.id, t.status === 'queued' ? { ...t, status: 'cancelled' }
+              : { ...t, status: 'cancelling', cancelRequestedAt: Date.now() });
       ev(a, r.id, 'room.' + status, { status });
       return room(r.id);
     });
@@ -590,11 +592,7 @@ export function createCore(store: Store): Core {
     }
     if (s.mode === 'managed' && !s.consent)
       throw new E('consent', 'Target owner consent required', 403);
-    if (
-      store.count('turn', { roomId: r.id }) >=
-        Number(r.policy.maxMessages) ||
-      Date.now() - r.createdAt > Number(r.policy.maxDurationMs)
-    )
+    if (store.count('turn', { roomId: r.id }) >= Number(r.policy.maxMessages) || roomTimeExhausted(r))
       throw new E('budget', 'Turn/time budget exhausted', 409);
     const interaction = x.interactionId
       ? store.get<I>('interaction', str(x, 'interactionId'))
@@ -656,8 +654,10 @@ export function createCore(store: Store): Core {
     const target = store.get<Seat>('seat', t.seatId);
     if (a.kind === 'human' && target?.ownerId === a.ownerId) requireSeatOwner(c, a, target);
     else if (a.kind !== 'agent' || member(a, r.id).id !== t.seatId) host(a, r.id);
-    if (['queued', 'running', 'dispatching'].includes(t.status))
+    if (['queued', 'running', 'dispatching'].includes(t.status)) {
       t.status = t.status === 'queued' ? 'cancelled' : 'cancelling';
+      if (t.status === 'cancelling') t.cancelRequestedAt = Date.now();
+    }
     store.put('turn', t.id, t);
     ev(a, r.id, 'turn.cancel_requested', { turnId: t.id, status: t.status });
     return t;
@@ -683,6 +683,7 @@ export function createCore(store: Store): Core {
     if (t.status !== 'queued') throw new E('turn', 'Turn is not queued', 409);
     if (!t.requestedBy || store.get('revoked', t.requestedBy))
       throw new E('revoked', 'Turn requester is unavailable', 403);
+    expirePollingTurns(store);
     const busy = store.list<Turn>('turn', { status: ['dispatching', 'running', 'cancelling'] });
     if (busy.length >= 2 || busy.filter((v) => v.roomId === r.id).length >= Number(r.policy.maxActiveTurns) ||
       busy.some((v) => v.seatId === s.id))
@@ -690,7 +691,7 @@ export function createCore(store: Store): Core {
     const previous = store.list<Turn>('turn', { seatId: s.id })
       .reduce((last, v) => Math.max(last, v.completedAt ?? 0), 0);
     if (Date.now() - previous < Number(r.policy.cooldownMs)) throw new E('cooldown', 'Seat cooldown is active', 409);
-    if (Date.now() - r.createdAt > Number(r.policy.maxDurationMs)) throw new E('budget', 'Room time budget exhausted', 409);
+    if (roomTimeExhausted(r)) throw new E('budget', 'Room time budget exhausted', 409);
     const next = { ...t, status: 'running' as const, startedAt: Date.now() };
     store.put('turn', t.id, next);
     ev(a, r.id, 'turn.started', { turnId: t.id, externalPolling: true, newManagedSession: false });
@@ -704,8 +705,8 @@ export function createCore(store: Store): Core {
       write(a, r.id);
       if (t.status !== 'running' || !['completed', 'failed'].includes(String(outcome)))
         throw new E('turn', 'Own active turn and valid outcome required', 409);
-      if (outcome === 'completed' && t.maxTurnMs && Date.now() - Number(t.startedAt) >= t.maxTurnMs)
-        throw new E('budget', 'Target owner turn time exhausted', 409);
+      if (outcome === 'completed' && Date.now() >= pollingDeadline(store, t))
+        throw new E('budget', 'Turn time budget exhausted', 409);
     }
     const next: Turn = { ...t, status: outcome as Turn['status'], completedAt: Date.now(),
       ...(outcome === 'failed' ? { error: redactPublic(str(x, 'reason')) } : {}) };
@@ -800,6 +801,8 @@ export function createCore(store: Store): Core {
       });
       store.append(t.roomId, 'turn.uncertain', 'runtime', { turnId: t.id });
     }
+  store.forgetResults([...READ_COMMANDS]);
+  store.expireResults(Date.now() - RESULT_RETENTION_MS, RESULT_EXPIRY_BATCH);
   mountMembership(c);
   mountSharedArtefacts(c);
   return c;

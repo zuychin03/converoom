@@ -59,6 +59,20 @@ describe('local identity boundary', () => {
     const credential = issueBridgeCredential(runtime, 'codex');
     expect((await server.app.inject({ method: 'POST', url: '/agent/commands', headers: { host: headers.host, authorization: 'Bearer ' + credential.token }, payload: { name: 'remote_connection_prepare', args: {} } })).statusCode).toBe(400);
   });
+  it('routes interrupted command inspection and clearing to the paired human only', async () => {
+    const { server, runtime, headers } = await fixture();
+    const pair = await server.app.inject({ method: 'POST', url: '/api/pair', headers, payload: { code: 'local-pair-code' } });
+    const cookie = String(pair.headers['set-cookie']).split(';')[0];
+    const session = await server.app.inject({ method: 'GET', url: '/api/session', headers: { ...headers, cookie } });
+    const human = (name: string, args = {}) => server.app.inject({ method: 'POST', url: '/api/commands',
+      headers: { ...headers, cookie, 'x-csrf-token': session.json().csrf }, payload: { name, args } });
+    expect((await human('interrupted_command_list')).json()).toMatchObject({ result: { name: 'interrupted_command_list' }, committed: false, retrySafe: true });
+    expect((await human('interrupted_command_clear', { entryId: 'entry' })).json()).toMatchObject({ result: { name: 'interrupted_command_clear' }, committed: true });
+    const credential = issueBridgeCredential(runtime, 'codex');
+    for (const name of ['interrupted_command_list', 'interrupted_command_clear'])
+      expect((await server.app.inject({ method: 'POST', url: '/agent/commands', headers: { host: headers.host, authorization: 'Bearer ' + credential.token },
+        payload: { name, args: {} } })).statusCode).toBe(400);
+  });
   it('accepts bounded human artefacts on a dedicated route with authentication before body parsing', async () => {
     const { server, headers } = await fixture();
     const pair = await server.app.inject({ method: 'POST', url: '/api/pair', headers, payload: { code: 'local-pair-code' } });
@@ -234,6 +248,17 @@ describe('local identity boundary', () => {
         })
       ).statusCode,
     ).toBe(413);
+  });
+  it('limits local agent traffic per credential so one busy bridge or anonymous traffic cannot starve another', async () => {
+    const { server, runtime, headers } = await fixture();
+    const first = issueBridgeCredential(runtime, 'codex'), second = issueBridgeCredential(runtime, 'claude');
+    const agent = (token?: string) => server.app.inject({ method: 'POST', url: '/agent/commands',
+      headers: { host: headers.host, ...(token ? { authorization: 'Bearer ' + token } : {}) }, payload: { name: 'room_list', args: {} } });
+    for (let i = 0; i < 240; i++) await agent();
+    expect((await agent()).statusCode).toBe(429);
+    for (let i = 0; i < 240; i++) expect((await agent(first.token)).statusCode).toBe(200);
+    expect((await agent(first.token)).statusCode).toBe(429);
+    expect((await agent(second.token)).statusCode).toBe(200);
   });
   it('rejects an expired or replaced managed attempt directly at authentication', async () => {
     const { server, runtime, headers } = await fixture();

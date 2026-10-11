@@ -32,6 +32,7 @@ export interface Room {
   policyVersion: number;
   seq: number;
   rounds?: number;
+  remoteConnectionId?: string;
 }
 export interface Seat {
   id: string;
@@ -107,6 +108,7 @@ export interface Turn {
   policyVersion: number;
   startedAt?: number;
   completedAt?: number;
+  cancelRequestedAt?: number;
   senderOwnerId?: string;
   requesterMembershipGeneration?: number;
   ownerConsentDigest?: string;
@@ -158,8 +160,9 @@ export interface RemoteProposal {
   maxTurnMs: number;
   deadline: number;
   digest: string;
-  status: 'pending' | 'accepted' | 'declined' | 'claimed' | 'completed' | 'uncertain';
+  status: 'pending' | 'accepted' | 'declined' | 'claimed' | 'completed' | 'failed' | 'cancelled' | 'uncertain';
   localTurnId?: string;
+  claimedAt?: number;
   ownerConsentDigest: string;
   authorityDigest: string;
   createdAt: number;
@@ -180,6 +183,7 @@ export interface SharedArtefact {
 export interface Store {
   get<T>(kind: string, id: string): T | undefined;
   list<T>(kind: string, filter?: RecordFilter): T[];
+  entries<T>(kind: string, filter?: RecordFilter): { id: string; value: T }[];
   count(kind: string, filter?: RecordFilter): number;
   put<T>(kind: string, id: string, value: T): void;
   remove(kind: string, id: string): void;
@@ -191,6 +195,9 @@ export interface Store {
   eventsAfter(cursor: string, limit?: number): Event[];
   importEvents(events: Event[]): void;
   idempotent<T>(actorId: string, command: string, key: string, payload: unknown, fn: () => T): T;
+  forgetResults(commands: readonly string[]): number;
+  expireResults(before: number, limit: number): number;
+  expireRecords(kind: string, statuses: readonly string[], before: number, limit: number): number;
   backup(path: string): Promise<void>;
   close(): void;
 }

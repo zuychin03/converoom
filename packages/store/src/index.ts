@@ -130,7 +130,7 @@ export function createStore(path: string): Store {
         conditions.push(filter.status.length ? `json_extract(json,'$.status') IN (${filter.status.map(() => '?').join(',')})` : '0');
         values.push(...filter.status);
       }
-      const sql = `SELECT ${column} FROM records WHERE ${conditions.join(' AND ')}${column === 'json' ? ' ORDER BY rowid' : ''}`;
+      const sql = `SELECT ${column} FROM records WHERE ${conditions.join(' AND ')}${column.endsWith('json') ? ' ORDER BY rowid' : ''}`;
       let statement = queries.get(sql);
       if (!statement) { statement = db.prepare(sql); queries.set(sql, statement); }
       return { statement, values };
@@ -152,6 +152,18 @@ export function createStore(path: string): Store {
       'SELECT payload_hash,result FROM idempotency WHERE actor_id=? AND command=? AND client_key=?',
     );
     const idemPut = db.prepare('INSERT INTO idempotency VALUES(?,?,?,?,?)');
+    const resultColumns = 'SELECT rowid AS rowid,actor_id AS actorId,command,client_key AS clientKey FROM idempotency';
+    const newestResult = db.prepare(resultColumns + ' ORDER BY rowid DESC LIMIT 1');
+    const resultAt = db.prepare(resultColumns + ' WHERE rowid=?');
+    const forgetThrough = db.prepare(
+      'DELETE FROM idempotency WHERE rowid IN (SELECT rowid FROM idempotency WHERE rowid<=? ORDER BY rowid LIMIT ?)',
+    );
+    type ResultMark = { rowid: number; key: string; at: number };
+    const resultKey = (row: unknown) => {
+      const r = row as { actorId: string; command: string; clientKey: string } | undefined;
+      return r && canonicalJson([r.actorId, r.command, r.clientKey]);
+    };
+    const liveMarks = (marks: ResultMark[]) => marks.filter((m) => resultKey(resultAt.get(m.rowid)) === m.key);
     const parse = <T>(row: unknown): T | undefined =>
       row ? (JSON.parse((row as { json: string }).json) as T) : undefined;
     const store: Store = {
@@ -160,6 +172,10 @@ export function createStore(path: string): Store {
         if (!filter) return list.all(kind).map((row) => parse<T>(row)!);
         const { statement, values } = query(kind, filter);
         return statement.all(...values).map((row) => parse<T>(row)!);
+      },
+      entries: <T>(kind: string, filter?: RecordFilter) => {
+        const { statement, values } = query(kind, filter, 'id,json');
+        return statement.all(...values).map((row) => ({ id: (row as { id: string }).id, value: parse<T>(row)! }));
       },
       count: (kind, filter) => {
         const { statement, values } = query(kind, filter, 'COUNT(*) AS count');
@@ -253,6 +269,33 @@ export function createStore(path: string): Store {
           const result = fn();
           idemPut.run(actorId, command, key, hash, canonicalJson(result));
           return result;
+        }),
+      forgetResults: (commands) => commands.length
+        ? db.prepare(`DELETE FROM idempotency WHERE command IN (${commands.map(() => '?').join(',')})`).run(...commands).changes
+        : 0,
+      // Marks stand in for row times so the table keeps the shape 0.2.0 opens after a downgrade. A new row gets
+      // max(rowid)+1, so rows at or below a mark whose row survives predate it; a lost mark row only delays expiry.
+      expireResults: (before, limit) =>
+        store.transaction(() => {
+          const now = Date.now();
+          const marks = liveMarks(store.get<{ marks: ResultMark[] }>('result_marks', 'idempotency')?.marks ?? []);
+          const due = marks.filter((m) => m.at <= before).at(-1);
+          const removed = due ? forgetThrough.run(due.rowid, limit).changes : 0;
+          const kept = removed ? liveMarks(marks) : marks, last = kept.at(-1);
+          const newest = newestResult.get() as { rowid: number } | undefined;
+          if (newest && newest.rowid !== last?.rowid && (!last || last.at <= now - 3600000))
+            kept.push({ rowid: newest.rowid, key: resultKey(newest)!, at: now });
+          store.put('result_marks', 'idempotency', { marks: kept });
+          return removed;
+        }),
+      // A record in these statuses without `at` was written before its kind kept one; timing it from first sight keeps it a full period.
+      expireRecords: (kind, statuses, before, limit) =>
+        store.transaction(() => {
+          const match = `kind=? AND json_extract(json,'$.status') IN (${statuses.map(() => '?').join(',')})`;
+          db.prepare(`UPDATE records SET json=json_set(json,'$.at',?) WHERE ${match} AND json_extract(json,'$.at') IS NULL`)
+            .run(Date.now(), kind, ...statuses);
+          return db.prepare(`DELETE FROM records WHERE rowid IN (SELECT rowid FROM records WHERE ${match} AND json_extract(json,'$.at')<=? LIMIT ?)`)
+            .run(kind, ...statuses, before, limit).changes;
         }),
       backup: async (destination) => {
         await db.backup(destination);

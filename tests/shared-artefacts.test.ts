@@ -41,6 +41,16 @@ it('rejects agents, private reasoning, binary, archives, active HTML and path-sh
     await expect(share('Public', { name })).rejects.toMatchObject({ code: 'artefact_name' });
   expect(core.store.count('shared_artefact')).toBe(0);
 });
+it('accepts ordinary technical Markdown and refuses only script-capable content', async () => {
+  for (const content of ['Check the metadata: field.', 'Use Map<string, number> or `Promise<void>` here.',
+    'See <https://example.com> (data: JSON) and the "data: key" note.', '<details><summary>Notes</summary>Plain notes</details>',
+    '<!-- reviewer note -->', 'Handlers: Map<string, onDone => void>'])
+    expect(await share(content), content).toMatchObject({ digest: digest(content) });
+  for (const content of ['<iframe src="https://example.com"></iframe>', '<IMG SRC=x onerror=alert(1)>', '<img/src=x/onerror=alert(1)>',
+    '<a href = "javascript:alert(1)">x</a>', '[x](&#106;avascript:alert(1))', '[x](java\tscript:alert(1))', '[x]: <vbscript:msgbox>',
+    '<svg><circle/></svg>', '<p style="position:fixed">overlay</p>', '![x](data:text/html,hi)'])
+    await expect(share(content), content).rejects.toMatchObject({ code: 'artefact_content' });
+});
 it('enforces byte and room quotas transactionally without partial publication', async () => {
   await expect(share('x'.repeat(1048577))).rejects.toThrow();
   await expect(share('é'.repeat(524289))).rejects.toThrow();
@@ -53,6 +63,17 @@ it('denies other-room and revoked reads including retained artefact identifiers'
   await expect(sharedCommand(core, b, room.id, member.generation, 'shared_artefact_get', { roomId: other.id, artefactId: value.id })).rejects.toThrow();
   await call('membership_revoke', { roomId: room.id, memberId: member.id, expectedGeneration: member.generation });
   await expect(sharedCommand(core, b, room.id, member.generation, 'shared_artefact_get', { roomId: room.id, artefactId: value.id })).rejects.toThrow();
+});
+it('re-reads artefacts under a reused client key instead of replaying a stored copy', async () => {
+  const listed = () => call('shared_artefact_list', { roomId: room.id, clientKey: 'list-key' }) as Promise<ToolArgs[]>;
+  expect(await listed()).toHaveLength(0);
+  const value = await share() as ToolArgs;
+  expect(await listed()).toHaveLength(1);
+  const read = () => call('shared_artefact_get', { roomId: room.id, artefactId: value.id, clientKey: 'get-key' });
+  await read();
+  const stored = core.store.get<ToolArgs>('shared_artefact', String(value.id))!;
+  core.store.put('shared_artefact', String(value.id), { ...stored, content: 'Tampered text' });
+  await expect(read()).rejects.toMatchObject({ code: 'artefact_integrity' });
 });
 it('rejects stored digest tampering instead of serving corrupted approved text', async () => {
   const value = await share() as ToolArgs, stored = core.store.get<ToolArgs>('shared_artefact', String(value.id))!;
