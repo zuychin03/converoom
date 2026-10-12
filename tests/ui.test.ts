@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClient, ApiError, parseSnapshot } from '../apps/ui/src/api.js';
-import { commandLabel, failureLabel, interruptedFor, requestDetails, visibleTurn } from '../apps/ui/src/model.js';
+import { commandLabel, failureLabel, interruptedFor, requestDetails, turnKind, visibleTurn } from '../apps/ui/src/model.js';
 import { coalesce } from '../apps/ui/src/refresh.js';
 
 describe('browser command boundary', () => {
@@ -46,6 +46,11 @@ describe('browser command boundary', () => {
   });
   it('names a room budget refusal instead of a generic failure', () => {
     expect(failureLabel({ status: 'failed', failure: 'budget' })).toBe('Failed · budget');
+  });
+  it('keeps the reason on uncertain turns', () => {
+    const state = parseSnapshot({});
+    expect(turnKind({ status: 'uncertain', failure: 'turn_timeout' }, state, 0)).toEqual({ kind: 'warn', label: 'Uncertain · timed out' });
+    expect(turnKind({ status: 'uncertain' }, state, 0)).toEqual({ kind: 'warn', label: 'Uncertain' });
   });
   it('keeps shared browser commands on their scoped routes and freezes current authority', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];

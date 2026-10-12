@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
-import type { Actor, ToolArgs, Turn } from '../packages/shared/src/contracts.js';
+import { ConveroomError, type Actor, type ToolArgs, type Turn } from '../packages/shared/src/contracts.js';
 const owner: Actor = { kind: 'human', principalId: 'owner', ownerId: 'owner' };
 it('dispatches retained approved work once after resume and never while paused', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'converoom-pause-'));
@@ -63,12 +63,12 @@ it('dispatches approved managed work once abandoned polling claims expire', asyn
     expect(runtime.core.store.list<Turn>('turn', { roomId: String(room.id), status: ['uncertain'] })).toHaveLength(2);
   } finally { vi.restoreAllMocks(); await runtime.stop(); await rm(dir, { recursive: true, force: true }); }
 });
-async function budgetRoom(maxMessages: number, prompt: () => Promise<string>) {
+async function budgetRoom(maxMessages: number, prompt: () => Promise<string>, cancel = async () => {}) {
   const dir = await mkdtemp(join(tmpdir(), 'converoom-budget-'));
   let started = 0;
   const runtime = await createRuntime(dir, { tickMs: 10, startSession: async (product) => {
     started++;
-    return { id: 'budget-fixture', product, capabilities: ['prompt', 'cancel'], prompt, cancel: async () => {}, close: async () => true };
+    return { id: 'budget-fixture', product, capabilities: ['prompt', 'cancel'], prompt, cancel, close: async () => true };
   } });
   const call = (name: string, args: ToolArgs) => runtime.core.dispatch(owner, name, args) as Promise<ToolArgs>;
   const room = await call('room_create', { title: 'Budget', objective: 'Bounded discussion' });
@@ -110,6 +110,42 @@ it('keeps a bounded UTF-8 copy of an answer too large for a room message', async
     expect(retained).toMatchObject({ bytes: 1200000, truncated: true });
     expect(retained.text).toBe('€'.repeat(349525));
     expect(fixture.runtime.core.store.eventCount(String(fixture.room.id), 'message')).toBe(0);
+  } finally { await fixture.close(); }
+});
+it.each([
+  ['a disconnect after the prompt was sent', 'uncertain', () => Promise.reject(new ConveroomError('vendor_disconnected', 'Native process disconnected'))],
+  ['a vendor refusal that proves the prompt never started', 'failed',
+    () => Promise.reject(Object.assign(new ConveroomError('vendor_error', 'Vendor request failed: Quota exhausted'), { notStarted: true }))],
+  ['the vendor reporting the turn as finished but failed', 'failed', () => Promise.reject(new ConveroomError('vendor_turn_failed', 'Vendor turn failed'))],
+])('records %s as %s', async (_label, status, prompt) => {
+  const fixture = await budgetRoom(5, prompt);
+  try {
+    const id = await fixture.request();
+    await expect.poll(() => fixture.turn(id).status).toBe(status);
+    expect(fixture.runtime.core.store.events(String(fixture.room.id)).some((e) => e.type === 'turn.' + status && e.data.turnId === id)).toBe(true);
+  } finally { await fixture.close(); }
+});
+it('records a managed turn that outlives its wall time as uncertain', async () => {
+  const fixture = await budgetRoom(5, () => new Promise<string>(() => {}));
+  try {
+    await fixture.call('policy_update', { roomId: fixture.room.id, policy: { maxTurnMs: 1000 } });
+    const id = await fixture.request();
+    await expect.poll(() => fixture.turn(id).status, { timeout: 5000 }).toBe('uncertain');
+    expect(fixture.turn(id)).toMatchObject({ failure: 'turn_timeout' });
+  } finally { await fixture.close(); }
+});
+it.each([
+  ['unconfirmed', 'uncertain', new ConveroomError('vendor_disconnected', 'Native process disconnected')],
+  ['confirmed', 'cancelled', new ConveroomError('cancelled', 'Vendor confirmed cancellation')],
+])('records a cancellation the vendor left %s as %s', async (_label, status, error) => {
+  let fail!: (e: Error) => void, running!: () => void;
+  const prompting = new Promise<void>((resolve) => { running = resolve; });
+  const fixture = await budgetRoom(5, () => new Promise<string>((_, reject) => { fail = reject; running(); }), async () => fail(error));
+  try {
+    const id = await fixture.request();
+    await prompting;
+    await fixture.call('turn_cancel', { roomId: fixture.room.id, turnId: id });
+    await expect.poll(() => fixture.turn(id).status).toBe(status);
   } finally { await fixture.close(); }
 });
 it('does not start approved managed work once the room message budget is exhausted', async () => {

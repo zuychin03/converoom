@@ -20,7 +20,7 @@ let stopPromise: Promise<boolean> | undefined, resolveStop: ((value: boolean) =>
 let localServer: Awaited<ReturnType<typeof createServer>> | undefined, readThroughMcp: boolean, mcpResult: unknown;
 let promptPromise: Promise<string> | undefined, resolvePrompt: ((value: string) => void) | undefined;
 let tamperInbox: 'senderOwnerId' | 'maxTurnMs' | undefined;
-let slowClaim: boolean, promptError: string | undefined, rateLimited: Set<string> | undefined, prompts: string[];
+let slowClaim: boolean, promptError: Error | undefined, rateLimited: Set<string> | undefined, prompts: string[];
 const call = (runtime: Runtime, name: string, args: ToolArgs, actor = a) => runtime.core.dispatch(actor, name, args);
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'converoom-participant-')); started = 0; dropClaim = false; dropReply = false;
@@ -70,7 +70,7 @@ beforeEach(async () => {
       }
       started++; return { id: 'participant-fixture', product, capabilities: ['prompt', 'cancel'], prompt: async (text: string) => {
         prompts.push(text);
-        if (promptError) throw new Error(promptError);
+        if (promptError) throw promptError;
         return promptPromise ?? '<thinking>Private reasoning</thinking>Public B answer';
       },
         cancel: async () => {}, close: async () => stopPromise ?? true };
@@ -309,13 +309,21 @@ async function admitted() {
 const localStatus = (id: string) => participant.core.store.get<Turn & { failure?: string }>('turn', id);
 const nativeIdle = () => expect.poll(() => participant.core.store.get<{ status: string }>('seat', connection.localSeatId!)?.status).toBe('idle');
 it('reports a failed local turn so the host stops counting the claimed seat', async () => {
-  promptError = 'Native quota exhausted';
+  promptError = Object.assign(new Error('Native quota exhausted'), { notStarted: true });
   const { pending, turn } = await admitted();
   await expect.poll(() => localStatus(turn.id)?.status).toBe('failed'); await nativeIdle();
   await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
   expect(host.core.store.get<Turn>('turn', pending.remoteTurnId)).toMatchObject({ status: 'failed', error: expect.stringContaining('quota_exhausted') });
   expect(participant.core.store.get<RemoteProposal>('remote_proposal', pending.id)?.status).toBe('failed');
   expect(host.core.store.eventCount(room.id, 'message')).toBe(0);
+});
+it('keeps a local turn lost after its prompt was sent uncertain and does not report it as failed', async () => {
+  promptError = new Error('Native process disconnected');
+  const { pending, turn } = await admitted();
+  await expect.poll(() => localStatus(turn.id)?.status).toBe('uncertain'); await nativeIdle();
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  expect(participant.core.store.get<RemoteProposal>('remote_proposal', pending.id)?.status).toBe('uncertain');
+  expect(host.core.store.get<Turn>('turn', pending.remoteTurnId)?.status).toBe('running');
 });
 it('carries host cancellation of a claimed turn to the local session and acknowledges it', async () => {
   promptPromise = new Promise<string>((resolve) => { resolvePrompt = resolve; });
@@ -331,14 +339,16 @@ it('carries host cancellation of a claimed turn to the local session and acknowl
   expect(participant.core.store.get<RemoteProposal>('remote_proposal', pending.id)?.status).toBe('cancelled');
   expect(host.core.store.eventCount(room.id, 'message')).toBe(0);
 });
-it('ends native work early enough for the host to receive the outcome within its claim budget', async () => {
+it('ends native work within the host claim budget and leaves a timed-out outcome uncertain', async () => {
   await call(host, 'owner_consent_update', { roomId: room.id, seatId: seat.id, allowedSenderOwnerIds: [a.ownerId], maxTurns: 3,
     maxTurnMs: REMOTE_PUBLICATION_MARGIN_MS + 500 }, remoteB);
   promptPromise = new Promise<string>((resolve) => { resolvePrompt = resolve; });
   const { pending, turn } = await admitted();
   await expect.poll(() => localStatus(turn.id)?.failure, { timeout: 5000 }).toBe('turn_timeout'); await nativeIdle();
+  expect(localStatus(turn.id)?.status).toBe('uncertain');
   await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
-  expect(host.core.store.get<Turn>('turn', pending.remoteTurnId)).toMatchObject({ status: 'failed', error: expect.stringContaining('turn_timeout') });
+  expect(participant.core.store.get<RemoteProposal>('remote_proposal', pending.id)?.status).toBe('uncertain');
+  expect(host.core.store.get<Turn>('turn', pending.remoteTurnId)?.status).toBe('running');
 });
 it('keeps accepted native work through a rate-limited poll and delivers it once the host answers', async () => {
   promptPromise = new Promise<string>((resolve) => { resolvePrompt = resolve; });

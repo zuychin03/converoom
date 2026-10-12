@@ -182,9 +182,10 @@ export function mountWorkspace(
     const seat = core.requireSeat(a, roomId);
     return at.seatId === seat.id || core.requireRoom(a, roomId).hostSeatId === seat.id;
   };
+  // An uncertain outcome stops blocking release once a process stop after that turn's dispatch is confirmed.
   const workerStopped = (at: Attempt) => !s.list<Turn & { dispatchBoundaryAt?: number; sessionId?: string }>('turn')
     .some((turn) => turn.attemptId === at.id && (
-      ['running', 'dispatching', 'cancelling', 'uncertain'].includes(turn.status) ||
+      ['running', 'dispatching', 'cancelling'].includes(turn.status) || (turn.status === 'uncertain' && !turn.dispatchBoundaryAt) ||
       (turn.dispatchBoundaryAt && (!at.processStoppedAt || at.processStoppedAt < turn.dispatchBoundaryAt)) ||
       (turn.sessionId && !at.processStoppedAt)
     ));

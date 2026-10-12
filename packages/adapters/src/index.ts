@@ -1,6 +1,6 @@
 import { isAbsolute } from 'node:path';
 import { executable, launch, run } from './process.js';
-import { startAcp } from './acp.js';
+import { notStarted, startAcp } from './acp.js';
 import { RpcPeer } from './rpc.js';
 import { ConveroomError, type Product, type ToolArgs } from '../../shared/src/contracts.js';
 import { redactPublic } from '../../store/src/index.js';
@@ -10,6 +10,7 @@ export interface ManagedSession {
   id: string;
   product: Product;
   capabilities: string[];
+  // A rejection marked notStarted proves the prompt never began; any other rejection after sending leaves the outcome unknown.
   prompt(text: string): Promise<string>;
   cancel(): Promise<void>;
   close(): Promise<boolean>;
@@ -103,7 +104,7 @@ export async function startManaged(
       });
       const thread = result.thread as ToolArgs,
         id = String(thread.id);
-      let turnId = '';
+      let turnId = '', interrupt = false;
       let finish: ((result: string) => void) | undefined;
       let fail: ((e: Error) => void) | undefined;
       let publicReply = '';
@@ -115,7 +116,8 @@ export async function startManaged(
       rpc.events.on('turn/completed', (p: ToolArgs) => {
         const t = p.turn as ToolArgs;
         if (t.status === 'completed') finish?.(redactPublic(publicReply));
-        else fail?.(new ConveroomError('vendor_turn_failed', 'Vendor turn ' + String(t.status)));
+        else fail?.(t.status === 'interrupted' ? new ConveroomError('cancelled', 'Vendor confirmed cancellation')
+          : new ConveroomError('vendor_turn_failed', 'Vendor turn ' + String(t.status)));
         finish = undefined;
         fail = undefined;
       });
@@ -126,6 +128,8 @@ export async function startManaged(
         capabilities: ['prompt', 'cancel'],
         prompt: async (text) => {
           publicReply = '';
+          turnId = '';
+          interrupt = false;
           const completed = new Promise<string>((resolve, reject) => {
             finish = resolve;
             fail = reject;
@@ -137,14 +141,18 @@ export async function startManaged(
               input: [{ type: 'text', text, text_elements: [] }],
             });
             turnId = String((response.turn as ToolArgs).id);
+            // A cancel requested before the turn had an ID still has to reach it.
+            if (interrupt) void rpc.request('turn/interrupt', { threadId: id, turnId }).catch(() => {});
             return completed;
           } catch (e) {
             finish = undefined;
             fail = undefined;
-            throw e;
+            // An error response is app-server refusing to start the turn; a timeout or disconnect proves nothing.
+            throw e instanceof ConveroomError && e.code === 'vendor_error' ? notStarted(e) : e;
           }
         },
         cancel: async () => {
+          interrupt = true;
           if (turnId) await rpc.request('turn/interrupt', { threadId: id, turnId });
         },
         close: async () => {

@@ -318,7 +318,7 @@ it('refuses to release an uncertain dispatched worker without confirmed process 
   expect(runtime.core.store.get<ToolArgs>('attempt', String(attempt.id))?.status).toBe('quarantined');
 });
 
-it('retains a failed worker reservation until its asynchronous close confirms stop', async () => {
+it('retains an uncertain worker reservation until its asynchronous close confirms stop', async () => {
   const { attempt } = await claim();
   promptSession = async () => { throw new Error('Fixture prompt failed'); };
   let finishClose!: (confirmed: boolean) => void;
@@ -328,7 +328,7 @@ it('retains a failed worker reservation until its asynchronous close confirms st
     const turn = await call('turn_request', { roomId: room.id, seatId: seat.id,
       attemptId: attempt.id, prompt: 'Fail during execution' });
     await call('permission_grant', { requestId: turn.permissionRequestId });
-    await expect.poll(() => runtime.core.store.get<Turn>('turn', String(turn.id))?.status).toBe('failed');
+    await expect.poll(() => runtime.core.store.get<Turn>('turn', String(turn.id))?.status).toBe('uncertain');
     await expect(call('attempt_release', { roomId: room.id, attemptId: attempt.id,
       confirm: true, reason: 'Close has not confirmed stop' })).rejects.toThrow(/stop|uncertain/i);
     finishClose(true);

@@ -140,7 +140,7 @@ export async function createRuntime(
     const entry = active.get(t.id)!;
     let attempt: Attempt | undefined;
     let bridge: Awaited<ReturnType<typeof managedBridge>> | undefined;
-    let nativeStartupBegan = false;
+    let nativeStartupBegan = false, promptSent = false;
     let unpublished: string | undefined;
     try {
       let cwd = join(dataDir, 'sessions', s.id);
@@ -259,6 +259,7 @@ export async function createRuntime(
         : Math.min(Number(frozen.maxTurnMs), t.maxTurnMs ?? Number(frozen.maxTurnMs),
           remoteDeadline === undefined ? Infinity : Math.max(0, remoteDeadline - Date.now()));
       let timer: NodeJS.Timeout | undefined;
+      promptSent = true;
       const answer = await Promise.race([
         session.prompt(prompt),
         new Promise<never>((_, reject) => {
@@ -294,10 +295,15 @@ export async function createRuntime(
     } catch (e) {
       const current = store.get<Turn>('turn', t.id)!;
       const message = redactPublic(e instanceof Error ? e.message : 'Vendor failure');
+      const code = e instanceof ConveroomError ? e.code : undefined;
+      // Past the dispatch boundary only a confirmed cancellation, the vendor's final outcome or the adapter's proof that
+      // the prompt never started is known; a timeout or disconnect after sending may have executed.
+      const known = !promptSent || unpublished !== undefined || code === 'cancelled' || code === 'vendor_turn_failed' ||
+        (e as { notStarted?: unknown }).notStarted === true;
       const status =
-        current.status === 'uncertain' ? 'uncertain' : current.status === 'cancelled' || (current.status === 'cancelling' && (!nativeStartupBegan || (e instanceof ConveroomError && e.code === 'cancelled')))
-          ? 'cancelled'
-          : 'failed';
+        current.status === 'uncertain' ? 'uncertain'
+          : current.status === 'cancelled' || (current.status === 'cancelling' && (!promptSent || code === 'cancelled')) ? 'cancelled'
+            : known ? 'failed' : 'uncertain';
       const failure = unpublished
         ? e instanceof ConveroomError ? e.code : 'publication_failed'
         : /quota|rate.limit|usage.limit/i.test(message)
@@ -314,7 +320,9 @@ export async function createRuntime(
         failure,
         repair: unpublished
           ? 'The answer is kept in this turn record and was not posted. Include it in the handoff.'
-          : 'Work preserved. Wait, sign in natively or explicitly reassign. No API/provider fallback.',
+          : status === 'uncertain'
+            ? 'The agent may have acted before this stopped. Inspect the room and workspace before requesting it again; nothing is rerun automatically.'
+            : 'Work preserved. Wait, sign in natively or explicitly reassign. No API/provider fallback.',
         ...(unpublished ? { retainedAnswer: retainAnswer(unpublished) } : {}),
       });
       emit(t, 'turn.' + status, { turnId: t.id, error: message, failure, ...(unpublished ? { answerRetained: true } : {}) });

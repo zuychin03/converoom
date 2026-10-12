@@ -56,16 +56,17 @@ export const agentWaitEnds = (permission: RecordData) => {
   return permission.action === 'vendor_tool' ? expires : undefined;
 };
 
-export function failureLabel(turn: RecordData) {
-  const failure = string(turn, 'failure');
-  if (failure === 'quota_exhausted') return 'Failed · quota';
-  if (failure === 'authentication' || failure === 'subscription_required')
-    return 'Failed · sign-in';
-  if (failure === 'turn_timeout') return 'Failed · timed out';
-  if (failure === 'worker_binding') return 'Failed · workspace';
-  if (failure === 'budget') return 'Failed · budget';
-  return 'Failed';
-}
+const FAILURE_REASONS: Record<string, string> = {
+  quota_exhausted: 'quota',
+  authentication: 'sign-in',
+  subscription_required: 'sign-in',
+  turn_timeout: 'timed out',
+  worker_binding: 'workspace',
+  budget: 'budget',
+};
+const withReason = (base: string, turn: RecordData) =>
+  FAILURE_REASONS[string(turn, 'failure')] ? base + ' · ' + FAILURE_REASONS[string(turn, 'failure')] : base;
+export const failureLabel = (turn: RecordData) => withReason('Failed', turn);
 
 export interface SeatState {
   kind: Kind;
@@ -100,7 +101,7 @@ export function seatState(seat: RecordData, state: Snapshot, now: number): SeatS
     return { kind: 'idle', label: seat.consent ? 'Queued' : 'Queued · requests off', turn: queued };
   }
   const last = turns[0];
-  if (last?.status === 'uncertain') return { kind: 'warn', label: 'Uncertain turn', turn: last };
+  if (last?.status === 'uncertain') return { kind: 'warn', label: withReason('Uncertain turn', last), turn: last };
   if (last?.status === 'failed') return { kind: 'fail', label: failureLabel(last), turn: last };
   if (seat.mode !== 'managed') return { kind: 'idle', label: 'Polling inbox' };
   return { kind: 'idle', label: seat.consent ? 'Ready' : 'Requests off' };
@@ -123,7 +124,7 @@ export function turnKind(turn: RecordData, state: Snapshot, now: number): { kind
   if (status === 'completed') return { kind: 'ok', label: 'Completed' };
   if (status === 'failed') return { kind: 'fail', label: failureLabel(turn) };
   if (status === 'cancelled') return { kind: 'closed', label: 'Cancelled' };
-  if (status === 'uncertain') return { kind: 'warn', label: 'Uncertain' };
+  if (status === 'uncertain') return { kind: 'warn', label: withReason('Uncertain', turn) };
   const seat = state.seats.find((s) => s.id === turn.seatId);
   if (seat && seat.mode !== 'managed') return { kind: 'idle', label: 'In seat inbox' };
   const request = state.permissions.find((p) => p.id === turn.permissionRequestId);

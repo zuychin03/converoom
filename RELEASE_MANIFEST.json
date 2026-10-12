@@ -3,11 +3,11 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "9b093780008f80e9030fb05cfa0589f42c036517c60938e31efbc0a5e5b906f5"
+      "sha256": "2591ccb12fa4972f236547d2598c66e2646e8c40d5d1490840ea6339d58cc887"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "ca868e1660f54d6497d1629d7782aae43ddac37e2d0c08f61674a6ba3b21fa21"
+      "sha256": "820b63c3fa76b8c4894e9a63727784958c9c417047a7d1af3bba61f428493a68"
     },
     {
       "path": "dist/server.js",
@@ -30,8 +30,8 @@
       "sha256": "809306f8444febde9c633c98531c6db7d3505735545b2369881e8cce511a31f9"
     },
     {
-      "path": "dist/ui/assets/index-B5H5UU1g.js",
-      "sha256": "1ce51a39497b28a200ffe85d5c962222890fce565fb17542ce0c70562fadbfcf"
+      "path": "dist/ui/assets/index-BwH0VRd1.js",
+      "sha256": "78b1f66ab4a8137fb1591c4c645a3beb4f450246e85796ab2d9fbebe00d99c98"
     },
     {
       "path": "dist/ui/assets/index-iOr94IDG.css",
@@ -63,7 +63,7 @@
     },
     {
       "path": "dist/ui/index.html",
-      "sha256": "3a8d77c3d33ec123ce39e33e97f5a7be4aa3bf7618c11fbfc8224767e501bd6f"
+      "sha256": "5d55ee239decb2257b4c163497c5b719278bc0035047cb135e15a48ccc9cde07"
     },
     {
       "path": "plugins/README.md",

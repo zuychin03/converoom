@@ -69,10 +69,21 @@ async function request(message) {
       const equal = setting.indexOf('=');
       config[setting.slice(0, equal)] = JSON.parse(setting.slice(equal + 1));
     }
-    if (config['mcp_servers.converoom.required'] !== true) throw new Error('Bridge must be required');
-    await bridge({ command: config['mcp_servers.converoom.command'], args: config['mcp_servers.converoom.args'] });
+    if (!scenario) {
+      if (config['mcp_servers.converoom.required'] !== true) throw new Error('Bridge must be required');
+      await bridge({ command: config['mcp_servers.converoom.command'], args: config['mcp_servers.converoom.args'] });
+    }
     send({ id: message.id, result: { thread: { id: 'fixture-thread' } } });
+  } else if (message.method === 'turn/interrupt') {
+    send({ id: message.id, result: {} });
+    send({ method: 'turn/completed', params: { turn: { status: 'interrupted' } } });
   } else if (message.method === 'turn/start') {
+    if (scenario === 'quota') throw new Error('Quota exhausted');
+    if (scenario === 'cancel') {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      send({ id: message.id, result: { turn: { id: 'fixture-turn' } } }); return;
+    }
+    if (scenario === 'drop') { send({ id: message.id, result: { turn: { id: 'fixture-turn' } } }); process.exit(1); }
     send({ id: message.id, result: { turn: { id: 'fixture-turn' } } });
     await post();
     send({ method: 'item/completed', params: { item: { type: 'agentMessage', text: 'Public protocol fixture answer' } } });
@@ -153,6 +164,9 @@ async function request(message) {
     }
     if (scenario === 'cancel') { pendingPrompt = message.id; return; }
     if (scenario === 'quota') throw new Error('Quota exhausted');
+    if (scenario?.startsWith('prompt-error:')) {
+      send({ id: message.id, error: { code: Number(scenario.slice(13)), message: 'Fixture prompt rejection' } }); return;
+    }
     if (scenario === 'permission') {
       const answer = await ask('session/request_permission', { sessionId: 'fixture-session',
         toolCall: { toolCallId: 'tool-1', title: 'Run approved check', kind: 'execute', rawInput: { command: 'node', args: ['--version'] } },

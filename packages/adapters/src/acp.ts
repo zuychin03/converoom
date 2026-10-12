@@ -7,6 +7,17 @@ import type { ManagedMcp } from '../../mcp/src/managed.js';
 import type { ManagedSession, PermissionHandler } from './index.js';
 import { mountAcpWorkspace } from './acp-workspace.js';
 
+// Positive evidence that a prompt never began executing; any other failure after sending leaves its outcome unknown.
+export const notStarted = <T extends Error>(error: T) => Object.assign(error, { notStarted: true as const });
+// JSON-RPC refusals of the request itself; -32000 is ACP's authentication-required code.
+const REFUSED = new Set([-32700, -32600, -32601, -32602, -32000]);
+// -32800 is an agent aborting the request, which some agents send instead of a cancelled stop reason.
+function promptFailure(error: unknown): never {
+  const code = (error as { code?: unknown }).code;
+  if (code === -32800) throw new ConveroomError('cancelled', 'Vendor confirmed cancellation');
+  throw typeof code === 'number' && REFUSED.has(code) ? notStarted(error as Error) : error;
+}
+
 async function bounded<T>(request: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   try {
@@ -94,13 +105,13 @@ export async function startAcp(
     return {
       id, product, capabilities: ['prompt', 'cancel', ...(!readOnly ? ['client-files', 'client-terminal'] : [])],
       prompt: async (text) => {
-        if (closed) throw new ConveroomError('vendor_disconnected', 'Native session is closed');
-        if (active) throw new ConveroomError('session_busy', 'A native prompt is already running');
+        if (closed) throw notStarted(new ConveroomError('vendor_disconnected', 'Native session is closed'));
+        if (active) throw notStarted(new ConveroomError('session_busy', 'A native prompt is already running'));
         reply = ''; replyBytes = 0; active = true; cancelled = false;
         try {
           const result = await bounded(connection.agent.request(acp.methods.agent.session.prompt, {
             sessionId: id, prompt: [{ type: 'text', text }],
-          }), 1800000);
+          }).catch(promptFailure), 1800000);
           if (result.stopReason === 'cancelled') throw new ConveroomError('cancelled', 'Vendor confirmed cancellation');
           if (result.stopReason !== 'end_turn')
             throw new ConveroomError('vendor_turn_failed', 'Native turn stopped: ' + result.stopReason);

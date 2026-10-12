@@ -30,7 +30,7 @@ it.each(acpProducts)('round-trips one-time approvals and denials for %s', async 
     } finally { expect(await session.close()).toBe(true); }
   }
 });
-it.each(acpProducts)('settles %s cancellation from the native prompt response', async (product) => {
+it.each(['codex', ...acpProducts] as const)('settles %s cancellation from the native prompt response', async (product) => {
   const session = await startManaged(product, process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'cancel' });
   try {
     const prompt = session.prompt('Wait');
@@ -42,6 +42,24 @@ it.each(acpProducts)('settles %s cancellation from the native prompt response', 
 it.each(acpProducts)('surfaces %s quota failure without another provider attempt', async (product) => {
   const session = await startManaged(product, process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'quota' });
   try { await expect(session.prompt('Respond')).rejects.toThrow(/quota/i); }
+  finally { expect(await session.close()).toBe(true); }
+});
+it('marks a Codex turn the vendor refuses to start as never started, but not one lost after starting', async () => {
+  const refused = await startManaged('codex', process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'quota' });
+  try { await expect(refused.prompt('Respond')).rejects.toMatchObject({ message: expect.stringMatching(/quota/i), notStarted: true }); }
+  finally { expect(await refused.close()).toBe(true); }
+  const dropped = await startManaged('codex', process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'drop' });
+  try { expect((await dropped.prompt('Respond').catch((error: unknown) => error) as { notStarted?: boolean }).notStarted).toBeUndefined(); }
+  finally { await dropped.close(); }
+});
+it.each([[-32000, true], [-32602, true], [-32603, false]])('marks an ACP prompt rejected with %i as never started: %s', async (code, unstarted) => {
+  const session = await startManaged('qoder', process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'prompt-error:' + code });
+  try { expect((await session.prompt('Respond').catch((error: unknown) => error) as { notStarted?: boolean }).notStarted === true).toBe(unstarted); }
+  finally { expect(await session.close()).toBe(true); }
+});
+it('treats an ACP prompt aborted with -32800 as a confirmed cancellation', async () => {
+  const session = await startManaged('kiro', process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'prompt-error:-32800' });
+  try { await expect(session.prompt('Respond')).rejects.toMatchObject({ code: 'cancelled' }); }
   finally { expect(await session.close()).toBe(true); }
 });
 it.each(acpProducts)('refuses incompatible %s protocol versions', async (product) => {
