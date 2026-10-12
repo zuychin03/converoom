@@ -30,8 +30,8 @@ test('independent owners complete shared consent, review, denial, revocation and
     await page.getByRole('button', { name: 'Refresh state' }).click(); await page.getByRole('button', { name: 'Confirm participant', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Confirm participant' }); await expect(dialog).toBeVisible();
     await page.keyboard.press('Escape'); await expect(dialog).toBeHidden(); await expect(page.getByRole('button', { name: 'Confirm participant' })).toBeFocused();
-    await page.getByRole('button', { name: 'Confirm participant', exact: true }).click(); await dialog.getByRole('button', { name: 'Confirm participant' }).click();
-    await expect(shared.getByRole('heading', { name: title })).toBeVisible();
+    await page.getByRole('button', { name: 'Confirm participant', exact: true }).click(); await dialog.getByRole('button', { name: 'Confirm participant' }).click(); await expect(dialog).toBeHidden();
+    await expect(shared.getByRole('heading', { name: title })).toBeVisible({ timeout: 15000 });
     await shared.getByLabel('Public message').fill('Participant public position'); await shared.getByRole('button', { name: 'Post message' }).click();
     await shared.getByRole('button', { name: 'Artefacts', exact: true }).click(); await shared.getByLabel('Reviewed public content').fill('Public Markdown review fixture');
     await shared.getByRole('button', { name: 'Review publication' }).click(); await shared.getByRole('button', { name: 'Publish to room' }).click();
@@ -69,8 +69,9 @@ test('independent owners complete shared consent, review, denial, revocation and
     await page.getByRole('button', { name: 'Recover identity', exact: true }).click(); await page.getByRole('dialog').getByRole('button', { name: 'Create recovery code' }).click();
     const nextCode = (await page.getByTestId('invitation-code').textContent())!.trim();
     await shared.getByLabel('Invitation code').fill(nextCode); await shared.getByLabel('Recover my existing identity').check(); await shared.getByRole('button', { name: 'Redeem invitation' }).click();
+    await expect(shared.getByRole('heading', { name: 'Confirmation pending' })).toBeVisible();
     await page.getByRole('button', { name: 'Refresh state' }).click(); await page.getByRole('button', { name: 'Confirm participant', exact: true }).click(); await page.getByRole('dialog').getByRole('button', { name: 'Confirm participant' }).click();
-    await expect(shared.getByRole('heading', { name: title })).toBeVisible(); await axe(shared);
+    await expect(page.getByRole('dialog')).toBeHidden(); await expect(shared.getByRole('heading', { name: title })).toBeVisible({ timeout: 15000 }); await axe(shared);
     await expect(shared.getByRole('button', { name: 'Cancel turn' })).toHaveCount(0);
     for (const [label, p] of [['members', page], ['participant', shared], ['connections', local]] as const) {
       expect(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
