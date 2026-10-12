@@ -4,10 +4,14 @@ const axe = async (page: Page) =>
   expect(
     (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations,
   ).toEqual([]);
+const watch = (page: Page, errors: string[]) => {
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error' && m.text().includes('Content Security Policy')) errors.push(m.text()); });
+};
 test('independent owners complete shared consent, review, denial, revocation and reconnect', async ({ page, browser, request }, info) => {
   const participantContext = await browser.newContext({ viewport: page.viewportSize()! });
   const shared = await participantContext.newPage(), local = await participantContext.newPage();
-  const errors: string[] = []; for (const p of [page, shared, local]) p.on('pageerror', (e) => errors.push(e.message));
+  const errors: string[] = []; for (const p of [page, shared, local]) watch(p, errors);
   const title = 'Shared browser ' + info.project.name;
   const declinePrompt = 'Decline fixture ' + info.project.name, denyPrompt = 'Deny local execution ' + info.project.name;
   try {
@@ -84,7 +88,7 @@ test('independent owners complete shared consent, review, denial, revocation and
 });
 test('complete human room lifecycle at desktop and mobile', async ({ page, request }, info) => {
   const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(e.message));
+  watch(page, errors);
   const pair = await request.post('http://127.0.0.1:43318/pair');
   const code = (await pair.json()).code;
   await page.goto('/');

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+The monospace font's extended Cyrillic subset now loads. The build embedded it in the stylesheet as a data URL, which the content security policy of both the local and shared listeners refuses, so every page load logged a policy violation and those characters fell back to another font. Every interface asset is now served as a file.
+
 Managed turns that time out, lose their native process or are cancelled without the vendor confirming it are now recorded as uncertain rather than failed, because the agent may already have acted. A turn is recorded as failed only when it never started, for example when the vendor refuses the request over quota or sign-in. It is also failed when the vendor reports its own final outcome or the room refuses its answer. Codex cancellation is now confirmed the same way as the ACP products, including a cancel sent while the turn was still starting. Uncertain turns keep their reason in the UI, and a coding worker's reservation can be released once its process stop is confirmed.
 
 Polling claims now have a lifetime. A claimed turn that is not completed within its turn time budget, or a cancellation the agent does not acknowledge within a minute, becomes uncertain and frees its active-turn slot instead of blocking dispatch until restart. Participant daemons report failed local turns, pass host cancellation to the local session and acknowledge it, and end native work early enough to publish within the host's claim budget. The shared listener now rate-limits each authenticated principal separately, so one participant or anonymous traffic cannot exhaust another's budget, and a rate-limited or unreachable poll no longer cancels accepted local work.

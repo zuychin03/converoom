@@ -30,12 +30,16 @@
       "sha256": "809306f8444febde9c633c98531c6db7d3505735545b2369881e8cce511a31f9"
     },
     {
-      "path": "dist/ui/assets/index-BwH0VRd1.js",
+      "path": "dist/ui/assets/index-B83b-ApF.js",
       "sha256": "78b1f66ab4a8137fb1591c4c645a3beb4f450246e85796ab2d9fbebe00d99c98"
     },
     {
-      "path": "dist/ui/assets/index-iOr94IDG.css",
-      "sha256": "309804702887328c731e7f9cf6ea2a738e83d08ed3f63ede44b4c4f37549ee12"
+      "path": "dist/ui/assets/index-CTZa4jwO.css",
+      "sha256": "4f6327d31aed57c50798494e1b73e58d70124c1dbde023ad5ba8f0451bc8196c"
+    },
+    {
+      "path": "dist/ui/assets/martian-mono-cyrillic-ext-wght-normal-DAknEryR.woff2",
+      "sha256": "25c291c2abbc28b2b7e7a3c42608239f92b4aa7a2494761e396e5e1f484e1601"
     },
     {
       "path": "dist/ui/assets/martian-mono-cyrillic-wght-normal-B84CD5C_.woff2",
@@ -63,7 +67,7 @@
     },
     {
       "path": "dist/ui/index.html",
-      "sha256": "5d55ee239decb2257b4c163497c5b719278bc0035047cb135e15a48ccc9cde07"
+      "sha256": "3416353498d9e45cb3801dbaf0b0118232d3ef830693adb60c56508330fc6b59"
     },
     {
       "path": "plugins/README.md",
@@ -87,7 +91,7 @@
     },
     {
       "path": "docs/PREVIEW_ACCEPTANCE.md",
-      "sha256": "9fe69edc08ede406341697bcb66f46e1008a9b72ef420c08ea8850833d5efac9"
+      "sha256": "cb39d8b34825080a5968f9643a3b6e7c39c97fb11751e4317d58145b87e9eb99"
     },
     {
       "path": "docs/AGENT_SUPPORT.md",
