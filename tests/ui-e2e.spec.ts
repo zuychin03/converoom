@@ -167,6 +167,17 @@ test('complete human room lifecycle at desktop and mobile', async ({ page, reque
   await expect(index.getByRole('option').first()).toContainText('Public opening position');
   await page.keyboard.press('Escape');
   await expect(index).toBeHidden();
+  await page.route('**/api/commands', (route) => route.request().postDataJSON()?.name === 'room_pause'
+    ? route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'inactive', message: 'Room refused the pause' } }) })
+    : route.fallback());
+  await page.getByRole('button', { name: 'Open index' }).click();
+  await page.getByRole('combobox', { name: 'Search rooms, entry numbers and actions' }).fill('Pause room');
+  await page.keyboard.press('Enter');
+  const refused = page.getByRole('alert').filter({ hasText: 'Room refused the pause' });
+  await expect(refused).toBeVisible();
+  await page.unroute('**/api/commands');
+  await refused.getByRole('button', { name: 'Dismiss error' }).click();
+  await expect(refused).toBeHidden();
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible();
   await page.getByRole('radio', { name: 'Light theme' }).click();

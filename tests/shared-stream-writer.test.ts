@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest';
 import { PassThrough } from 'node:stream';
-import { streamWriter } from '../apps/daemon/src/shared-stream.js';
+import { deliver, streamWriter } from '../apps/daemon/src/shared-stream.js';
 it('resumes event delivery after a heartbeat or event fills the writable buffer', async () => {
   const output = new PassThrough({ highWaterMark: 8 });
   let drains = 0, text = '';
@@ -14,5 +14,19 @@ it('resumes event delivery after a heartbeat or event fills the writable buffer'
   writer.write('data: resumed\n\n');
   await expect.poll(() => text.includes('data: resumed')).toBe(true);
   expect(text).not.toContain('must not be queued');
+  output.destroy();
+});
+it('keeps the cursor on an event a blocked writer refused, so it is delivered after drain', async () => {
+  const output = new PassThrough({ highWaterMark: 8 });
+  let text = '';
+  const writer = streamWriter(output, () => {});
+  expect(writer.write(': heartbeat during the room read\n\n')).toBe(false);
+  const page = { events: [{ seq: 4, text: 'first' }, { seq: 5, text: 'second' }], cursor: 7 };
+  expect(deliver(writer, page, 3, () => {})).toBe(3);
+  output.on('data', (chunk) => { text += chunk; });
+  await expect.poll(() => writer.blocked()).toBe(false);
+  expect(deliver(writer, page, 3, () => {})).toBe(7);
+  await expect.poll(() => text.includes('id: 5')).toBe(true);
+  expect(text.match(/^id: \d+$/gm)).toEqual(['id: 4', 'id: 5']);
   output.destroy();
 });

@@ -1,8 +1,10 @@
-import { isRecord, string } from './api.js';
+import { isRecord, string, type RecordData } from './api.js';
+import { num } from './model.js';
 import { PRODUCT_IDS, PRODUCT_PROFILES } from '../../../packages/shared/src/products.js';
 import type { Action } from './components.js';
 
 export const PRODUCTS = PRODUCT_IDS.map((value) => ({ value, label: PRODUCT_PROFILES[value].label }));
+const POLLING_ONLY = PRODUCT_IDS.filter((value) => PRODUCT_PROFILES[value].protocol === 'polling').map((value) => PRODUCT_PROFILES[value].label).join(' and ');
 
 const roomIdOf = (result: unknown) => (isRecord(result) ? string(result, 'id') : '');
 
@@ -68,6 +70,7 @@ export const addAgentAction = (roomId: string): Action => ({
   title: 'Add agent',
   command: 'seat_add',
   args: { roomId },
+  description: `${POLLING_ONLY} join only through an existing MCP conversation. The other products can also start a new managed session for each turn. Observers read the room but never take turns or coding work.`,
   fields: [
     { key: 'name', label: 'Agent name', required: true },
     { key: 'product', label: 'Product', type: 'select', options: PRODUCTS, required: true, value: 'codex' },
@@ -95,3 +98,25 @@ export const addAgentAction = (roomId: string): Action => ({
     },
   ],
 });
+
+export const grantAction = (permission: RecordData): Action => {
+  const action = string(permission, 'action').replaceAll('_', ' '),
+    digest = string(permission, 'scopeDigest'),
+    expiry = new Date(num(permission, 'expiresAt') ?? 0).toLocaleString('en-AU'),
+    args = { requestId: permission.id, scopeDigest: digest };
+  if (permission.action === 'host_transfer')
+    return {
+      title: 'Confirm host transfer',
+      command: 'host_transfer_confirm',
+      args,
+      label: 'Transfer host',
+      confirm: `Make the requested seat this room's host for scope digest ${digest}. Its agent can then set the agenda, propose decisions, request and cancel turns, and pause, resume or close the room. This authorises no local execution: every turn still needs its own grant. The current host becomes a member.`,
+    };
+  return {
+    title: 'Grant this exact request',
+    command: 'permission_grant',
+    args,
+    label: 'Grant permission',
+    confirm: `Grant “${action}” only for scope digest ${digest}. This authorises local execution until ${expiry}. Review any commands and paths in the scope first.`,
+  };
+};

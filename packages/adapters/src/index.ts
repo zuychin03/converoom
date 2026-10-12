@@ -24,6 +24,15 @@ async function managedEntry(product: Product, env: NodeJS.ProcessEnv = {}) {
   const entry = await executable(override ?? profile.managedCommand ?? profile.command);
   return { command: entry.command, args: [...entry.args, ...profile.managedArgs] };
 }
+// What a managed session verifies before inference; the account plan itself stays with the vendor.
+export function authCheck(product: Product): string {
+  const label = PRODUCT_PROFILES[product].label;
+  if (!isManagedProduct(product)) return 'Not applicable: ' + label + ' joins through its own MCP conversation and keeps its own sign-in.';
+  if (product === 'codex') return 'Managed sessions refuse unless the Codex app server reports a ChatGPT sign-in.';
+  if (product === 'grok') return 'Managed sessions authenticate only with the advertised cached native token.';
+  if (product === 'antigravity') return 'Managed sessions authenticate only with the advertised personal Google OAuth method.';
+  return 'Not verified by Converoom: managed sessions use the native ' + label + ' login with vendor API-key variables removed. Confirm the account plan in ' + label + '.';
+}
 export async function probeProduct(product: Product, cwd: string): Promise<ToolArgs> {
   const profile = PRODUCT_PROFILES[product];
   let installed = false, version: string | undefined, managedInstalled = false;
@@ -40,6 +49,7 @@ export async function probeProduct(product: Product, cwd: string): Promise<ToolA
   return {
     product, installed, version, managedInstalled,
     subscription: 'unknown; native login and explicit managed smoke required',
+    authCheck: authCheck(product),
     declared: isManagedProduct(product) ? [profile.protocol, 'prompt', 'cancel', 'mcp-polling'] : ['mcp-polling'],
     probed: [], tested: [],
     managed: !isManagedProduct(product) ? 'MCP polling; managed adapter deferred' : managedInstalled ? 'available for explicit smoke; vendor acceptance unverified' : 'MCP polling only; managed executable unavailable',

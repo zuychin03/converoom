@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { isProduct } from '../../shared/src/products.js';
+import { PRODUCT_PROFILES, isProduct } from '../../shared/src/products.js';
 import { mountSharedArtefacts } from './shared-artefacts.js';
 import {
   ConveroomError as E,
@@ -200,6 +200,8 @@ export function createCore(store: Store): Core {
     if (!isProduct(product))
       throw new E('product', 'Unsupported product');
     const mode = x.mode === 'managed' ? 'managed' : 'polling';
+    if (mode === 'managed' && PRODUCT_PROFILES[product].protocol === 'polling')
+      throw new E('managed_unsupported', PRODUCT_PROFILES[product].label + ' joins through its own MCP conversation; it has no managed session', 409);
     const membership = activeMembership(store, r.id, a.ownerId);
     if (a.ownerId !== r.ownerId) {
       if (!membership || (membership.role === 'observer' && role !== 'observer'))

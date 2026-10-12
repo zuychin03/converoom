@@ -1,4 +1,5 @@
 import { string, type RecordData } from './api.js';
+import { grantAction } from './actions.js';
 import { Countdown, Empty, Status, type Action } from './components.js';
 import { agentWaitEnds, num } from './model.js';
 
@@ -17,21 +18,13 @@ export function GrantSlip({
   const digest = string(permission, 'scopeDigest');
   const expiresAt = num(permission, 'expiresAt') ?? 0;
   const waitEnds = agentWaitEnds(permission);
-  const args = { requestId: permission.id };
-  const expiry = new Date(expiresAt).toLocaleString('en-AU');
-  const grant = () =>
-    openAction({
-      title: 'Grant this exact request',
-      command: permission.action === 'host_transfer' ? 'host_transfer_confirm' : 'permission_grant',
-      args: { ...args, scopeDigest: digest },
-      label: 'Grant permission',
-      confirm: `Grant “${action}” only for scope digest ${digest}. This authorises local execution until ${expiry}. Review any commands and paths in the scope first.`,
-    });
+  const transfer = permission.action === 'host_transfer';
+  const grant = () => openAction(grantAction(permission));
   const deny = () =>
     openAction({
       title: 'Deny request',
       command: 'permission_deny',
-      args,
+      args: { requestId: permission.id },
       label: 'Deny request',
       confirm:
         'This request will be denied. The agent must submit a new request if its action or scope changes.',
@@ -68,7 +61,7 @@ export function GrantSlip({
         </div>
       </dl>
       <details className="raw" open={!compact}>
-        <summary>Exact execution scope</summary>
+        <summary>{transfer ? 'Exact transfer request' : 'Exact execution scope'}</summary>
         <pre tabIndex={0}>{JSON.stringify(permission.scope, null, 2)}</pre>
       </details>
       <div className="slip-actions">
@@ -76,7 +69,7 @@ export function GrantSlip({
           Deny
         </button>
         <button type="button" className="button primary" onClick={grant}>
-          Review and grant
+          {transfer ? 'Review transfer' : 'Review and grant'}
         </button>
       </div>
     </article>
@@ -96,12 +89,12 @@ export function ApprovalQueue({
     <section className="approvals" aria-labelledby="approvals-title">
       <div className="page-head">
         <h1 id="approvals-title">Approval queue</h1>
-        <p>Every execution waits here for your exact, scoped grant. Nothing is approved automatically.</p>
+        <p>Every execution and host transfer waits here for your exact, scoped decision. Nothing is approved automatically.</p>
       </div>
       {permissions.length === 0 ? (
         <Empty title="No approvals waiting">
-          When an agent needs your authority to run a turn or a native tool, the exact request
-          appears here and pinned in its room.
+          When an agent needs your authority to run a turn or a native tool, or a host transfer needs
+          your confirmation, the exact request appears here and pinned in its room.
         </Empty>
       ) : (
         <div className="slip-list">

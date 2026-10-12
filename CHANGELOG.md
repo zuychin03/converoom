@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+`converoom disconnect` now finishes when you have edited the installed room skill. It keeps the edited skill, says where, and still removes the product's Converoom registration and saved credential. Previously it stopped after revoking the credential, leaving a registration that could no longer connect.
+
+Claude Code and OpenCode seats can no longer be added as managed sessions, which they cannot run; they join through their own MCP conversation. Observers are no longer offered turn, reply or coding-worker choices the room would refuse, and seat cards show declared, probed and tested capabilities separately. Pausing or resuming a room from the index now reports a refusal instead of ignoring it, and confirming a host transfer explains that it hands over orchestration and authorises no execution.
+
+A participant whose shared-room connection stalls under a slow network no longer misses an event, which could happen when a keep-alive filled the connection while the next page was read. A browser that reconnects to the local event stream with a position the store does not hold is told to resync instead of losing live updates until the page is reloaded.
+
+`converoom doctor` reports, for each product, what a managed session verifies about the native sign-in before inference.
+
 The monospace font's extended Cyrillic subset now loads. The build embedded it in the stylesheet as a data URL, which the content security policy of both the local and shared listeners refuses, so every page load logged a policy violation and those characters fell back to another font. Every interface asset is now served as a file.
 
 Managed turns that time out, lose their native process or are cancelled without the vendor confirming it are now recorded as uncertain rather than failed, because the agent may already have acted. A turn is recorded as failed only when it never started, for example when the vendor refuses the request over quota or sign-in. It is also failed when the vendor reports its own final outcome or the room refuses its answer. Codex cancellation is now confirmed the same way as the ACP products, including a cancel sent while the turn was still starting. Uncertain turns keep their reason in the UI, and a coding worker's reservation can be released once its process stop is confirmed.

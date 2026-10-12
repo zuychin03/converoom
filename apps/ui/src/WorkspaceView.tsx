@@ -12,7 +12,7 @@ import {
   type Action,
   type Run,
 } from './components.js';
-import { STAGES, acceptedOrder, commandLabel, interruptedFor, num, requestDetails, shortId, taskProgress, type Kind } from './model.js';
+import { STAGES, acceptedOrder, commandLabel, interruptedFor, num, requestDetails, shortId, taskProgress, workerSeat, type Kind } from './model.js';
 
 export function WorkspaceView({
   state,
@@ -30,7 +30,7 @@ export function WorkspaceView({
   const now = useNow(5000);
   const roomId = room ? string(room, 'id') : '';
   const tasks = state.tasks.filter((t) => t.roomId === roomId);
-  const workers = state.seats.filter((s) => s.roomId === roomId && s.mode === 'managed' && s.status !== 'left');
+  const workers = state.seats.filter((s) => s.roomId === roomId && workerSeat(s));
   const candidates = state.candidates.filter((c) => c.roomId === roomId);
   const repoOptions = state.repos.map((r) => ({ value: string(r, 'id'), label: string(r, 'name') }));
   const profileOptions = state.profiles.map((p) => ({ value: string(p, 'id'), label: string(p, 'name') }));

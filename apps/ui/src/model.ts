@@ -1,4 +1,5 @@
 import { isRecord, list, string, type RecordData, type Snapshot } from './api.js';
+import { isManagedProduct } from '../../../packages/shared/src/products.js';
 
 export type Kind = 'live' | 'needs' | 'ok' | 'warn' | 'fail' | 'idle' | 'paused' | 'closed';
 export type Intent = 'question' | 'review' | 'challenge';
@@ -104,6 +105,7 @@ export function seatState(seat: RecordData, state: Snapshot, now: number): SeatS
   if (last?.status === 'uncertain') return { kind: 'warn', label: withReason('Uncertain turn', last), turn: last };
   if (last?.status === 'failed') return { kind: 'fail', label: failureLabel(last), turn: last };
   if (seat.mode !== 'managed') return { kind: 'idle', label: 'Polling inbox' };
+  if (!turnTarget(seat)) return { kind: 'idle', label: seat.role === 'observer' ? 'Observing' : 'Turns unavailable' };
   return { kind: 'idle', label: seat.consent ? 'Ready' : 'Requests off' };
 }
 
@@ -261,3 +263,12 @@ export const requestDetails = (args: unknown, roomId: string) =>
     .filter(([key, value]) => !(key === 'roomId' && value === roomId))
     .map(([key, value]) => key + ' ' + (Array.isArray(value) ? value.join(', ') : String(value)))
     .join(' · ');
+// Mirrors turn_request and task_claim admission: observers never take turns, and a managed seat needs a managed adapter.
+export const turnTarget = (seat: RecordData) =>
+  seat.role !== 'observer' && seat.status !== 'left' && (seat.mode !== 'managed' || isManagedProduct(string(seat, 'product')));
+export const workerSeat = (seat: RecordData) => seat.mode === 'managed' && turnTarget(seat);
+export function capabilityLine(seat: RecordData) {
+  const capabilities = isRecord(seat.capabilities) ? seat.capabilities : {};
+  const named = (key: string, empty: string) => list(capabilities, key).join(', ') || empty;
+  return `Declared ${named('declared', 'none')} · probed ${named('probed', 'not yet')} · tested ${named('tested', 'not yet')}`;
+}

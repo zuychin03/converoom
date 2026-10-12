@@ -253,13 +253,10 @@ export async function installSkill(path: string): Promise<{ path: string; digest
   await cp(source, target);
   return { path, digest: scopeDigest(text) };
 }
-export async function removeSkill(skill: { path: string; digest: string }): Promise<void> {
+// Returns the path of an edited skill, which is kept.
+export async function removeSkill(skill: { path: string; digest: string }): Promise<string | undefined> {
   const file = join(skill.path, 'SKILL.md');
   if (!existsSync(file)) return;
-  if (scopeDigest(await readFile(file, 'utf8')) !== skill.digest)
-    throw new ConveroomError(
-      'skill_changed',
-      'Modified skill preserved. Inspect it before removing',
-    );
+  if (scopeDigest(await readFile(file, 'utf8')) !== skill.digest) return file;
   await rm(file);
 }

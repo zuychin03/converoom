@@ -5,7 +5,7 @@ import { closeRoomAction, createRoomAction, joinRoomAction, requestTurnAction } 
 import { ApprovalQueue } from './Approvals.js';
 import { CommandIndex, type IndexItem } from './CommandIndex.js';
 import { ActionDialog, ErrorNotice, Status, useNow, type Action } from './components.js';
-import { ACTIVE_TURN, data, num, pad, pendingPermissions, roomEvents, shortId } from './model.js';
+import { ACTIVE_TURN, data, num, pad, pendingPermissions, roomEvents, shortId, turnTarget } from './model.js';
 import { NoRoom, RoomIndex, RoomView } from './RoomView.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import { coalesce } from './refresh.js';
@@ -40,6 +40,7 @@ export function App() {
   const [view, setView] = useState<View>('room');
   const [connection, setConnection] = useState<'connecting' | 'live' | 'reconnecting' | 'offline'>('connecting');
   const [error, setError] = useState('');
+  const [failure, setFailure] = useState('');
   const [notice, setNotice] = useState('');
   const [action, setAction] = useState<Action>();
   const [indexOpen, setIndexOpen] = useState(false);
@@ -153,6 +154,12 @@ export function App() {
       throw cause;
     }
   };
+  const lifecycle = (command: 'room_pause' | 'room_resume', roomId: string, label: string) => () => {
+    setFailure('');
+    run(command, { roomId }).catch((cause: unknown) =>
+      setFailure(`${label} failed: ${cause instanceof Error ? cause.message : 'the room did not change.'}`),
+    );
+  };
   const createRoom = () =>
     setAction(
       createRoomAction((id) => {
@@ -210,12 +217,12 @@ export function App() {
     if (room) {
       const id = string(room, 'id');
       if (room.status === 'open')
-        list.push({ id: 'pause', group: 'Actions', label: 'Pause room', hint: string(room, 'title'), run: () => void run('room_pause', { roomId: id }).catch(() => undefined) });
+        list.push({ id: 'pause', group: 'Actions', label: 'Pause room', hint: string(room, 'title'), run: lifecycle('room_pause', id, 'Pause room') });
       if (room.status === 'paused')
-        list.push({ id: 'resume', group: 'Actions', label: 'Resume room', hint: string(room, 'title'), run: () => void run('room_resume', { roomId: id }).catch(() => undefined) });
+        list.push({ id: 'resume', group: 'Actions', label: 'Resume room', hint: string(room, 'title'), run: lifecycle('room_resume', id, 'Resume room') });
       if (room.status !== 'closed')
         list.push({ id: 'close', group: 'Actions', label: 'Close room…', hint: string(room, 'title'), run: () => setAction(closeRoomAction(id)) });
-      for (const seat of snapshot.seats.filter((s) => s.roomId === id && s.mode === 'managed' && s.consent === true && s.status !== 'left'))
+      for (const seat of snapshot.seats.filter((s) => s.roomId === id && s.mode === 'managed' && s.consent === true && turnTarget(s)))
         list.push({
           id: `turn-${string(seat, 'id')}`,
           group: 'Actions',
@@ -368,6 +375,11 @@ export function App() {
           <ErrorNotice dismiss={() => setError('')}>
             {error} Content may be out of date until the server answers.
           </ErrorNotice>
+        </div>
+      )}
+      {failure && (
+        <div className="global-error">
+          <ErrorNotice dismiss={() => setFailure('')}>{failure}</ErrorNotice>
         </div>
       )}
       <div className="sr-only" role="status" aria-live="polite">

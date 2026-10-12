@@ -30,7 +30,7 @@ async function room(actor = agent) {
   );
 }
 async function seat(roomId: string, mode = 'managed', role = 'member') {
-  return call<Seat>('seat_add', { roomId, product: 'claude', name: 'Reviewer', mode, role });
+  return call<Seat>('seat_add', { roomId, product: 'codex', name: 'Reviewer', mode, role });
 }
 beforeEach(() => {
   store = createStore(':memory:');
@@ -194,6 +194,12 @@ describe('room authority and interactions', () => {
     await seat(r.id);
     await expect(seat(r.id)).rejects.toThrow(/seat/i);
     await expect(seat(r.id, 'polling', 'observer')).resolves.toMatchObject({ role: 'observer' });
+  });
+  it.each(['claude', 'opencode'])('refuses a managed %s seat at setup because it has no managed adapter', async (product) => {
+    const r = await room(human);
+    await expect(call('seat_add', { roomId: r.id, product, mode: 'managed', name: 'Unsupported' })).rejects.toMatchObject({ code: 'managed_unsupported' });
+    expect(store.list<Seat>('seat', { roomId: r.id })).toHaveLength(0);
+    await expect(call<Seat>('seat_add', { roomId: r.id, product, mode: 'polling', name: 'Polling' })).resolves.toMatchObject({ product, mode: 'polling' });
   });
   it('requires consent and human grant bound to exact turn scope', async () => {
     const r = await room();

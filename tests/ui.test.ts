@@ -1,9 +1,39 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClient, ApiError, parseSnapshot } from '../apps/ui/src/api.js';
-import { commandLabel, failureLabel, interruptedFor, requestDetails, turnKind, visibleTurn } from '../apps/ui/src/model.js';
+import { grantAction } from '../apps/ui/src/actions.js';
+import { capabilityLine, commandLabel, failureLabel, interruptedFor, requestDetails, seatState, turnKind, turnTarget, visibleTurn, workerSeat } from '../apps/ui/src/model.js';
 import { coalesce } from '../apps/ui/src/refresh.js';
 
 describe('browser command boundary', () => {
+  it('offers turns and coding work only to seats the backend admits', () => {
+    const managed = { mode: 'managed', product: 'codex', role: 'member', status: 'idle' };
+    expect([turnTarget(managed), workerSeat(managed)]).toEqual([true, true]);
+    expect([turnTarget({ ...managed, mode: 'polling' }), workerSeat({ ...managed, mode: 'polling' })]).toEqual([true, false]);
+    for (const refused of [{ ...managed, role: 'observer' }, { ...managed, status: 'left' }, { ...managed, product: 'claude' }])
+      expect([turnTarget(refused), workerSeat(refused)]).toEqual([false, false]);
+    expect(turnTarget({ ...managed, product: 'claude', mode: 'polling' })).toBe(true);
+    const label = (seat: Record<string, unknown>) => seatState({ id: 'seat', ...seat }, parseSnapshot({}), 0).label;
+    expect([label(managed), label({ ...managed, role: 'observer' }), label({ ...managed, product: 'claude' })])
+      .toEqual(['Requests off', 'Observing', 'Turns unavailable']);
+  });
+  it('labels declared, probed and tested capabilities separately', () => {
+    expect(capabilityLine({ capabilities: { declared: ['prompt', 'cancel'], probed: [], tested: [] } }))
+      .toBe('Declared prompt, cancel · probed not yet · tested not yet');
+    expect(capabilityLine({ capabilities: { declared: ['prompt', 'cancel'], probed: ['prompt'], tested: ['prompt'] } }))
+      .toBe('Declared prompt, cancel · probed prompt · tested prompt');
+    expect(capabilityLine({})).toBe('Declared none · probed not yet · tested not yet');
+  });
+  it('confirms a host transfer as orchestration that authorises no execution', () => {
+    const request = { id: 'request', scopeDigest: 'digest', expiresAt: Date.UTC(2026, 9, 12) };
+    const transfer = grantAction({ ...request, action: 'host_transfer', scope: { seatId: 'seat' } });
+    expect(transfer).toMatchObject({ title: 'Confirm host transfer', command: 'host_transfer_confirm', label: 'Transfer host',
+      args: { requestId: 'request', scopeDigest: 'digest' } });
+    expect(transfer.confirm).toContain('authorises no local execution');
+    expect(transfer.confirm).not.toContain('authorises local execution');
+    const execution = grantAction({ ...request, action: 'turn_execute' });
+    expect(execution).toMatchObject({ title: 'Grant this exact request', command: 'permission_grant', label: 'Grant permission' });
+    expect(execution.confirm).toContain('This authorises local execution until');
+  });
   it('uses public lifecycle evidence rather than presenting a historical request as still queued', () => {
     const queued = { id: 'turn', seatId: 'removed-seat', status: 'queued' };
     const state = parseSnapshot({ events: [{ roomId: 'room', seq: 10, type: 'turn.cancelled', data: { turnId: 'turn' } }] });

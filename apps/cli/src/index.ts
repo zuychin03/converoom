@@ -263,16 +263,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const path = resolve(flag('--config') ?? config(product)),
       clientFile = join(dataDir, 'clients', product + '.json');
     if (command === 'disconnect') {
+      let kept: string | undefined;
       if (existsSync(clientFile)) {
         await local('/local/revoke', {
           principalId: (await json<{ principalId: string }>(clientFile)).principalId,
         });
         const saved = await json<{ skill?: { path: string; digest: string } }>(clientFile);
-        if (saved.skill) await removeSkill(saved.skill);
+        if (saved.skill) kept = await removeSkill(saved.skill);
         await unlink(clientFile);
       }
       await editConfig(path, product, {}, true);
       console.log('Removed only Converoom registration for ' + product);
+      if (kept) console.log('Kept your edited room skill: ' + kept);
       return;
     }
     const stable = await installStable(dataDir);

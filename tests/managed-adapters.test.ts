@@ -11,8 +11,15 @@ vi.mock('../packages/adapters/src/process.js', async (original) => ({
 }));
 import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { createServer } from '../apps/daemon/src/server.js';
-import { startManaged } from '../packages/adapters/src/index.js';
+import { authCheck, startManaged } from '../packages/adapters/src/index.js';
 const acpProducts = ['cursor', 'antigravity', 'kiro', 'qoder', 'grok'] as const;
+it('reports which managed adapters verify the native sign-in before inference', () => {
+  expect(authCheck('codex')).toContain('ChatGPT sign-in');
+  expect(authCheck('grok')).toContain('cached native token');
+  expect(authCheck('antigravity')).toContain('personal Google OAuth');
+  for (const product of ['cursor', 'kiro', 'qoder'] as const) expect(authCheck(product)).toMatch(/^Not verified by Converoom/);
+  for (const product of ['claude', 'opencode'] as const) expect(authCheck(product)).toMatch(/^Not applicable/);
+});
 it.each(acpProducts)('publishes only public output belonging to the %s session', async (product) => {
   const session = await startManaged(product, process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'public' });
   try { expect(await session.prompt('Public response')).toBe('Public protocol fixture answer'); }

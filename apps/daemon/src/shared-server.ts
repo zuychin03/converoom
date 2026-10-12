@@ -9,7 +9,7 @@ import { SharedOAuth } from '../../../packages/mcp/src/shared-auth.js';
 import { handleSharedMcp } from '../../../packages/mcp/src/http.js';
 import { activeMembership, membershipId, sharedSeat, sharedProjection, sharedCommand, sharedExport, SHARED_READS, SHARED_WRITES } from '../../../packages/core/src/membership.js';
 import { validateToolArgs } from '../../../packages/mcp/src/tools.js';
-import { streamWriter } from './shared-stream.js';
+import { deliver, streamWriter } from './shared-stream.js';
 import { ConveroomError as E, requiredString as str, type Actor, type Core, type HumanMembership, type Seat, type ToolArgs } from '../../../packages/shared/src/contracts.js';
 
 const secret = () => randomBytes(32).toString('base64url');
@@ -228,13 +228,7 @@ export async function createSharedServer(core: Core, options: SharedServerOption
         try {
           session(request); if (writer.blocked() || reply.raw.destroyed) return;
           const page = await sharedCommand(core, s.actor, s.roomId, s.generation, 'room_read', { roomId: s.roomId, cursor, limit: 100 }) as { events: ToolArgs[]; cursor: number };
-          for (const event of page.events) {
-            session(request);
-            const accepted = writer.write('id: ' + event.seq + '\nevent: room\ndata: ' + JSON.stringify(event) + '\n\n');
-            cursor = Number(event.seq);
-            if (!accepted) break;
-          }
-          if (!writer.blocked()) cursor = page.cursor;
+          cursor = deliver(writer, page, cursor, () => session(request));
         } catch { finish(); } finally { busy = false; }
       };
       const writer = streamWriter(reply.raw, () => void emit());

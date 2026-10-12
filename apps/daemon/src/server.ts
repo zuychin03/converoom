@@ -401,7 +401,13 @@ export async function createServer(
   app.get('/api/events', async (request, reply) => {
     humanSession(request);
     const cursor = String(request.headers['last-event-id'] ?? '');
-    runtime.core.store.eventsAfter(cursor, 1);
+    let known = true;
+    try {
+      runtime.core.store.eventsAfter(cursor, 1);
+    } catch (e) {
+      if (!(e instanceof ConveroomError && e.code === 'cursor_expired')) throw e;
+      known = false;
+    }
     reply.hijack();
     reply.raw.writeHead(200, {
       'content-type': 'text/event-stream',
@@ -410,6 +416,11 @@ export async function createServer(
       'x-content-type-options': 'nosniff',
     });
     reply.raw.flushHeaders();
+    // EventSource gives up on a refused connection, so a cursor from another store gets the same resync as one lost mid-stream.
+    if (!known) {
+      reply.raw.end('event: resync\ndata: {"reason":"cursor_expired"}\n\n');
+      return;
+    }
     let lastId = cursor;
     let busy = false;
     let blocked = false;

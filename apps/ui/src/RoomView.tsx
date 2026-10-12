@@ -24,6 +24,7 @@ import {
   ACTIVE_TURN,
   OPEN_TURN,
   activity,
+  capabilityLine,
   data,
   fmtClock,
   fmtDuration,
@@ -35,6 +36,7 @@ import {
   seatState,
   shortId,
   turnKind,
+  turnTarget,
   turnTiming,
   visibleTurn,
   type Kind,
@@ -528,9 +530,10 @@ function SeatRow({
       <p className="seat-meta">
         Owner · {ownerLabel}<br />
         {string(seat, 'product')} ·{' '}
-        {managed ? 'new managed session per turn' : 'polls its inbox, outside runtime control'}
+        {managed ? 'new managed session per turn' : 'polls its inbox, outside runtime control'}<br />
+        {capabilityLine(seat)}
       </p>
-      {(managed || shared || remote) && (
+      {(managed || shared || remote) && turnTarget(seat) && (
         <div className="seat-actions">
           {!shared && !remote && <button
             type="button"
@@ -810,6 +813,7 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
                 const canWake =
                   recipient?.mode === 'managed' &&
                   recipient.consent === true &&
+                  turnTarget(recipient) &&
                   ctx.room.status === 'open' &&
                   !i.turnId &&
                   !['responded', 'resolved'].includes(string(i, 'status'));
