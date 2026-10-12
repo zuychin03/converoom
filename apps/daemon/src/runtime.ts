@@ -496,6 +496,7 @@ export async function createRuntime(
       'candidate',
       'task',
     ];
+    // Hash the transport-redacted form: the HTTP layer redacts the response again, which must leave the digest valid.
     const records = kinds.flatMap((kind) =>
       store
         .list<ToolArgs>(kind)

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { createStore } from '../packages/store/src/index.js';
+import { createStore, redactTransport } from '../packages/store/src/index.js';
 import type { Store } from '../packages/shared/src/contracts.js';
 
 const stores: Store[] = [];
@@ -152,6 +152,15 @@ describe('durable store', () => {
     unknown.exec('CREATE TABLE private_data(id TEXT)');
     unknown.close();
     expect(() => createStore(stray)).toThrow(/schema/i);
+  });
+  it('redacts for transport idempotently, so a second pass cannot change a hashed export', () => {
+    const value = {
+      apiKey: 'sk-fixtureSECRET1234', cookie: 'c', keep: 'Bearer fixture password=fixture <thinking>hidden-plan</thinking> api_key=Bearer fixture',
+      nested: [{ reasoning: 'r', note: 'secret: sk-abcdefgh12, refresh_token=fixture;rest' }, 'ghp_fixture1234 Bearer abc== tail'],
+    };
+    const once = redactTransport(value);
+    expect(redactTransport(once)).toEqual(once);
+    expect(JSON.stringify(once)).not.toMatch(/fixture|SECRET|hidden-plan|abcdefgh12/);
   });
   it('does not persist credentials or private reasoning in public events', () => {
     const { store } = open();

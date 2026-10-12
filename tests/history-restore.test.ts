@@ -40,6 +40,34 @@ it.each(['event gap', 'missing room', 'duplicate record', 'multiple owners'])(
     } finally { await rm(dir, { recursive: true, force: true }); }
   }, 30000,
 );
+it('keeps the HTTP export digest valid across every kind of transport redaction', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'converoom-restore-redaction-'));
+  const runtime = await createRuntime(join(dir, 'source'), { noScheduler: true });
+  const server = await createServer(runtime, { port: 0, pairingCode: 'redaction-fixture' });
+  try {
+    const owner = humanIdentity(runtime);
+    const room = await runtime.core.dispatch(owner, 'room_create', { title: 'Redaction digest', objective: 'Survive a second redaction' }) as ToolArgs;
+    const seat = await runtime.core.dispatch(owner, 'seat_add', { roomId: room.id, product: 'codex', mode: 'managed', name: 'Worker' }) as ToolArgs;
+    runtime.core.store.put('seat', String(seat.id), { ...seat, apiKey: 'sk-fixtureSECRET1234', refresh_token: 'fixture-secret-a',
+      Authorization: 'Bearer fixture-secret-b', cookie: 'fixture-secret-c', csrf: 'fixture-secret-d', reasoning: 'fixture-secret-e',
+      note: 'password=fixture-secret-f then Bearer fixture-secret-g', items: [{ credential: 'fixture-secret-h', keep: 'Visible item' }] });
+    runtime.core.store.append(String(room.id), 'fixture', 'owner', { text: '<thinking>fixture-secret-i</thinking>Visible answer',
+      privateReasoning: 'fixture-secret-j', nested: [{ accessToken: 'fixture-secret-k' }, 'api_key: fixture-secret-l'], github: 'ghp_fixtureSECRET123' });
+    const e = await humanCommand(server.url, 'redaction-fixture', 'room_export', { roomId: room.id }) as History;
+    expect(e.digest).toBe(scopeDigest({ records: e.records, events: e.events }));
+    expect(JSON.stringify(e)).not.toMatch(/fixture-secret|SECRET/);
+    expect(JSON.stringify(e)).toContain('Visible answer');
+    expect(JSON.stringify(e)).toContain('Visible item');
+    const input = join(dir, 'input.json'), target = join(dir, 'target');
+    await writeFile(input, JSON.stringify(e, null, 2));
+    await restore(input, target);
+    const restored = createStore(join(target, 'converoom.sqlite'));
+    try {
+      expect(JSON.stringify(restored.events(String(room.id)))).toContain('Visible answer');
+      expect(JSON.stringify([restored.events(String(room.id)), restored.get('seat', String(seat.id))])).not.toMatch(/fixture-secret|SECRET/);
+    } finally { restored.close(); }
+  } finally { await server.close(); await runtime.stop(); await rm(dir, { recursive: true, force: true }); }
+}, 30000);
 it('restores a valid redacted HTTP export as read-only history and refuses to replace existing data', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'converoom-restore-roundtrip-'));
   const runtime = await createRuntime(join(dir, 'source'), { noScheduler: true });
