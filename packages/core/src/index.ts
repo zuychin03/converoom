@@ -664,6 +664,26 @@ export function createCore(store: Store): Core {
     ev(a, r.id, 'turn.cancel_requested', { turnId: t.id, status: t.status });
     return t;
   });
+  // Records what the owner found; the turn stays uncertain and nothing is rerun. The note stays out of the public event.
+  c.register('turn_inspect', (a, x) => {
+    if (a.kind !== 'human') throw new E('human_required', 'A person records the inspection', 403);
+    const r = access(a, str(x, 'roomId')),
+      t = store.get<Turn>('turn', str(x, 'turnId'));
+    if (!t || t.roomId !== r.id) throw new E('turn', 'Turn not found');
+    const target = store.get<Seat>('seat', t.seatId);
+    if (target?.ownerId === a.ownerId) requireSeatOwner(c, a, target);
+    else host(a, r.id);
+    if (t.status !== 'uncertain') throw new E('turn_state', 'Only an uncertain turn needs an inspection', 409);
+    if (!['acted', 'not_acted', 'unclear'].includes(String(x.finding)))
+      throw new E('invalid_argument', 'Finding must be acted, not_acted or unclear');
+    if (x.note !== undefined && (typeof x.note !== 'string' || x.note.length > 2000))
+      throw new E('invalid_argument', 'Note must be text of at most 2,000 characters');
+    const next: Turn = { ...t, inspection: { finding: x.finding as NonNullable<Turn['inspection']>['finding'],
+      note: redactPublic(String(x.note ?? '')) as string, at: Date.now(), by: a.principalId } };
+    store.put('turn', t.id, next);
+    ev(a, r.id, 'turn.inspected', { turnId: t.id, finding: x.finding });
+    return next;
+  });
   const pollingTurn = (a: Actor, x: ToolArgs) => {
     const r = access(a, str(x, 'roomId'));
     if (a.kind !== 'agent') throw new E('agent_required', 'The target agent must acknowledge its turn', 403);

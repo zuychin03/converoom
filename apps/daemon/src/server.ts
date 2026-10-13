@@ -265,6 +265,7 @@ export async function createServer(
     'attempt_release',
     'interrupted_command_list',
     'interrupted_command_clear',
+    'turn_inspect',
     'managed_stop',
     'adapter_status',
     'room_export',

@@ -3,19 +3,19 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "d149438484e6ac6a2bc364da9d3dda06a6102da46d6353d03262228d10801aca"
+      "sha256": "69b5b3b566a91bbc26e3e6f9e5d3b83947be649bf7358b6babf0451e4d2e80e1"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "c671f8ba3d5e29be324d4a9989802e8c48073616e1ebe0736cd5520a0611be82"
+      "sha256": "cee8b21bfe55a2be3212c000d3e8052a0152d6b1f3bc96d3d15885bebe587569"
     },
     {
       "path": "dist/server.js",
-      "sha256": "d40ba0014436f69492388fa0321e7d30b2adec89f787765d924308d3bd5cd517"
+      "sha256": "cfc5396e2d66b5602ceaeb8e6fa22109a37ac1bc152685a13981b36c8ba7b331"
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "9197174e4e020a2e9f33ef4ebcd7694caaf354fb71f86a4c29d7c8aded54b9a3"
+      "sha256": "4d1bac508685aed1217ff2cc0c9ca717263e5af61e9ad492d3fc4a762df28b74"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -30,12 +30,12 @@
       "sha256": "809306f8444febde9c633c98531c6db7d3505735545b2369881e8cce511a31f9"
     },
     {
-      "path": "dist/ui/assets/index-BiqNH6ri.js",
-      "sha256": "eb8bf326c98516b9e84aac1a86c8d92a5f06f7dc4b29763f9d99004f19e4c66a"
-    },
-    {
       "path": "dist/ui/assets/index-CTZa4jwO.css",
       "sha256": "4f6327d31aed57c50798494e1b73e58d70124c1dbde023ad5ba8f0451bc8196c"
+    },
+    {
+      "path": "dist/ui/assets/index-CxuqZZ85.js",
+      "sha256": "eb84441421053ddb8e7cb889fdaa2fe6e2542ce5520697d585574b095ce17641"
     },
     {
       "path": "dist/ui/assets/martian-mono-cyrillic-ext-wght-normal-DAknEryR.woff2",
@@ -67,7 +67,7 @@
     },
     {
       "path": "dist/ui/index.html",
-      "sha256": "7e36d15f6c21e74cb17ad5b7311e213d643520e10919e68fd3d8b802abc43ce4"
+      "sha256": "5e539d79b6dec1e5cd4b554dd6605ad0e817d52a3944c520f4c1ac9770a30126"
     },
     {
       "path": "plugins/README.md",
@@ -95,7 +95,7 @@
     },
     {
       "path": "docs/AGENT_SUPPORT.md",
-      "sha256": "cd37379cca6c90435aa44294b1f46f645d0776407d6fc2b51cc9c5f823b3b302"
+      "sha256": "241702a2efb35352d1e9cc9f95a49c307fccd1fde047a4a8718999b95d72fb6e"
     },
     {
       "path": "docs/REQUIREMENT_MATRIX.md",

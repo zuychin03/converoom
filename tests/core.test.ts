@@ -201,6 +201,25 @@ describe('room authority and interactions', () => {
     expect(store.list<Seat>('seat', { roomId: r.id })).toHaveLength(0);
     await expect(call<Seat>('seat_add', { roomId: r.id, product, mode: 'polling', name: 'Polling' })).resolves.toMatchObject({ product, mode: 'polling' });
   });
+  it('records an owner inspection of an uncertain turn without changing or rerunning it', async () => {
+    const r = await room(human);
+    const target = await seat(r.id);
+    await call('seat_consent', { roomId: r.id, seatId: target.id, consent: true });
+    const turn = await call<Turn>('turn_request', { roomId: r.id, seatId: target.id, prompt: 'Review' });
+    const inspect = (finding: unknown, actor = human, turnId = turn.id) => call<Turn & { inspection?: ToolArgs }>('turn_inspect',
+      { roomId: r.id, turnId, finding, note: 'Checked the workspace: no files changed' }, actor);
+    await expect(inspect('not_acted')).rejects.toMatchObject({ code: 'turn_state' });
+    store.put('turn', turn.id, { ...store.get<Turn>('turn', turn.id)!, status: 'uncertain' });
+    await expect(inspect('not_acted', { kind: 'agent', principalId: target.principalId, ownerId: human.ownerId })).rejects.toMatchObject({ code: 'human_required' });
+    await expect(inspect('maybe')).rejects.toMatchObject({ code: 'invalid_argument' });
+    const inspected = await inspect('not_acted');
+    expect(inspected).toMatchObject({ status: 'uncertain', inspection: { finding: 'not_acted', note: 'Checked the workspace: no files changed', by: human.principalId } });
+    expect(store.get<Turn>('turn', turn.id)).toMatchObject({ status: 'uncertain', inspection: { finding: 'not_acted' } });
+    const event = store.events(r.id).at(-1)!;
+    expect(event).toMatchObject({ type: 'turn.inspected', data: { turnId: turn.id, finding: 'not_acted' } });
+    expect(JSON.stringify(event)).not.toContain('no files changed');
+    expect(store.list<Turn>('turn', { roomId: r.id })).toHaveLength(1);
+  });
   it('requires consent and human grant bound to exact turn scope', async () => {
     const r = await room();
     const target = await seat(r.id);

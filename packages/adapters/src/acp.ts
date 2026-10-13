@@ -85,8 +85,9 @@ export async function startAcp(
     const init = await bounded(connection.agent.request(acp.methods.agent.initialize, initParams), 60000);
     if (init.protocolVersion !== acp.PROTOCOL_VERSION)
       throw new ConveroomError('protocol_version', 'Native agent negotiated an incompatible ACP version');
-    if (product === 'grok' || product === 'antigravity') {
-      const methodId = product === 'grok' ? 'cached_token' : 'oauth-personal';
+    // Native login method IDs these vendors document; selecting one refuses API-key authentication.
+    const methodId = ({ grok: 'cached_token', antigravity: 'oauth-personal', cursor: 'cursor_login' } as Partial<Record<Product, string>>)[product];
+    if (methodId) {
       const method = init.authMethods?.find((m) => m.id === methodId && !('type' in m && m.type === 'terminal'));
       if (!method) throw new ConveroomError('subscription_required', 'Native ' + methodId + ' authentication is required; API authentication is disabled', 403);
       await bounded(connection.agent.request(acp.methods.agent.authenticate, {

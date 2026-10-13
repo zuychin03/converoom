@@ -68,6 +68,7 @@ const FAILURE_REASONS: Record<string, string> = {
 const withReason = (base: string, turn: RecordData) =>
   FAILURE_REASONS[string(turn, 'failure')] ? base + ' · ' + FAILURE_REASONS[string(turn, 'failure')] : base;
 export const failureLabel = (turn: RecordData) => withReason('Failed', turn);
+export const FINDINGS: Record<string, string> = { acted: 'agent acted', not_acted: 'agent did not act', unclear: 'still unclear' };
 
 export interface SeatState {
   kind: Kind;
@@ -102,7 +103,7 @@ export function seatState(seat: RecordData, state: Snapshot, now: number): SeatS
     return { kind: 'idle', label: seat.consent ? 'Queued' : 'Queued · requests off', turn: queued };
   }
   const last = turns[0];
-  if (last?.status === 'uncertain') return { kind: 'warn', label: withReason('Uncertain turn', last), turn: last };
+  if (last?.status === 'uncertain' && !isRecord(last.inspection)) return { kind: 'warn', label: withReason('Uncertain turn', last), turn: last };
   if (last?.status === 'failed') return { kind: 'fail', label: failureLabel(last), turn: last };
   if (seat.mode !== 'managed') return { kind: 'idle', label: 'Polling inbox' };
   if (!turnTarget(seat)) return { kind: 'idle', label: seat.role === 'observer' ? 'Observing' : 'Turns unavailable' };
@@ -126,7 +127,10 @@ export function turnKind(turn: RecordData, state: Snapshot, now: number): { kind
   if (status === 'completed') return { kind: 'ok', label: 'Completed' };
   if (status === 'failed') return { kind: 'fail', label: failureLabel(turn) };
   if (status === 'cancelled') return { kind: 'closed', label: 'Cancelled' };
-  if (status === 'uncertain') return { kind: 'warn', label: withReason('Uncertain', turn) };
+  if (status === 'uncertain') {
+    const finding = isRecord(turn.inspection) ? FINDINGS[string(turn.inspection, 'finding')] : undefined;
+    return finding ? { kind: 'closed', label: 'Uncertain · inspected, ' + finding } : { kind: 'warn', label: withReason('Uncertain', turn) };
+  }
   const seat = state.seats.find((s) => s.id === turn.seatId);
   if (seat && seat.mode !== 'managed') return { kind: 'idle', label: 'In seat inbox' };
   const request = state.permissions.find((p) => p.id === turn.permissionRequestId);
@@ -271,4 +275,20 @@ export function capabilityLine(seat: RecordData) {
   const capabilities = isRecord(seat.capabilities) ? seat.capabilities : {};
   const named = (key: string, empty: string) => list(capabilities, key).join(', ') || empty;
   return `Declared ${named('declared', 'none')} · probed ${named('probed', 'not yet')} · tested ${named('tested', 'not yet')}`;
+}
+const clip = (id: string) => (id.length > 12 ? id.slice(0, 12) + '…' : id);
+// Native tools can bypass room checks, so a managed session is labelled advisory rather than contained.
+export function turnEvidence(turn: RecordData, state: Snapshot): [string, string][] {
+  const seat = state.seats.find((s) => s.id === turn.seatId), status = string(turn, 'status');
+  if (seat?.mode !== 'managed') return [['Native session', 'External conversation, outside runtime control']];
+  const dispatched = num(turn, 'dispatchBoundaryAt'), stopped = num(turn, 'sessionStoppedAt'), cancel = num(turn, 'cancelRequestedAt');
+  const rows: [string, string][] = [['Dispatch', dispatched ? 'Committed ' + fmtClock(dispatched) : OPEN_TURN.includes(status) ? 'Not yet' : 'Never committed, so known not sent']];
+  if (typeof turn.sessionId === 'string')
+    rows.push(['Native session', clip(turn.sessionId) + ' · ' + (stopped ? 'stop confirmed ' + fmtClock(stopped) : ACTIVE_TURN.includes(status) ? 'running' : 'stop not confirmed')]);
+  if (typeof turn.failure === 'string') rows.push(['Outcome code', turn.failure]);
+  if (cancel) rows.push(['Cancel requested', fmtClock(cancel)]);
+  const answer = state.events.find((e) => e.id === turn.responseEventId);
+  if (answer) rows.push(['Posted answer', 'Entry ' + pad(num(answer, 'seq') ?? 0)]);
+  rows.push(['Containment', 'Trusted local and advisory, not a sandbox']);
+  return rows;
 }

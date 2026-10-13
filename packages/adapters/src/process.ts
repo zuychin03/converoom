@@ -86,6 +86,7 @@ export function launch(
       OPENAI_API_KEY: undefined,
       ANTHROPIC_API_KEY: undefined,
       CURSOR_API_KEY: undefined,
+      CURSOR_AUTH_TOKEN: undefined,
       GEMINI_API_KEY: undefined,
       GOOGLE_API_KEY: undefined,
       XAI_API_KEY: undefined,

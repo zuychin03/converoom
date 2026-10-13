@@ -337,6 +337,7 @@ export async function createRuntime(
       let credentialCleanupFailed = false;
       try { await bridge?.revoke(); } catch { credentialCleanupFailed = true; }
       const confirmed = entry.session ? await entry.session.close().catch(() => false) : !nativeStartupBegan;
+      if (entry.session && confirmed) store.put('turn', t.id, { ...store.get<Turn>('turn', t.id)!, sessionStoppedAt: Date.now() });
       const seat = store.get<Seat>('seat', s.id)!;
       store.put('seat', s.id, { ...seat, status: seat.status === 'left' ? 'left' : confirmed ? 'idle' : 'degraded' });
       if (attempt && confirmed) {

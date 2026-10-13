@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, CornerDownRight, Pause, Play, Plus, Search, Square } from 'lucide-react';
 import { isRecord, list, string, type RecordData, type Snapshot } from './api.js';
-import { addAgentAction, closeRoomAction, requestTurnAction } from './actions.js';
+import { addAgentAction, closeRoomAction, inspectTurnAction, requestTurnAction } from './actions.js';
 import { GrantSlip } from './Approvals.js';
 import { Composer } from './Composer.js';
 import { PulsePlot, Sparkline } from './PulsePlot.js';
@@ -22,6 +22,7 @@ import {
 } from './components.js';
 import {
   ACTIVE_TURN,
+  FINDINGS,
   OPEN_TURN,
   activity,
   capabilityLine,
@@ -35,6 +36,7 @@ import {
   roomSeats,
   seatState,
   shortId,
+  turnEvidence,
   turnKind,
   turnTarget,
   turnTiming,
@@ -276,7 +278,7 @@ export function RoomView({
           ? 'Runtime'
           : string(state.seats.find((s) => s.principalId === actorId && s.roomId === id) ?? {}, 'name', 'Agent'),
   };
-  const ctx: EntryContext = { state, room, humanId, now, names, openAction, requestTurn, jump: setFocusSeq };
+  const ctx: EntryContext = { state, room, humanId, now, names, openAction, requestTurn, jump: setFocusSeq, shared };
 
   return (
     <>
@@ -706,6 +708,7 @@ interface EntryContext {
   openAction: (action: Action) => void;
   requestTurn: (seat: RecordData, interactionId?: string) => void;
   jump: (seq: number | null) => void;
+  shared?: boolean;
 }
 
 function Entry({
@@ -954,6 +957,11 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
                 Stop worker
               </button>
             )}
+            {current && !ctx.shared && statusText === 'uncertain' && (
+              <button type="button" className="text-button" onClick={() => ctx.openAction(inspectTurnAction(string(ctx.room, 'id'), turn.id))}>
+                {isRecord(turn.inspection) ? 'Update inspection' : 'Record inspection'}
+              </button>
+            )}
           </div>
           {typeof turn.error === 'string' && <p className="entry-error">{string(turn, 'error')}</p>}
         </>
@@ -976,6 +984,21 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
                 <dt>Grant</dt>
                 <dd>
                   {string(request, 'status')} · <code>{string(request, 'scopeDigest').slice(0, 16)}</code>
+                </dd>
+              </div>
+            )}
+            {!ctx.shared && turnEvidence(turn, state).map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+            {isRecord(turn.inspection) && (
+              <div>
+                <dt>Inspection</dt>
+                <dd>
+                  {[FINDINGS[string(turn.inspection, 'finding')], fmtClock(num(turn.inspection, 'at') ?? 0), string(turn.inspection, 'note')]
+                    .filter(Boolean).join(' · ')}
                 </dd>
               </div>
             )}
@@ -1084,6 +1107,8 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `Candidate applied to the checkout · ${string(d, 'resultDigest').slice(0, 12)}`;
     case 'command.cleared':
       return `Interrupted ${string(d, 'command')} cleared · its client key can run again`;
+    case 'turn.inspected':
+      return `Uncertain turn inspected · ${FINDINGS[string(d, 'finding')] ?? 'finding recorded'}`;
     default:
       return type.replaceAll('.', ' ').replaceAll('_', ' ');
   }

@@ -63,12 +63,12 @@ it('dispatches approved managed work once abandoned polling claims expire', asyn
     expect(runtime.core.store.list<Turn>('turn', { roomId: String(room.id), status: ['uncertain'] })).toHaveLength(2);
   } finally { vi.restoreAllMocks(); await runtime.stop(); await rm(dir, { recursive: true, force: true }); }
 });
-async function budgetRoom(maxMessages: number, prompt: () => Promise<string>, cancel = async () => {}) {
+async function budgetRoom(maxMessages: number, prompt: () => Promise<string>, cancel = async () => {}, close = async () => true) {
   const dir = await mkdtemp(join(tmpdir(), 'converoom-budget-'));
   let started = 0;
   const runtime = await createRuntime(dir, { tickMs: 10, startSession: async (product) => {
     started++;
-    return { id: 'budget-fixture', product, capabilities: ['prompt', 'cancel'], prompt, cancel, close: async () => true };
+    return { id: 'budget-fixture', product, capabilities: ['prompt', 'cancel'], prompt, cancel, close };
   } });
   const call = (name: string, args: ToolArgs) => runtime.core.dispatch(owner, name, args) as Promise<ToolArgs>;
   const room = await call('room_create', { title: 'Budget', objective: 'Bounded discussion' });
@@ -146,6 +146,16 @@ it.each([
     await prompting;
     await fixture.call('turn_cancel', { roomId: fixture.room.id, turnId: id });
     await expect.poll(() => fixture.turn(id).status).toBe(status);
+  } finally { await fixture.close(); }
+});
+it.each([[true, 'completed'], [false, 'uncertain']] as const)('records whether the native session stop was confirmed (%s)', async (confirmed, status) => {
+  const fixture = await budgetRoom(5, async () => 'Checked answer', async () => {}, async () => confirmed);
+  try {
+    const id = await fixture.request();
+    await expect.poll(() => fixture.turn(id).status).toBe(status);
+    const turn = fixture.turn(id) as Turn & { dispatchBoundaryAt?: number; sessionId?: string; sessionStoppedAt?: number };
+    expect(turn).toMatchObject({ sessionId: 'budget-fixture', dispatchBoundaryAt: expect.any(Number) });
+    expect(turn.sessionStoppedAt === undefined).toBe(!confirmed);
   } finally { await fixture.close(); }
 });
 it('does not start approved managed work once the room message budget is exhausted', async () => {

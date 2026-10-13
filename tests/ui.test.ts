@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClient, ApiError, parseSnapshot } from '../apps/ui/src/api.js';
 import { grantAction } from '../apps/ui/src/actions.js';
-import { capabilityLine, commandLabel, failureLabel, interruptedFor, requestDetails, seatState, turnKind, turnTarget, visibleTurn, workerSeat } from '../apps/ui/src/model.js';
+import { capabilityLine, commandLabel, failureLabel, interruptedFor, requestDetails, seatState, turnEvidence, turnKind, turnTarget, visibleTurn, workerSeat } from '../apps/ui/src/model.js';
 import { coalesce } from '../apps/ui/src/refresh.js';
 
 describe('browser command boundary', () => {
@@ -15,6 +15,35 @@ describe('browser command boundary', () => {
     const label = (seat: Record<string, unknown>) => seatState({ id: 'seat', ...seat }, parseSnapshot({}), 0).label;
     expect([label(managed), label({ ...managed, role: 'observer' }), label({ ...managed, product: 'claude' })])
       .toEqual(['Requests off', 'Observing', 'Turns unavailable']);
+  });
+  it('stops flagging an uncertain turn once the owner records an inspection', () => {
+    const seat = { id: 'seat', mode: 'managed', product: 'codex', role: 'member', consent: true };
+    const turn = { id: 'turn', seatId: 'seat', status: 'uncertain', failure: 'turn_timeout', createdAt: 1 };
+    const state = (t: Record<string, unknown>) => parseSnapshot({ seats: [seat], turns: [t] });
+    expect(turnKind(turn, state(turn), 0)).toEqual({ kind: 'warn', label: 'Uncertain · timed out' });
+    expect(seatState(seat, state(turn), 0)).toMatchObject({ kind: 'warn' });
+    const inspected = { ...turn, inspection: { finding: 'not_acted', note: '', at: 2, by: 'owner' } };
+    expect(turnKind(inspected, state(inspected), 0)).toEqual({ kind: 'closed', label: 'Uncertain · inspected, agent did not act' });
+    expect(seatState(seat, state(inspected), 0)).toMatchObject({ kind: 'idle', label: 'Ready' });
+  });
+  it('lists the execution evidence an owner needs to inspect a turn', () => {
+    const state = parseSnapshot({ seats: [{ id: 'managed', mode: 'managed' }, { id: 'polling', mode: 'polling' }],
+      events: [{ id: 'answer-event', roomId: 'room', seq: 12, type: 'message', data: {} }] });
+    const labels = (rows: [string, string][]) => Object.fromEntries(rows);
+    const uncertain = labels(turnEvidence({ seatId: 'managed', status: 'uncertain', dispatchBoundaryAt: 1, sessionId: 'session-abcdef', failure: 'turn_timeout',
+      cancelRequestedAt: 2 }, state));
+    expect(uncertain.Dispatch).toMatch(/^Committed /);
+    expect(uncertain['Native session']).toBe('session-abcd… · stop not confirmed');
+    expect(uncertain).toMatchObject({ 'Outcome code': 'turn_timeout', Containment: 'Trusted local and advisory, not a sandbox' });
+    expect(uncertain['Cancel requested']).toBeDefined();
+    const done = labels(turnEvidence({ seatId: 'managed', status: 'completed', dispatchBoundaryAt: 1, sessionId: 'session-abcdef', sessionStoppedAt: 3,
+      responseEventId: 'answer-event' }, state));
+    expect(done['Native session']).toMatch(/^session-abcd… · stop confirmed /);
+    expect(done['Posted answer']).toBe('Entry 012');
+    expect(labels(turnEvidence({ seatId: 'managed', status: 'failed' }, state)).Dispatch).toBe('Never committed, so known not sent');
+    expect(labels(turnEvidence({ seatId: 'managed', status: 'queued' }, state)).Dispatch).toBe('Not yet');
+    const polling = labels(turnEvidence({ seatId: 'polling', status: 'uncertain' }, state));
+    expect(polling).toEqual({ 'Native session': 'External conversation, outside runtime control' });
   });
   it('labels declared, probed and tested capabilities separately', () => {
     expect(capabilityLine({ capabilities: { declared: ['prompt', 'cancel'], probed: [], tested: [] } }))

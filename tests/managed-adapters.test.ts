@@ -17,7 +17,9 @@ it('reports which managed adapters verify the native sign-in before inference', 
   expect(authCheck('codex')).toContain('ChatGPT sign-in');
   expect(authCheck('grok')).toContain('cached native token');
   expect(authCheck('antigravity')).toContain('personal Google OAuth');
-  for (const product of ['cursor', 'kiro', 'qoder'] as const) expect(authCheck(product)).toMatch(/^Not verified by Converoom/);
+  expect(authCheck('cursor')).toContain('cursor_login');
+  expect(authCheck('kiro')).toContain('--auth-method=cli');
+  expect(authCheck('qoder')).toMatch(/^Not verified by Converoom/);
   for (const product of ['claude', 'opencode'] as const) expect(authCheck(product)).toMatch(/^Not applicable/);
 });
 it.each(acpProducts)('publishes only public output belonging to the %s session', async (product) => {
@@ -73,8 +75,8 @@ it.each(acpProducts)('refuses incompatible %s protocol versions', async (product
   await expect(startManaged(product, process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'wrong-protocol' }))
     .rejects.toMatchObject({ code: 'protocol_version' });
 });
-it('refuses Grok API-only authentication before creating a session', async () => {
-  await expect(startManaged('grok', process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'api-only' }))
+it.each(['grok', 'cursor'] as const)('refuses %s API-only authentication before creating a session', async (product) => {
+  await expect(startManaged(product, process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'api-only' }))
     .rejects.toMatchObject({ code: 'subscription_required' });
 });
 it.each(acpProducts)('surfaces missing %s native login without another provider attempt', async (product) => {

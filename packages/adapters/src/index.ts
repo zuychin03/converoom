@@ -31,7 +31,9 @@ export function authCheck(product: Product): string {
   if (product === 'codex') return 'Managed sessions refuse unless the Codex app server reports a ChatGPT sign-in.';
   if (product === 'grok') return 'Managed sessions authenticate only with the advertised cached native token.';
   if (product === 'antigravity') return 'Managed sessions authenticate only with the advertised personal Google OAuth method.';
-  return 'Not verified by Converoom: managed sessions use the native ' + label + ' login with vendor API-key variables removed. Confirm the account plan in ' + label + '.';
+  if (product === 'cursor') return 'Managed sessions authenticate only with the advertised cursor_login method; API keys and auth tokens are removed.';
+  if (product === 'kiro') return 'Managed sessions start Kiro with --auth-method=cli, so the CLI keeps its own sign-in. Confirm the account plan in Kiro.';
+  return 'Not verified by Converoom: managed sessions use the ' + label + ' CLI\'s own login with its token variable removed. Confirm the account plan in ' + label + '.';
 }
 export async function probeProduct(product: Product, cwd: string): Promise<ToolArgs> {
   const profile = PRODUCT_PROFILES[product];

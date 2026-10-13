@@ -4,6 +4,9 @@ const axe = async (page: Page) =>
   expect(
     (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations,
   ).toEqual([]);
+test.beforeEach(async ({ request }) => {
+  expect((await request.post('http://127.0.0.1:43318/reset')).ok()).toBe(true);
+});
 const watch = (page: Page, errors: string[]) => {
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error' && m.text().includes('Content Security Policy')) errors.push(m.text()); });
@@ -133,6 +136,7 @@ test('complete human room lifecycle at desktop and mobile', async ({ page, reque
     return state.rooms.find((room: { title: string; status: string }) => room.title === 'Acceptance room' && room.status === 'open').id as string;
   });
   expect((await request.post('http://127.0.0.1:43318/workspace?roomId=' + encodeURIComponent(roomId))).ok()).toBe(true);
+  expect((await request.post('http://127.0.0.1:43318/uncertain?roomId=' + encodeURIComponent(roomId))).ok()).toBe(true);
   await page.getByRole('button', { name: 'Work', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Work', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Inspect reservation' }).click();
@@ -157,6 +161,15 @@ test('complete human room lifecycle at desktop and mobile', async ({ page, reque
   await clearing.getByRole('button', { name: 'Clear', exact: true }).click();
   await expect(interrupted).toBeHidden();
   await page.getByRole('button', { name: 'Room', exact: true }).click();
+  await expect(page.getByText('Uncertain · timed out', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Record inspection' }).click();
+  const inspection = page.getByRole('dialog', { name: 'Record inspection' });
+  await inspection.getByLabel('Finding').selectOption('not_acted');
+  await inspection.getByLabel('Note for the record').fill('Checked the workspace; nothing changed');
+  await axe(page);
+  await inspection.getByRole('button', { name: 'Record inspection' }).click();
+  await expect(inspection).toBeHidden();
+  await expect(page.getByText('Uncertain · inspected, agent did not act', { exact: true })).toBeVisible();
   await page.getByText('Room controls', { exact: true }).click();
   await expect(page.getByRole('button', { name: 'Set agenda' })).toBeVisible();
   await axe(page);

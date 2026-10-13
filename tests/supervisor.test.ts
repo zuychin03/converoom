@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 it('removes API billing credentials from supervised native processes', async () => {
-  const keys = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'CURSOR_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'XAI_API_KEY', 'KIRO_API_KEY', 'QODER_PERSONAL_ACCESS_TOKEN'];
+  const keys = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'CURSOR_API_KEY', 'CURSOR_AUTH_TOKEN', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'XAI_API_KEY', 'KIRO_API_KEY', 'QODER_PERSONAL_ACCESS_TOKEN'];
   const result = await run(process.execPath, ['-e', 'console.log(process.argv.slice(1).filter(key => process.env[key]).join(","))', ...keys], process.cwd(), 15000,
     Object.fromEntries(keys.map((key) => [key, 'non-secret-fixture'])));
   expect(result.exitCode).toBe(0);

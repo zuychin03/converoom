@@ -8,7 +8,8 @@ const product = process.argv[2];
 const scenario = process.env.CONVEROOM_VENDOR_FIXTURE;
 const send = (value) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...value }) + '\n');
 let client, roomId, pendingPrompt, clientCapabilities;
-let authenticated = product !== 'grok' && product !== 'antigravity';
+const nativeAuth = { grok: 'cached_token', antigravity: 'oauth-personal', cursor: 'cursor_login' }[product];
+let authenticated = !nativeAuth;
 let nextId = 500;
 const pending = new Map();
 const ask = (method, params) => new Promise((resolve, reject) => {
@@ -53,10 +54,11 @@ async function request(message) {
       protocolVersion: scenario === 'wrong-protocol' ? 999 : 1,
       agentCapabilities: {}, authMethods: product === 'grok'
         ? [{ id: scenario === 'api-only' ? 'xai.api_key' : 'cached_token', name: 'Cached native login' }]
-        : product === 'antigravity' ? [{ id: 'oauth-personal', name: 'Google native login' }] : [],
+        : product === 'antigravity' ? [{ id: 'oauth-personal', name: 'Google native login' }]
+        : product === 'cursor' ? [{ id: scenario === 'api-only' ? 'cursor_api_key' : 'cursor_login', name: 'Cursor login' }] : [],
     } });
   } else if (message.method === 'authenticate') {
-    if (message.params.methodId !== (product === 'grok' ? 'cached_token' : 'oauth-personal'))
+    if (message.params.methodId !== nativeAuth)
       throw new Error('Non-native authentication selected');
     authenticated = true; send({ id: message.id, result: {} });
   } else if (message.method === 'account/read') {

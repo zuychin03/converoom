@@ -120,3 +120,27 @@ export const grantAction = (permission: RecordData): Action => {
     confirm: `Grant “${action}” only for scope digest ${digest}. This authorises local execution until ${expiry}. Review any commands and paths in the scope first.`,
   };
 };
+
+export const inspectTurnAction = (roomId: string, turnId: unknown): Action => ({
+  title: 'Record inspection',
+  command: 'turn_inspect',
+  args: { roomId, turnId },
+  label: 'Record inspection',
+  description:
+    'Check the room, the workspace and the native session first. Recording a finding changes nothing else and reruns nothing; request the work again yourself if it is still needed.',
+  fields: [
+    {
+      key: 'finding',
+      label: 'Finding',
+      type: 'select',
+      required: true,
+      value: 'unclear',
+      options: [
+        { value: 'acted', label: 'The agent acted' },
+        { value: 'not_acted', label: 'The agent did not act' },
+        { value: 'unclear', label: 'Still unclear' },
+      ],
+    },
+    { key: 'note', label: 'Note for the record', type: 'textarea' },
+  ],
+});

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Managed Cursor sessions now authenticate only with Cursor's advertised `cursor_login` method, as Grok and Antigravity already did with theirs, and refuse to start without it. Cursor's auth-token variable is now removed from managed processes along with the API keys. `converoom doctor` describes this and Kiro's CLI-owned sign-in.
+
+A turn's full record now shows its execution evidence: when dispatch was committed, which native session ran it and whether the session's stop was confirmed, the outcome code, any cancel request, the posted answer and that containment is advisory. After checking an uncertain turn you can record what you found (the agent acted, did not act, or it is still unclear) with a private note. The turn stays uncertain, nothing is rerun, and its seat stops showing the warning.
+
 `converoom disconnect` now finishes when you have edited the installed room skill. It keeps the edited skill, says where, and still removes the product's Converoom registration and saved credential. Previously it stopped after revoking the credential, leaving a registration that could no longer connect.
 
 Claude Code and OpenCode seats can no longer be added as managed sessions, which they cannot run; they join through their own MCP conversation. Observers are no longer offered turn, reply or coding-worker choices the room would refuse, and seat cards show declared, probed and tested capabilities separately. Pausing or resuming a room from the index now reports a refusal instead of ignoring it, and confirming a host transfer explains that it hands over orchestration and authorises no execution.

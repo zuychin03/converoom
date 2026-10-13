@@ -120,6 +120,7 @@ export interface Turn {
   interactionId?: string;
   permissionRequestId?: string;
   error?: string;
+  inspection?: { finding: 'acted' | 'not_acted' | 'unclear'; note: string; at: number; by: string };
 }
 export interface RecordFilter {
   roomId?: string;

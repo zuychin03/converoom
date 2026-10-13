@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { createServer as createHttpServer, request as proxyRequest } from 'node:http';
 import { createServer as createTlsServer, Agent, request as tlsRequest } from 'node:https';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
-import { createServer } from '../apps/daemon/src/server.js';
+import { createServer, humanIdentity } from '../apps/daemon/src/server.js';
 import { createSharedServer } from '../apps/daemon/src/shared-server.js';
-import type { Room, Seat } from '../packages/shared/src/contracts.js';
+import type { Room, Seat, Turn } from '../packages/shared/src/contracts.js';
 const dir = await mkdtemp(join(tmpdir(), 'converoom-browser-'));
 const runtime = await createRuntime(dir, { noScheduler: true });
 let terminalCode = '';
@@ -46,6 +46,24 @@ const participantServer = await createServer(participant, { port: 43320, pairing
 const fixtureControl = createHttpServer(async (request, response) => {
   const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
   if (requestUrl.pathname === '/native-count') { response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ nativeStarts })); return; }
+  // The UI opens the latest unclosed room on load, so a room left by a failed flow would change the next flow's first screen.
+  if (request.method === 'POST' && requestUrl.pathname === '/reset') {
+    for (const room of runtime.core.store.list<Room>('room').filter((r) => r.status !== 'closed'))
+      await runtime.core.dispatch(humanIdentity(runtime), 'room_close', { roomId: room.id });
+    response.writeHead(204).end();
+    return;
+  }
+  if (request.method === 'POST' && requestUrl.pathname === '/uncertain') {
+    const roomId = requestUrl.searchParams.get('roomId') ?? '';
+    const turn = runtime.core.store.list<Turn>('turn', { roomId }).sort((a, b) => a.createdAt - b.createdAt).at(-1);
+    if (!turn) { response.writeHead(400).end(); return; }
+    runtime.core.store.put('turn', turn.id, { ...turn, status: 'uncertain', dispatchBoundaryAt: Date.now() - 60000, startedAt: Date.now() - 55000,
+      sessionId: 'browser-native-fixture', failure: 'turn_timeout', error: 'Turn exceeded its wall time',
+      repair: 'The agent may have acted before this stopped. Inspect the room and workspace before requesting it again; nothing is rerun automatically.' });
+    runtime.core.store.append(roomId, 'turn.uncertain', 'runtime', { turnId: turn.id, failure: 'turn_timeout' });
+    response.writeHead(204).end();
+    return;
+  }
   if (request.method === 'POST' && requestUrl.pathname === '/workspace') {
     const roomId = requestUrl.searchParams.get('roomId') ?? '';
     const room = runtime.core.store.get<Room>('room', roomId);
