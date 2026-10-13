@@ -399,6 +399,12 @@ export async function createServer(
       }
     return { revoked: true };
   });
+  app.post<{ Body: { principalId?: unknown } }>('/local/credentials/status', async (request) => {
+    localAuth(request);
+    const principalId = String(request.body?.principalId ?? '');
+    const issued = runtime.core.store.list<Actor>('bridge').some((credential) => credential.principalId === principalId);
+    return { active: issued && !runtime.core.store.get('revoked', principalId) };
+  });
   app.get('/api/events', async (request, reply) => {
     humanSession(request);
     const cursor = String(request.headers['last-event-id'] ?? '');

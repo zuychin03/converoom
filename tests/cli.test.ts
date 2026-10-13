@@ -1,5 +1,5 @@
 import { it, expect, vi } from 'vitest';
-import { editConfig, installSkill, privateJson } from '../apps/cli/src/support.js';
+import { connectionReport, editConfig, installSkill, privateJson } from '../apps/cli/src/support.js';
 import { main } from '../apps/cli/src/index.js';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { createServer } from '../apps/daemon/src/server.js';
@@ -76,4 +76,32 @@ it.each([['an edited', true], ['an unchanged', false]] as const)('disconnect rem
     expect(existsSync(skill) && await readFile(skill, 'utf8')).toBe(edited && 'Owner notes\n');
     expect(log.mock.calls.flat().join('\n').includes(skill)).toBe(edited);
   } finally { log.mockRestore(); await server.close(); await runtime.stop(); await rm(root, { recursive: true, force: true }); }
+}, 30000);
+it('reports whether a product is registered for this data directory and its saved credential is still active', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'converoom-doctor-'));
+  const dataDir = join(root, 'data'), codexConfig = join(root, 'codex.toml'), cursorConfig = join(root, 'cursor.json'), qoderConfig = join(root, 'qoder.json');
+  const runtime = await createRuntime(dataDir, { noScheduler: true });
+  const server = await createServer(runtime, { port: 0, controlToken: 'doctor-fixture' });
+  try {
+    const post = async (path: string, body: unknown) => (await fetch(server.url + path, { method: 'POST', body: JSON.stringify(body),
+      headers: { authorization: 'Bearer doctor-fixture', 'content-type': 'application/json' } })).json() as Promise<Record<string, unknown>>;
+    const active = async (principalId: string) => (await post('/local/credentials/status', { principalId })).active === true;
+    const credential = await post('/local/credentials', { product: 'codex' }) as { principalId: string; token: string };
+    await privateJson(join(dataDir, 'clients', 'codex.json'), { ...credential, config: codexConfig });
+    await editConfig(codexConfig, 'codex', { command: 'node', args: ['stable/cli.js', 'mcp', '--client', 'codex', '--data-dir', dataDir] });
+    await editConfig(cursorConfig, 'cursor', { command: 'node', args: ['stable/cli.js', 'mcp', '--client', 'cursor', '--data-dir', join(root, 'other')] });
+    await writeFile(qoderConfig, '{ not json');
+    expect(await connectionReport('codex', dataDir, join(root, 'default.toml'), active)).toEqual({ registration: 'registered', config: codexConfig, credential: 'active' });
+    expect(await connectionReport('cursor', dataDir, cursorConfig, active))
+      .toEqual({ registration: 'registered for another data directory', config: cursorConfig, credential: 'none saved' });
+    expect(await connectionReport('kiro', dataDir, join(root, 'missing.json'), active)).toMatchObject({ registration: 'no config file' });
+    expect(await connectionReport('qoder', dataDir, qoderConfig, active)).toMatchObject({ registration: 'unreadable config' });
+    expect(await connectionReport('codex', dataDir, codexConfig)).toMatchObject({ credential: 'saved; runtime not running, so not checked' });
+    await post('/local/revoke', { principalId: credential.principalId });
+    expect(await connectionReport('codex', dataDir, codexConfig, active)).toMatchObject({ credential: 'revoked or unknown to this runtime' });
+    await editConfig(codexConfig, 'codex', {}, true);
+    expect(await connectionReport('codex', dataDir, codexConfig, active)).toMatchObject({ registration: 'not registered' });
+    expect((await fetch(server.url + '/local/credentials/status', { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } })).status).toBe(401);
+    expect(JSON.stringify(await connectionReport('codex', dataDir, codexConfig, active))).not.toContain(credential.token);
+  } finally { await server.close(); await runtime.stop(); await rm(root, { recursive: true, force: true }); }
 }, 30000);

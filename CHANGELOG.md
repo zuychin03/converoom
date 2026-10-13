@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+`converoom doctor` now reports, for each product, whether its Converoom registration is present and points at this data directory, and whether the saved bridge credential is still active. It reads only Converoom's own entry in the product's MCP config, and checks the credential with the running runtime without printing it. `connect` records the config path it used, so a registration made with `--config` is checked in the right file.
+
 Managed Cursor sessions now authenticate only with Cursor's advertised `cursor_login` method, as Grok and Antigravity already did with theirs, and refuse to start without it. Cursor's auth-token variable is now removed from managed processes along with the API keys. `converoom doctor` describes this and Kiro's CLI-owned sign-in.
 
 A turn's full record now shows its execution evidence: when dispatch was committed, which native session ran it and whether the session's stop was confirmed, the outcome code, any cancel request, the posted answer and that containment is advisory. After checking an uncertain turn you can record what you found (the agent acted, did not act, or it is still unclear) with a private note. The turn stays uncertain, nothing is rerun, and its seat stops showing the warning.

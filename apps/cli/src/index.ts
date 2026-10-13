@@ -21,6 +21,7 @@ import {
   secret,
   installStable,
   editConfig,
+  connectionReport,
   installSkill,
   removeSkill,
   VERSION,
@@ -103,6 +104,23 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === 'doctor') {
+    let running = false;
+    try {
+      const m = await metadata();
+      const health = (await (await fetch(m.url + '/health', { signal: AbortSignal.timeout(1500) })).json()) as ToolArgs;
+      running = health.name === 'converoom' && health.pid === m.pid;
+    } catch {
+      /* Credential activity is reported as unchecked. */
+    }
+    const active = running
+      ? async (principalId: string) => {
+          try {
+            return (await local('/local/credentials/status', { principalId })).active === true;
+          } catch {
+            return undefined;
+          }
+        }
+      : undefined;
     console.log(
       JSON.stringify(
         {
@@ -111,7 +129,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           arch: process.arch,
           dataDir,
           credentialStorage: 'degraded user files, not an OS keystore',
-          products: await Promise.all(products.map((p) => probeProduct(p, dataDir))),
+          products: await Promise.all(products.map(async (p) => ({
+            ...(await probeProduct(p, dataDir)),
+            ...(await connectionReport(p, dataDir, config(p), active)),
+          }))),
           smoke: 'Approve a bounded managed turn in the room UI; doctor never starts inference',
         },
         null,
@@ -290,7 +311,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       await local('/local/revoke', { principalId: previous.principalId });
     }
     await privateJson(clientFile, { ...(await local('/local/credentials', { product,
-      ...(flag('--remote-connection') ? { remoteConnectionId: flag('--remote-connection') } : {}) })), skill });
+      ...(flag('--remote-connection') ? { remoteConnectionId: flag('--remote-connection') } : {}) })), skill, config: path });
     await editConfig(path, product, {
       command: process.execPath,
       args: [stable, 'mcp', '--client', product, '--data-dir', dataDir],

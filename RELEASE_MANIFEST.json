@@ -3,19 +3,19 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "69b5b3b566a91bbc26e3e6f9e5d3b83947be649bf7358b6babf0451e4d2e80e1"
+      "sha256": "ff85fed5208c32877ee7a7fa5967b36834a1244bfd694e8d1a43d684d36b3ad0"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "cee8b21bfe55a2be3212c000d3e8052a0152d6b1f3bc96d3d15885bebe587569"
+      "sha256": "5625918dbeb6f18e83d241a2462e6f98827e334c3892a39cec62535e9172700a"
     },
     {
       "path": "dist/server.js",
-      "sha256": "cfc5396e2d66b5602ceaeb8e6fa22109a37ac1bc152685a13981b36c8ba7b331"
+      "sha256": "4f5bf6bf36f937275df72c55caeea7b7d27a88e2662db168a392c33061c181ae"
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "4d1bac508685aed1217ff2cc0c9ca717263e5af61e9ad492d3fc4a762df28b74"
+      "sha256": "aa31a722532de0d22cb6b1b2ac9dde0c999bb67755d341beaf985c8d278db1bc"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -83,7 +83,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "271c174b4dbf14ad214e06b7c4dcd271c4b7381ea3ebf7e2934a4cb741820dbf"
+      "sha256": "e7e423f88200acdd07d9f82e061afac178b6e47f61b2d1605166beb9dae94368"
     },
     {
       "path": "docs/WINDOWS_SHARED_PILOT.md",
@@ -95,7 +95,7 @@
     },
     {
       "path": "docs/AGENT_SUPPORT.md",
-      "sha256": "241702a2efb35352d1e9cc9f95a49c307fccd1fde047a4a8718999b95d72fb6e"
+      "sha256": "66fbd379672e87dc58d3dcd528e8c5a3cc8925332147bcc259f90241b2fd3d7f"
     },
     {
       "path": "docs/REQUIREMENT_MATRIX.md",
