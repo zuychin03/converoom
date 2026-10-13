@@ -149,10 +149,12 @@ it.each([
   } finally { await fixture.close(); }
 });
 it.each([[true, 'completed'], [false, 'uncertain']] as const)('records whether the native session stop was confirmed (%s)', async (confirmed, status) => {
-  const fixture = await budgetRoom(5, async () => 'Checked answer', async () => {}, async () => confirmed);
+  const fixture = await budgetRoom(5, async () => 'Checked answer', async () => {},
+    () => new Promise<boolean>((resolve) => setTimeout(() => resolve(confirmed), 200)));
   try {
     const id = await fixture.request();
     await expect.poll(() => fixture.turn(id).status).toBe(status);
+    await expect.poll(() => fixture.runtime.core.store.get<{ status: string }>('seat', fixture.turn(id).seatId)?.status).toBe(confirmed ? 'idle' : 'degraded');
     const turn = fixture.turn(id) as Turn & { dispatchBoundaryAt?: number; sessionId?: string; sessionStoppedAt?: number };
     expect(turn).toMatchObject({ sessionId: 'budget-fixture', dispatchBoundaryAt: expect.any(Number) });
     expect(turn.sessionStoppedAt === undefined).toBe(!confirmed);
