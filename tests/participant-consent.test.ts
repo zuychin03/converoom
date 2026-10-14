@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
+import { scopeDigest } from '../packages/store/src/index.js';
 import { sharedCommand } from '../packages/core/src/membership.js';
 import { createServer, issueBridgeCredential } from '../apps/daemon/src/server.js';
 import { REMOTE_PUBLICATION_MARGIN_MS } from '../packages/remote/src/client.js';
@@ -415,4 +416,31 @@ it('fences an acknowledged remote claim if the local connection ends while await
   await expect.poll(() => participant.core.store.get<{ status: string }>('seat', connection.localSeatId!)?.status).toBe('idle');
   expect(started).toBe(0);
   expect(participant.core.store.get<RemoteProposal>('remote_proposal', pending.id)?.status).toBe('uncertain');
+});
+it('audits the participant owner\'s connection, proposal and revocation decisions locally', async () => {
+  const audited = (type: string) => participant.core.store.events(connection.localRoomId!, 0, 1000).filter((e) => e.type === type);
+  const check = (type: string, fields: string[]) => {
+    const [e] = audited(type);
+    expect(e, type).toBeDefined();
+    expect(e.actorId, type).toBe(localB.principalId);
+    const { actionDigest, policyVersion, ...content } = e.data as ToolArgs;
+    expect(actionDigest, type).toBe(scopeDigest(content));
+    expect(policyVersion, type).toEqual(expect.any(Number));
+    for (const field of fields) expect(content, type + ' ' + field).toHaveProperty(field);
+  };
+  check('remote.connected', ['connectionId', 'remoteRoomId', 'mode', 'maxTurns', 'maxTurnMs']);
+  const accepted = await proposal();
+  await call(participant, 'remote_turn_accept', { proposalId: accepted.id, digest: accepted.digest }, localB);
+  check('remote.proposal_accepted', ['proposalId', 'digest', 'senderOwnerId', 'maxTurnMs', 'expiresAt']);
+  await call(host, 'turn_request', { roomId: room.id, seatId: seat.id, prompt: 'Second review' });
+  await call(participant, 'remote_refresh', { connectionId: connection.id }, localB);
+  const declined = participant.core.store.list<RemoteProposal>('remote_proposal').find((p) => p.status === 'pending')!;
+  await call(participant, 'remote_turn_decline', { proposalId: declined.id, digest: declined.digest }, localB);
+  check('remote.proposal_declined', ['proposalId', 'digest']);
+  await call(participant, 'remote_connection_disconnect', { connectionId: connection.id }, localB);
+  check('remote.disconnected', ['connectionId', 'remoteRoomId']);
+  const polling = await call(participant, 'remote_connection_attach', { origin: connection.origin, remoteRoomId: room.id,
+    clientId: 'participant-bridge', accessToken: 'fixture', product: 'codex', mode: 'polling', maxTurns: 2, maxTurnMs: 60000 }, localB) as RemoteConnection;
+  const outside = participant.core.store.list<{ type: string; actorId: string; data: ToolArgs }>('authority_audit').find((r) => r.type === 'remote.connected')!;
+  expect(outside).toMatchObject({ actorId: localB.principalId, data: { connectionId: polling.id, mode: 'polling', actionDigest: expect.any(String) } });
 });

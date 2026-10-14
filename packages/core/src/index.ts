@@ -16,6 +16,7 @@ import {
 } from '../../shared/src/contracts.js';
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
 import { activeMembership, currentSeat, currentTurnAuthority, mountMembership, requireHumanParticipant, requireSeatOwner, SHARED_READS } from './membership.js';
+import { authority } from './audit.js';
 // Reads rerun on retry, so their results are never stored under a client key.
 export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
   'resource_profile_list', 'adapter_status', 'room_export', 'interrupted_command_list']);
@@ -181,7 +182,7 @@ export function createCore(store: Store): Core {
       expiresAt: Date.now() + (action === 'vendor_tool' ? 120000 : 3600000),
     };
     store.put('permission', p.id, p);
-    ev(a, id, 'permission.requested', p);
+    authority(store, a, room(id), 'permission.requested', p);
     return p;
   };
   const add = (a: Actor, r: Room, x: ToolArgs, principalId: string = randomUUID()): Seat => {
@@ -230,7 +231,7 @@ export function createCore(store: Store): Core {
     store.put('seat', s.id, s);
     if (role === 'host' && !r.hostSeatId)
       store.put('room', r.id, { ...room(r.id), hostSeatId: s.id });
-    ev(a, r.id, 'seat.joined', { ...s });
+    authority(store, a, room(r.id), 'seat.joined', { ...s });
     return s;
   };
   const c: Core = {
@@ -340,7 +341,7 @@ export function createCore(store: Store): Core {
     requireSeatOwner(c, a, s);
     s.consent = x.consent === true;
     store.put('seat', s.id, s);
-    ev(a, id, 'seat.consent', { seatId: s.id, consent: s.consent });
+    authority(store, a, room(id), 'seat.consent', { seatId: s.id, consent: s.consent });
     return s;
   });
   c.register('room_leave', (a, x) => {
@@ -367,7 +368,7 @@ export function createCore(store: Store): Core {
       version: next.policyVersion,
       policy: p,
     });
-    ev(a, r.id, 'policy.changed', { version: next.policyVersion });
+    authority(store, a, next, 'policy.changed', { version: next.policyVersion, previousVersion: r.policyVersion, policy: p });
     return room(r.id);
   });
   const post = (a: Actor, x: ToolArgs) => {
@@ -555,7 +556,7 @@ export function createCore(store: Store): Core {
     store.put('seat', s.id, { ...s, role: 'host' });
     store.put('room', r.id, { ...r, hostSeatId: s.id });
     store.put('permission', p.id, { ...p, status: 'granted' });
-    ev(a, r.id, 'host.transferred', { seatId: s.id });
+    authority(store, a, room(r.id), 'host.transferred', { requestId: p.id, seatId: s.id, previousSeatId: r.hostSeatId ?? null, scopeDigest: p.scopeDigest });
     return room(r.id);
   });
   for (const [n, status] of [
@@ -782,8 +783,10 @@ export function createCore(store: Store): Core {
     };
     store.put('grant', g.id, g);
     store.put('permission', p.id, { ...p, status: 'granted' });
-    ev(a, p.roomId, 'permission.granted', {
+    authority(store, a, room(p.roomId), 'permission.granted', {
       requestId: p.id,
+      action: p.action,
+      scope: p.scope,
       scopeDigest: p.scopeDigest,
       expiresAt: p.expiresAt,
     });
@@ -795,7 +798,7 @@ export function createCore(store: Store): Core {
     requireHumanParticipant(c, a, p.roomId);
     if (p.ownerId !== a.ownerId) throw new E('permission_owner', 'Permission owner required', 403);
     store.put('permission', p.id, { ...p, status: 'denied' });
-    return ev(a, p.roomId, 'permission.denied', { requestId: p.id });
+    return authority(store, a, room(p.roomId), 'permission.denied', { requestId: p.id, action: p.action, scopeDigest: p.scopeDigest, expiresAt: p.expiresAt });
   });
   c.register('runtime_capabilities', () => ({
     protocol: 1,

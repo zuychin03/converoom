@@ -6,8 +6,9 @@ import { createOAuthMetadata } from '@modelcontextprotocol/sdk/server/auth/route
 import { OAuthClientInformationFullSchema, type OAuthClientInformationFull, type OAuthTokens,
   type OAuthTokenRevocationRequest } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { InvalidClientError, InvalidGrantError, InvalidRequestError, InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
-import { ConveroomError as E, type Actor, type Core, type Seat } from '../../shared/src/contracts.js';
+import { ConveroomError as E, type Actor, type Core, type Room, type Seat } from '../../shared/src/contracts.js';
 import { activeMembership, currentSeat } from '../../core/src/membership.js';
+import { authority } from '../../core/src/audit.js';
 
 const secret = () => randomBytes(32).toString('base64url');
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
@@ -120,6 +121,8 @@ export class SharedOAuth implements OAuthServerProvider {
       this.check(record);
       this.core.store.put('shared_oauth_code', hash(code), { ...record, id: hash(code) });
       this.core.store.put('shared_oauth_request', id, { ...request, approved: true });
+      authority(this.core.store, actor, this.core.store.get<Room>('room', request.roomId)!, 'bridge.authorized', { clientId: request.clientId,
+        scope: 'room:' + request.roomId, generation: m.generation, familyId: record.familyId, expiresAt: record.expiresAt });
       const redirect = new URL(request.redirectUri);
       redirect.searchParams.set('code', code); redirect.searchParams.set('state', request.state); redirect.searchParams.set('iss', this.origin);
       return redirect.href;
@@ -181,6 +184,8 @@ export class SharedOAuth implements OAuthServerProvider {
     const id = hash(request.token), record = this.core.store.get<Binding>('shared_oauth_access', id) ?? this.core.store.get<Binding>('shared_oauth_refresh', id);
     if (record?.clientId === this.client(client.client_id).client_id) {
       this.core.store.put('shared_oauth_revoked', record.familyId, { revokedAt: Date.now() });
+      const r = this.core.store.get<Room>('room', record.roomId);
+      if (r) authority(this.core.store, record.actor, r, 'bridge.revoked', { clientId: record.clientId, familyId: record.familyId });
       for (const kind of ['shared_oauth_access', 'shared_oauth_refresh'])
         for (const row of this.core.store.list<Binding & { id: string }>(kind))
           if (row.familyId === record.familyId) this.core.store.remove(kind, row.id);

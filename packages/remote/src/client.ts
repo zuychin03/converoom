@@ -13,6 +13,7 @@ import { ConveroomError as E, requiredString as str, type Actor, type Core, type
 import { privateOrigin } from '../../mcp/src/shared-auth.js';
 import { pinnedFetch, RoomOAuthClient, type RoomOAuthState } from '../../mcp/src/remote.js';
 import { SHARED_READS, SHARED_WRITES } from '../../core/src/membership.js';
+import { authority, installationAuthority } from '../../core/src/audit.js';
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
 import { privateJson } from '../../../apps/cli/src/support.js';
 
@@ -84,6 +85,11 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
     if (!local || a.kind !== 'human' || a.ownerId !== local.ownerId || a.principalId !== local.principalId)
       throw new E('local_human', 'The paired local human must approve', 403);
     return local;
+  };
+  // A managed connection records the owner's decisions in its local room; a polling one has no room, so they become audit records.
+  const audit = (a: Actor, c: RemoteConnection, type: string, data: ToolArgs) => {
+    const r = c.localRoomId ? store.get<Room>('room', c.localRoomId) : undefined;
+    if (r) authority(store, a, r, type, data); else installationAuthority(store, a, type, data);
   };
   const connection = (id: string) => {
     const c = store.get<RemoteConnection>('remote_connection', id);
@@ -259,7 +265,10 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
         throw new E('remote_identity', 'An owner-bound room agent credential is required', 403);
       c.remoteOwnerId = identity.actor.ownerId; c.generation = identity.generation; c.remoteSeatId = identity.actor.seatId;
       if (c.mode === 'managed') Object.assign(c, await proxyRoom(a, c.id, c.product, c.maxTurns, c.maxTurnMs));
-      await privateJson(path(id), { ...credentials, connection: c }); store.put('remote_connection', c.id, c); clients.set(c.id, remote); return c;
+      await privateJson(path(id), { ...credentials, connection: c }); store.put('remote_connection', c.id, c); clients.set(c.id, remote);
+      audit(a, c, 'remote.connected', { connectionId: c.id, remoteRoomId: c.remoteRoomId, origin: c.origin, product: c.product, mode: c.mode,
+        maxTurns: c.maxTurns, maxTurnMs: c.maxTurnMs, generation: c.generation });
+      return c;
     } catch (error) { await remote.close().catch(() => {}); await unlink(path(id)).catch(() => {}); throw error; }
   });
   core.register('remote_connection_prepare', async (a, x) => {
@@ -334,7 +343,9 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
     store.put('remote_connection', c.id, { ...c, status: 'uncertain' });
     const next: RemoteConnection = { ...c, mode: 'managed', status: 'connected', ...await proxyRoom(a, c.id, c.product, Number(x.maxTurns), Number(x.maxTurnMs)),
       maxTurns: Number(x.maxTurns), maxTurnMs: Number(x.maxTurnMs), updatedAt: Date.now() };
-    store.put('remote_connection', c.id, next); return next;
+    store.put('remote_connection', c.id, next);
+    audit(a, next, 'remote.managed_enabled', { connectionId: c.id, remoteRoomId: c.remoteRoomId, product: c.product, maxTurns: next.maxTurns, maxTurnMs: next.maxTurnMs });
+    return next;
   });
   core.register('remote_turn_decline', async (a, x) => {
     human(a); const p = store.get<RemoteProposal>('remote_proposal', str(x, 'proposalId', 256));
@@ -344,6 +355,7 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
     store.put('remote_proposal', p.id, { ...p, status: 'uncertain' });
     await (await client(c)).command('turn_cancel', { ...versioned(c, p), turnId: p.remoteTurnId, clientKey: 'participant-decline:' + p.id });
     store.put('remote_proposal', p.id, { ...p, status: 'declined' });
+    audit(a, c, 'remote.proposal_declined', { proposalId: p.id, connectionId: c.id, digest: p.digest, remoteTurnId: p.remoteTurnId });
     return { proposalId: p.id, status: 'declined' };
   });
   core.register('remote_connection_disconnect', async (a, x) => {
@@ -359,6 +371,7 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
     }
     const remote = clients.get(c.id); clients.delete(c.id); await remote?.close().catch(() => {});
     await unlink(path(c.id)).catch(() => {}); await unlink(join(dataDir, 'remote', c.id + '.oauth.json')).catch(() => {});
+    audit(a, c, 'remote.disconnected', { connectionId: c.id, remoteRoomId: c.remoteRoomId, remoteRevocationConfirmed: false });
     return { connectionId: c.id, status: 'revoked', remoteRevocationConfirmed: false };
   });
   core.register('remote_agent_dispatch', async (a, x) => {
@@ -406,6 +419,8 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
         throw new E('remote_offline', 'Connection changed while accepting the proposal', 409);
       }
       store.put('remote_proposal', p.id, { ...p, status: 'accepted', localTurnId: turn.id });
+      audit(a, c, 'remote.proposal_accepted', { proposalId: p.id, connectionId: c.id, digest: p.digest, remoteTurnId: p.remoteTurnId,
+        senderOwnerId: p.senderOwnerId, maxTurnMs: p.maxTurnMs, localTurnId: turn.id, expiresAt: p.deadline });
       return { proposalId: p.id, localTurnId: turn.id, permissionRequestId: turn.permissionRequestId, localApprovalRequired: true };
     } catch (error) { store.put('remote_proposal', p.id, { ...p, status: 'uncertain' }); throw error; }
   });

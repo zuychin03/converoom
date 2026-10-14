@@ -3,19 +3,19 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "ff85fed5208c32877ee7a7fa5967b36834a1244bfd694e8d1a43d684d36b3ad0"
+      "sha256": "94bf6b9a37ebfb203942447bead8c4691c281d350ab5714266d4d8fb8b5d737c"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "5625918dbeb6f18e83d241a2462e6f98827e334c3892a39cec62535e9172700a"
+      "sha256": "9e128b1a948ce110c253ef871766562872f15c46433ff3d41b5631529ad593c6"
     },
     {
       "path": "dist/server.js",
-      "sha256": "4f5bf6bf36f937275df72c55caeea7b7d27a88e2662db168a392c33061c181ae"
+      "sha256": "e84bdf356c86a9e6693ef6298e3fe61a57190b7621e8f130537ca1d51447df69"
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "aa31a722532de0d22cb6b1b2ac9dde0c999bb67755d341beaf985c8d278db1bc"
+      "sha256": "150cc46b212a235468d9d81c2b662bf0e725576a1b1f3697fa1eac6c85bde6e4"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -30,12 +30,12 @@
       "sha256": "809306f8444febde9c633c98531c6db7d3505735545b2369881e8cce511a31f9"
     },
     {
-      "path": "dist/ui/assets/index-CTZa4jwO.css",
-      "sha256": "4f6327d31aed57c50798494e1b73e58d70124c1dbde023ad5ba8f0451bc8196c"
+      "path": "dist/ui/assets/index-CGpLd8-b.js",
+      "sha256": "fa4c90aa6b9df23b3a5279b2bd1d18fb03a82ab1b180bcee12a0d261d7b7c605"
     },
     {
-      "path": "dist/ui/assets/index-CxuqZZ85.js",
-      "sha256": "eb84441421053ddb8e7cb889fdaa2fe6e2542ce5520697d585574b095ce17641"
+      "path": "dist/ui/assets/index-CTZa4jwO.css",
+      "sha256": "4f6327d31aed57c50798494e1b73e58d70124c1dbde023ad5ba8f0451bc8196c"
     },
     {
       "path": "dist/ui/assets/martian-mono-cyrillic-ext-wght-normal-DAknEryR.woff2",
@@ -67,7 +67,7 @@
     },
     {
       "path": "dist/ui/index.html",
-      "sha256": "5e539d79b6dec1e5cd4b554dd6605ad0e817d52a3944c520f4c1ac9770a30126"
+      "sha256": "d8d6cc08fac077f677ccbe39afe717d067db3762968a9fa5f50823c353378f18"
     },
     {
       "path": "plugins/README.md",
@@ -83,7 +83,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "e7e423f88200acdd07d9f82e061afac178b6e47f61b2d1605166beb9dae94368"
+      "sha256": "3442a5027b876b1799f8d68194b0696ae41ad63ca16db884e823cb07eae13587"
     },
     {
       "path": "docs/WINDOWS_SHARED_PILOT.md",
@@ -91,7 +91,7 @@
     },
     {
       "path": "docs/PREVIEW_ACCEPTANCE.md",
-      "sha256": "cb39d8b34825080a5968f9643a3b6e7c39c97fb11751e4317d58145b87e9eb99"
+      "sha256": "af44e305b99f4194eeca8dc9c9d83f0f20fb0bc4c0216866fe757af16760a575"
     },
     {
       "path": "docs/AGENT_SUPPORT.md",
@@ -99,7 +99,7 @@
     },
     {
       "path": "docs/REQUIREMENT_MATRIX.md",
-      "sha256": "36bdbdb3a0d3a31efc7e546894dae4a3365f7edee12780ee24bd2e273faf2c77"
+      "sha256": "140d79ae71017e60caabb603df0175a8e35acee9f6e16a2f8ea627a4251d1cde"
     },
     {
       "path": "docs/WINDOWS_INSTALL.md",

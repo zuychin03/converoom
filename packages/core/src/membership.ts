@@ -6,6 +6,8 @@ import {
   type SharedArtefact,
 } from '../../shared/src/contracts.js';
 import { artefactMetadata } from './shared-artefacts.js';
+import { authority } from './audit.js';
+import { code, inline, time, transcriptMarkdown, TRANSCRIPT_FORMAT } from './transcript.js';
 import { scopeDigest, redactPublic, redactTransport } from '../../store/src/index.js';
 
 const lifetime = 600000;
@@ -198,14 +200,21 @@ export async function sharedCommand(c: Core, a: Actor, roomId: string, generatio
 }
 export async function sharedExport(c: Core, a: Actor, roomId: string, generation: number, cursor: number) {
   const projection = sharedProjection(c, a, roomId), page = await sharedCommand(c, a, roomId, generation, 'room_read', { roomId, cursor, limit: 20 }) as ToolArgs;
-  const view = { room: projection.room, events: page.events, artefacts: projection.artefacts, omitted: page.omitted, cursor: page.cursor };
-  const markdown = '# Converoom shared room\n\nBounded public history page. Request the next cursor for remaining history.\n\n```json\n' + JSON.stringify(view, null, 2) + '\n```\n';
-  return { markdown, cursor: page.cursor, hasMore: Number(page.cursor) < Number((projection.room as ToolArgs).seq), digest: scopeDigest(markdown), view: 'bounded-page' };
+  const room = projection.room as ToolArgs, events = page.events as ToolArgs[], hasMore = Number(page.cursor) < Number(room.seq);
+  const self = a.kind === 'human' ? activeMembership(c.store, roomId, a.ownerId, a.principalId) : undefined;
+  const markdown = transcriptMarkdown({ room, events, seats: projection.seats as ToolArgs[], interactions: projection.interactions as ToolArgs[],
+    members: projection.members as ToolArgs[], artefacts: projection.artefacts as ToolArgs[], people: self ? { [a.principalId]: self.displayName } : {}, provenance: [
+      `Shared room ${code('converoom://rooms/' + roomId)}, ${inline(room.status)}, policy version ${Number(room.policyVersion)}`,
+      `Public history after event #${cursor}` + (events.length ? `: #${Number(events[0].seq)} to #${Number(events.at(-1)!.seq)}` : '') +
+        (hasMore ? `; request cursor ${Number(page.cursor)} for the next page` : '; no later public events'),
+      `Exported ${time(Date.now())} as Converoom transcript format ${TRANSCRIPT_FORMAT}. Only the room's public projection is included; ` +
+        'message, agenda and decision text appears in fenced blocks as recorded after credential redaction',
+    ] });
+  return { markdown, cursor: page.cursor, hasMore, digest: scopeDigest(markdown), view: 'bounded-page' };
 }
 export function mountMembership(c: Core) {
   const { store } = c;
-  const audit = (a: Actor, r: Room, type: string, data: ToolArgs) => store.append(r.id, type, a.principalId,
-    { ...data, actionDigest: scopeDigest(data), policyVersion: r.policyVersion });
+  const audit = (a: Actor, r: Room, type: string, data: ToolArgs) => authority(store, a, r, type, data);
   const admin = (a: Actor, x: ToolArgs) => {
     const id = str(x, 'roomId', 256); c.requireOwner(a, id);
     const r = c.requireRoom(a, id);
@@ -266,7 +275,7 @@ export function mountMembership(c: Core) {
       invitedBy: invitation.invitedBy, createdAt: old?.createdAt ?? Date.now(), updatedAt: Date.now(), pendingExpiresAt: Date.now() + lifetime };
     store.put('invitation', invitation.id, { ...invitation, status: 'redeemed', memberId });
     store.put('human_membership', m.id, m);
-    audit(a, r, 'membership.pending', { memberId: m.id, ownerId: m.ownerId, generation: m.generation, displayName: m.displayName });
+    audit(a, r, 'membership.pending', { memberId: m.id, ownerId: m.ownerId, generation: m.generation, displayName: m.displayName, expiresAt: m.pendingExpiresAt });
     return m;
   }));
   c.register('membership_confirm', (a, x) => store.transaction(() => {
@@ -297,10 +306,10 @@ export function mountMembership(c: Core) {
       store.put('turn', t.id, { ...t, status, error: 'Membership removed; external execution stop is unconfirmed' });
       audit(a, r, 'turn.' + status, { turnId: t.id, membershipGeneration: next.generation });
     }
-    for (const p of store.list<{ id: string; ownerId: string; status: string }>('permission', { roomId: r.id, status: ['pending'] }))
+    for (const p of store.list<{ id: string; ownerId: string; status: string; action: string; scopeDigest: string }>('permission', { roomId: r.id, status: ['pending'] }))
       if (p.ownerId === m.ownerId) {
         store.put('permission', p.id, { ...p, status: 'cancelled' });
-        audit(a, r, 'permission.cancelled', { requestId: p.id, memberId: m.id });
+        audit(a, r, 'permission.cancelled', { requestId: p.id, memberId: m.id, action: p.action, scopeDigest: p.scopeDigest });
       }
     for (const consent of store.list<OwnerConsent>('owner_consent', { roomId: r.id }))
       if (consent.ownerId === m.ownerId) store.put('owner_consent', consent.id, { ...consent, status: 'revoked', updatedAt: Date.now() });
@@ -325,7 +334,7 @@ export function mountMembership(c: Core) {
     const next: HumanMembership = { ...fenced, status: 'pending', invitedBy: invitation.invitedBy, pendingExpiresAt: Date.now() + lifetime };
     store.put('invitation', invitation.id, { ...invitation, status: 'redeemed', memberId: m.id });
     store.put('human_membership', m.id, next);
-    audit(a, r, 'membership.recovery_pending', { memberId: m.id, ownerId: m.ownerId, generation: next.generation });
+    audit(a, r, 'membership.recovery_pending', { memberId: m.id, ownerId: m.ownerId, generation: next.generation, expiresAt: next.pendingExpiresAt });
     return next;
   }));
   c.register('room_members', (a, x) => {

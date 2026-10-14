@@ -29,7 +29,8 @@ import {
 import { probeProduct } from '../../../packages/adapters/src/index.js';
 import { PRODUCT_IDS, PRODUCT_PROFILES, isProduct } from '../../../packages/shared/src/products.js';
 import { redactPublic } from '../../../packages/store/src/index.js';
-import type { Product, ToolArgs, Event } from '../../../packages/shared/src/contracts.js';
+import { exportTranscript, type RoomExport } from '../../../packages/core/src/transcript.js';
+import type { Product, ToolArgs } from '../../../packages/shared/src/contracts.js';
 interface Metadata {
   url: string;
   pid: number;
@@ -333,26 +334,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   if (command === 'export') {
     if (!argv[1]) throw new Error('Room ID required');
     const output = resolve(flag('--output') ?? 'converoom-' + argv[1] + '.json');
-    const exported = (await call('room_export', { roomId: argv[1] })) as {
-      records: unknown[];
-      events: Event[];
-    };
-    const text = output.endsWith('.md')
-      ? '# Converoom room history\n\n' +
-        exported.events
-          .map(
-            (e) =>
-              '## ' +
-              e.seq +
-              ' ' +
-              e.type +
-              '\n\n```json\n' +
-              JSON.stringify(e.data, null, 2) +
-              '\n```',
-          )
-          .join('\n\n') +
-        '\n'
-      : JSON.stringify(exported, null, 2) + '\n';
+    const exported = (await call('room_export', { roomId: argv[1] })) as RoomExport;
+    const text = output.endsWith('.md') ? exportTranscript(exported) : JSON.stringify(exported, null, 2) + '\n';
     await writeFile(output, text, { mode: 0o600 });
     console.log('Export: ' + output);
     return;

@@ -85,6 +85,14 @@ const SYSTEM_LABELS: Record<string, string> = {
   'candidate.prepared': 'candidate',
   'candidate.accepted': 'candidate accepted',
   'candidate.applied': 'candidate applied',
+  'turn.inspected': 'inspection',
+  'bridge.authorized': 'room connection approved',
+  'bridge.revoked': 'room connection revoked',
+  'remote.connected': 'connected',
+  'remote.managed_enabled': 'managed discussion enabled',
+  'remote.proposal_accepted': 'proposal accepted',
+  'remote.proposal_declined': 'proposal declined',
+  'remote.disconnected': 'disconnected',
 };
 function summarise(events: RecordData[]) {
   const counts = new Map<string, number>();
@@ -1109,6 +1117,20 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `Interrupted ${string(d, 'command')} cleared · its client key can run again`;
     case 'turn.inspected':
       return `Uncertain turn inspected · ${FINDINGS[string(d, 'finding')] ?? 'finding recorded'}`;
+    case 'bridge.authorized':
+      return `Room connection approved for a participant bridge · membership ${String(d.generation)}`;
+    case 'bridge.revoked':
+      return 'Room connection revoked for a participant bridge';
+    case 'remote.connected':
+      return `Connected to the shared room · ${d.mode === 'managed' ? 'managed discussion' : 'polling'}`;
+    case 'remote.managed_enabled':
+      return `Managed discussion enabled · up to ${String(d.maxTurns)} turns of ${fmtDuration(num(d, 'maxTurnMs') ?? 0)}`;
+    case 'remote.proposal_accepted':
+      return 'Turn proposal accepted · local approval still required';
+    case 'remote.proposal_declined':
+      return 'Turn proposal declined';
+    case 'remote.disconnected':
+      return 'Disconnected locally · remote revocation not confirmed';
     default:
       return type.replaceAll('.', ' ').replaceAll('_', ' ');
   }

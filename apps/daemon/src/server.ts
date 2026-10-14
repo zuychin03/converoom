@@ -22,6 +22,7 @@ import { MANAGED_TOOLS, type ManagedScope } from '../../../packages/mcp/src/mana
 import { SHARED_READS, SHARED_WRITES } from '../../../packages/core/src/membership.js';
 import { READ_COMMANDS } from '../../../packages/core/src/index.js';
 import { artefactMetadata } from '../../../packages/core/src/shared-artefacts.js';
+import { installationAuthority } from '../../../packages/core/src/audit.js';
 import type { SharedArtefact } from '../../../packages/shared/src/contracts.js';
 
 export const VERSION = '0.2.0';
@@ -234,7 +235,9 @@ export async function createServer(
     pairingUsed = true;
     const cookie = secret();
     const csrf = secret();
-    sessions.set(hash(cookie), { csrf, expiresAt: Date.now() + 86400000 });
+    const expiresAt = Date.now() + 86400000;
+    sessions.set(hash(cookie), { csrf, expiresAt });
+    installationAuthority(runtime.core.store, human, 'pairing.session_issued', { expiresAt });
     reply.header(
       'set-cookie',
       `converoom_session=${cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400`,
@@ -373,7 +376,10 @@ export async function createServer(
   });
   app.post<{ Body: { product: Product; remoteConnectionId?: string } }>('/local/credentials', async (request) => {
     localAuth(request);
-    return issueBridgeCredential(runtime, request.body.product, request.body.remoteConnectionId);
+    const issued = issueBridgeCredential(runtime, request.body.product, request.body.remoteConnectionId);
+    installationAuthority(runtime.core.store, human, 'bridge.credential_issued', { principalId: issued.principalId, product: request.body.product,
+      ...(issued.remoteConnectionId ? { remoteConnectionId: issued.remoteConnectionId } : {}) });
+    return issued;
   });
   app.post('/local/pair', async (request) => {
     localAuth(request);
@@ -382,6 +388,7 @@ export async function createServer(
     pairing = secret().slice(0, 12);
     pairingExpiresAt = Date.now() + 300000;
     pairingUsed = false;
+    installationAuthority(runtime.core.store, human, 'pairing.code_issued', { reason: 'rotation', expiresAt: pairingExpiresAt });
     options.onPairingCode(pairing, pairingExpiresAt);
     return { issued: true, expiresAt: pairingExpiresAt };
   });
@@ -392,11 +399,14 @@ export async function createServer(
   });
   app.post<{ Body: { principalId: string } }>('/local/revoke', async (request) => {
     localAuth(request);
+    let revoked = false;
     for (const credential of runtime.core.store.list<Actor & { id?: string }>('bridge'))
       if (credential.principalId === request.body.principalId) {
         // Hash keys are not exposed by Store.list; credentials are revoked through an indexed principal record.
         runtime.core.store.put('revoked', credential.principalId, true);
+        revoked = true;
       }
+    if (revoked) installationAuthority(runtime.core.store, human, 'bridge.credential_revoked', { principalId: request.body.principalId });
     return { revoked: true };
   });
   app.post<{ Body: { principalId?: unknown } }>('/local/credentials/status', async (request) => {
@@ -486,6 +496,7 @@ export async function createServer(
     sessions.clear();
   });
   url = await app.listen({ host: '127.0.0.1', port: options.port ?? 43123 });
+  installationAuthority(runtime.core.store, human, 'pairing.code_issued', { reason: 'startup', expiresAt: pairingExpiresAt });
   return {
     app,
     url,

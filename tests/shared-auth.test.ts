@@ -106,3 +106,14 @@ it('fails closed on non-private or non-canonical origins and unsafe static clien
     expect(() => new SharedOAuth(core, url, [client])).toThrow();
   expect(() => new SharedOAuth(core, origin, [{ ...client, redirect_uris: ['http://169.254.169.254/callback'] }])).toThrow();
 });
+it('audits a room connection approval and its revocation under the participant who authorised it', async () => {
+  const issued = await tokens();
+  const events = () => core.store.events(room.id, 0, 1000);
+  const authorized = events().find((e) => e.type === 'bridge.authorized')!;
+  expect(authorized).toMatchObject({ actorId: b.principalId, data: { clientId: client.client_id, scope: 'room:' + room.id,
+    generation: member.generation, expiresAt: expect.any(Number), actionDigest: expect.any(String), policyVersion: room.policyVersion } });
+  await auth.revokeToken(client, { token: issued.access_token });
+  const revoked = events().find((e) => e.type === 'bridge.revoked')!;
+  expect(revoked).toMatchObject({ actorId: b.principalId, data: { clientId: client.client_id, familyId: (authorized.data as { familyId: string }).familyId,
+    actionDigest: expect.any(String), policyVersion: room.policyVersion } });
+});

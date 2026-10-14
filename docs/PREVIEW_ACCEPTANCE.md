@@ -24,9 +24,19 @@ Local packed Windows checks pass setup, preserved configuration, credential rota
 
 The documentation refresh rebuilds and repacks 0.2.0. Its 18 runtime/skill assets and seven recorded runtime source hashes still match the earlier lifecycle-tested installation. The updated overlay README is the remaining manifest asset. The new 32-file package passes version, asset, shrinkwrap, native provenance and private-content checks; publication preparation does not count as a new fresh-user or full lifecycle run.
 
-The final-source reference fixture on a Ryzen 9 6900HX, 15,629 MiB RAM, Windows x64 and Node 24.21.0 measures command p95 7.984 ms (100), state p95 176.187 ms (100), SSE p95 765.099 ms (20) and separate-daemon peak 247.488 MiB with 200 rooms, 100,000 events, 10,000 completed turns, 10,000 expired grants and ten ungranted requests. No inference ran. These are daemon fixture measurements; rendered latency, combined idle browser memory and saturation remain open.
+The final-source reference fixture on a Ryzen 9 6900HX, 15,629 MiB RAM, Windows x64 and Node 24.21.0 measures command p95 7.984 ms (100), state p95 176.187 ms (100), SSE p95 765.099 ms (20) and separate-daemon peak 247.488 MiB with 200 rooms, 100,000 events, 10,000 completed turns, 10,000 expired grants and ten ungranted requests. No inference ran. These are daemon fixture measurements; saturation remains open.
 
-The package version is 0.2.0. The real two-Windows pilot awaits the private hostname and explicit activation. Actual vendor permission/cancel/quota behaviour, three fresh-user timings, manual screen-reader/WCAG 2.2 and rendered-latency/combined-memory/capacity evidence remain open. Verify Windows CI against the exact published commit in the [workflow runs](https://github.com/zuychin03/converoom/actions/workflows/windows-preview.yml); earlier green runs do not validate 0.2.0. macOS/Linux are unverified and excluded from preview claims. See the [Windows pilot guide](WINDOWS_SHARED_PILOT.md).
+On 14/10/2026 the compiled daemon ran the SPEC reference pilot load with one headless Chrome 154 page on the same machine. The load was five seats in the live room, two claimed polling turns and 10,000 stored room events across 41 rooms, with no inference. Six fresh-daemon runs gave 144 samples of each kind, with random gaps of 0.3 to 1.5 seconds:
+
+- Command acknowledgement, from the Post click to the command response: p95 21.2 ms. An agent's local command: p95 16.9 ms.
+- The owner's own post visible: p95 91.2 ms.
+- An agent's post visible in the page: p95 767.6 ms. Two samples in one run took 2.0 and 6.7 seconds; they did not recur in 72 instrumented samples, where event stream delivery was p95 683 ms and state reloads p95 55 to 70 ms. The local event stream's 750 ms poll accounts for most of this latency.
+- Idle memory after 30 seconds: the daemon's working set was 94 to 149 MiB. The UI added 120 to 200 MiB over the same browser on about:blank, mostly in its renderer, although the page's JavaScript heap was about 6 MiB. The combined working set was 269 to 313 MiB (median 284), above the 300 MiB target in one run of six; the combined private working set was 170 to 228 MiB.
+- No workers or services ran. The daemon's only descendant was the console host Windows attaches to a start without a terminal. The data directory held 10.6 MiB, and the daemon was serving 1.5 to 1.8 seconds after launch.
+
+Headed browsers and other hardware are unmeasured.
+
+The package version is 0.2.0. The real two-Windows pilot awaits the private hostname and explicit activation. Actual vendor permission/cancel/quota behaviour, three fresh-user timings, manual screen-reader/WCAG 2.2 and capacity evidence remain open, and the combined memory target is not yet met reliably. Verify Windows CI against the exact published commit in the [workflow runs](https://github.com/zuychin03/converoom/actions/workflows/windows-preview.yml); earlier green runs do not validate 0.2.0. macOS/Linux are unverified and excluded from preview claims. See the [Windows pilot guide](WINDOWS_SHARED_PILOT.md).
 
 ## Historical hardening checkpoints, 09/10/2026
 
@@ -64,7 +74,7 @@ Actual Claude Code and OpenCode MCP acceptance remains unverified. As directed o
 
 The Windows bundle provides one-run prerequisite installation and guided local onboarding, with native login remaining in the vendor clients. A fully interactive account/setup wizard and three fresh-user onboarding timings remain open. Installer fixtures, local npm/npx, upgrade/downgrade and partial-install results are recorded separately from fresh-machine acceptance. npm registry publication has not been requested.
 
-Capacity admission, disk/memory/CPU pressure, reference-load acknowledgement/update latency and combined resident-memory targets remain open. Source executable-mode behaviour on Windows, path-transition races, read-only private-backup restoration, complete authority audit coverage and adversarial resource-exhaustion acceptance need broader tests.
+Capacity admission and disk/memory/CPU pressure remain open. The reference-load acknowledgement and update latency targets were met on the Windows reference machine. The combined resident-memory target was exceeded in one of six runs. Source executable-mode behaviour on Windows, path-transition races, read-only private-backup restoration and adversarial resource-exhaustion acceptance need broader tests. Authority audit records now have fixture coverage for every permission, consent, policy, host, membership, connection and credential change, including pairing; release acceptance of that audit remains open.
 
 Quarantined or uncertain work is retained for inspection. Automatic resource recycling and complete rework/reassignment recovery are not yet accepted. Private shared human memberships are implemented behind explicit setup; real multi-machine acceptance is pending. Hosted services, cloud connectors, distributed coding workers and interactive previews remain deferred.
 
