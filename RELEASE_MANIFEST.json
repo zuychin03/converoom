@@ -91,7 +91,7 @@
     },
     {
       "path": "docs/PREVIEW_ACCEPTANCE.md",
-      "sha256": "2d6511342032d2e3fc27c32f6c510f798c0f5e187f58b608ac135eef35c6e41c"
+      "sha256": "f77ad39caf321f8027b3b1156f28ef31de2f2ff3909e4f8ad5d25a6376c64a64"
     },
     {
       "path": "docs/AGENT_SUPPORT.md",
@@ -99,7 +99,7 @@
     },
     {
       "path": "docs/REQUIREMENT_MATRIX.md",
-      "sha256": "140d79ae71017e60caabb603df0175a8e35acee9f6e16a2f8ea627a4251d1cde"
+      "sha256": "e2b606a5bc35831a5a8aa22fcd1dc2ebc5eaa545e86b15eb0188d7c7ca6c736c"
     },
     {
       "path": "docs/WINDOWS_INSTALL.md",
