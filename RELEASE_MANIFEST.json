@@ -3,19 +3,19 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "94bf6b9a37ebfb203942447bead8c4691c281d350ab5714266d4d8fb8b5d737c"
+      "sha256": "2f77a0b78b410d482570ca021128bb09c7a072f5f1d84ceae5667e44d94ecd42"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "9e128b1a948ce110c253ef871766562872f15c46433ff3d41b5631529ad593c6"
+      "sha256": "1f4204c9249217891a2b6a83e5779ad7b013ddb399aa2d1df35b5b8b2d1aee15"
     },
     {
       "path": "dist/server.js",
-      "sha256": "e84bdf356c86a9e6693ef6298e3fe61a57190b7621e8f130537ca1d51447df69"
+      "sha256": "291bf65b89d9617a6a07c7dc7be21aa110d1234146ac001594dbf6bb55dedf9a"
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "150cc46b212a235468d9d81c2b662bf0e725576a1b1f3697fa1eac6c85bde6e4"
+      "sha256": "b34d32731bf5c0263673651d0520896ef12981a48e58f4e0a9818dda682fd8f4"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -91,7 +91,7 @@
     },
     {
       "path": "docs/PREVIEW_ACCEPTANCE.md",
-      "sha256": "af44e305b99f4194eeca8dc9c9d83f0f20fb0bc4c0216866fe757af16760a575"
+      "sha256": "2d6511342032d2e3fc27c32f6c510f798c0f5e187f58b608ac135eef35c6e41c"
     },
     {
       "path": "docs/AGENT_SUPPORT.md",

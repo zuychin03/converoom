@@ -164,6 +164,19 @@ export function createStore(path: string): Store {
       return r && canonicalJson([r.actorId, r.command, r.clientKey]);
     };
     const liveMarks = (marks: ResultMark[]) => marks.filter((m) => resultKey(resultAt.get(m.rowid)) === m.key);
+    const appendListeners = new Set<() => void>();
+    let notifying = false;
+    // Transactions are synchronous, so a microtask runs only after the outermost one has committed or rolled back.
+    const notifyAppend = () => {
+      if (notifying) return;
+      notifying = true;
+      queueMicrotask(() => {
+        notifying = false;
+        for (const listener of appendListeners) {
+          try { listener(); } catch { /* One failing listener must not stop the others or reach the appender. */ }
+        }
+      });
+    };
     const parse = <T>(row: unknown): T | undefined =>
       row ? (JSON.parse((row as { json: string }).json) as T) : undefined;
     const store: Store = {
@@ -211,6 +224,7 @@ export function createStore(path: string): Store {
           };
           append.run(roomId, event.seq, event.id, canonicalJson(event));
           store.put('room', roomId, { ...room, seq: event.seq });
+          notifyAppend();
           return event;
         }),
       events: (roomId, after = 0, limit = 100) =>
@@ -228,6 +242,10 @@ export function createStore(path: string): Store {
         const row = eventCursor.get(cursor) as { cursor: number } | undefined;
         if (!row) throw new ConveroomError('cursor_expired', 'Event cursor is no longer retained', 409);
         return afterCursor.all(row.cursor, pageLimit(limit)).map((r) => parse<Event>(r)!);
+      },
+      onAppend: (listener) => {
+        appendListeners.add(listener);
+        return () => { appendListeners.delete(listener); };
       },
       importEvents: (input) =>
         store.transaction(() => {

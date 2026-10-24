@@ -194,6 +194,7 @@ export interface Store {
   eventCount(roomId: string, type: string): number;
   recentEvents(limit?: number): Event[];
   eventsAfter(cursor: string, limit?: number): Event[];
+  onAppend(listener: () => void): () => void;
   importEvents(events: Event[]): void;
   idempotent<T>(actorId: string, command: string, key: string, payload: unknown, fn: () => T): T;
   forgetResults(commands: readonly string[]): number;

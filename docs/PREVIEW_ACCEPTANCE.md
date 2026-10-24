@@ -34,6 +34,12 @@ On 14/10/2026 the compiled daemon ran the SPEC reference pilot load with one hea
 - Idle memory after 30 seconds: the daemon's working set was 94 to 149 MiB. The UI added 120 to 200 MiB over the same browser on about:blank, mostly in its renderer, although the page's JavaScript heap was about 6 MiB. The combined working set was 269 to 313 MiB (median 284), above the 300 MiB target in one run of six; the combined private working set was 170 to 228 MiB.
 - No workers or services ran. The daemon's only descendant was the console host Windows attaches to a start without a terminal. The data directory held 10.6 MiB, and the daemon was serving 1.5 to 1.8 seconds after launch.
 
+Later the same day the local event stream began sending each event as soon as the transaction that stored it commits, instead of checking every 750 ms. By then Chrome had updated to 155 and OneDrive was syncing on about two cores, so the previous build was measured again under the same conditions (three runs, 72 samples of each kind) to separate the change from the environment:
+
+- An agent's post visible in the page: p95 43.2 ms (maximum 61.2 ms) over six runs and 144 samples, against 754.4 ms for the previous build. Event stream delivery fell from p95 723.5 ms to 8.8 ms.
+- The owner's own post visible (p95 50.3 ms against 49.1 ms) and command acknowledgement (18.0 ms against 17.1 ms) did not change. Both builds reloaded state at p95 25 to 33 ms, against 55 to 70 ms in the first measurement, so the faster own-post figure comes from the environment, not the event stream.
+- Idle memory did not change: the combined working set was 261 to 304 MiB (median 265) with the change and 269 to 298 MiB without it, again above 300 MiB in one run of six.
+
 Headed browsers and other hardware are unmeasured.
 
 The package version is 0.2.0. The real two-Windows pilot awaits the private hostname and explicit activation. Actual vendor permission/cancel/quota behaviour, three fresh-user timings, manual screen-reader/WCAG 2.2 and capacity evidence remain open, and the combined memory target is not yet met reliably. Verify Windows CI against the exact published commit in the [workflow runs](https://github.com/zuychin03/converoom/actions/workflows/windows-preview.yml); earlier green runs do not validate 0.2.0. macOS/Linux are unverified and excluded from preview claims. See the [Windows pilot guide](WINDOWS_SHARED_PILOT.md).

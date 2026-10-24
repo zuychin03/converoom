@@ -43,6 +43,25 @@ describe('durable store', () => {
     expect(restored.append('r', 'post', 'a', {}).seq).toBe(2);
     expect(restored.events('r').map((e) => e.seq)).toEqual([1, 2]);
   });
+  it('notifies append listeners once per synchronous batch after it commits, past a failing listener, until they unsubscribe', async () => {
+    const { store } = open();
+    store.put('room', 'r', { id: 'r', seq: 0 });
+    const seen: number[][] = [];
+    store.onAppend(() => { throw new Error('listener failure'); });
+    const stop = store.onAppend(() => seen.push(store.events('r').map((e) => e.seq)));
+    store.transaction(() => {
+      store.append('r', 'post', 'a', {});
+      store.append('r', 'post', 'a', {});
+    });
+    store.append('r', 'post', 'a', {});
+    expect(seen).toEqual([]);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(seen).toEqual([[1, 2, 3]]);
+    stop();
+    store.append('r', 'post', 'a', {});
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(seen).toEqual([[1, 2, 3]]);
+  });
   it('deduplicates 100 callers and rejects changed payload reuse', async () => {
     const { store } = open();
     store.put('room', 'r', { id: 'r', seq: 0 });

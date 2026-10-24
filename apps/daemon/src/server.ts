@@ -442,10 +442,11 @@ export async function createServer(
     let busy = false;
     let blocked = false;
     const emit = () => {
-      if (busy || blocked || reply.raw.destroyed) return;
+      if (busy || blocked || reply.raw.writableEnded || reply.raw.destroyed) return;
       busy = true;
       try {
-        for (const event of runtime.core.store.eventsAfter(lastId)) {
+        const page = runtime.core.store.eventsAfter(lastId, 1000);
+        for (const event of page) {
           const accepted = reply.raw.write(
               `id: ${event.id}\nevent: room\ndata: ${JSON.stringify(redact(event))}\n\n`,
             );
@@ -456,16 +457,17 @@ export async function createServer(
             break;
           }
         }
+        if (!blocked && page.length === 1000) setImmediate(emit);
       } catch {
         reply.raw.end('event: resync\ndata: {"reason":"cursor_expired"}\n\n');
       } finally {
         busy = false;
       }
     };
-    const timer = setInterval(emit, 750);
+    const unsubscribe = runtime.core.store.onAppend(emit);
     const heartbeat = setInterval(() => reply.raw.write(': keepalive\n\n'), 15000);
     const finish = () => {
-      clearInterval(timer);
+      unsubscribe();
       clearInterval(heartbeat);
       streams.delete(finish);
       reply.raw.end();

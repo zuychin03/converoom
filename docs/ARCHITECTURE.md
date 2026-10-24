@@ -1,6 +1,6 @@
 # Converoom architecture
 
-Converoom 0.2.0 is a Windows V1.1 preview with one authoritative writer per room. A Node 24 daemon stores rooms, events, interactions, permissions, tasks and evidence in SQLite. A React browser interface connects over authenticated loopback JSON and SSE. The compiled CLI starts the daemon, pairs a browser, registers MCP clients and manages local exports and installation. Private shared discussion uses a separate opt-in listener and participant-owned local bridges.
+Converoom 0.2.0 is a Windows V1.1 preview with one authoritative writer per room. A Node 24 daemon stores rooms, events, interactions, permissions, tasks and evidence in SQLite. A React browser interface connects over authenticated loopback JSON and SSE; the local event stream sends each room event as soon as the transaction that stored it commits. The compiled CLI starts the daemon, pairs a browser, registers MCP clients and manages local exports and installation. Private shared discussion uses a separate opt-in listener and participant-owned local bridges.
 
 ## Agent participation
 

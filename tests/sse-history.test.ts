@@ -110,6 +110,26 @@ it('delivers every event once and in order to a consumer that stops reading for 
     expect(await ids(response, 400)).toEqual(written);
   } finally { await close(); }
 }, 30000);
+it('pushes committed events to an open stream in pages without waiting for a timer, and never a rolled-back one', async () => {
+  const { runtime, server, cookie, close } = await paired();
+  try {
+    const room = String((await runtime.core.dispatch(humanIdentity(runtime), 'room_create', { title: 'Push', objective: 'Prompt delivery' }) as ToolArgs).id);
+    // With the stream's interval timers frozen, an event can only arrive if the append itself wakes the stream.
+    vi.useFakeTimers({ toFake: ['setInterval'] });
+    const response = await open(server.url, cookie, runtime.core.store.recentEvents(1)[0].id);
+    vi.useRealTimers();
+    expect(() => runtime.core.store.transaction(() => {
+      runtime.core.store.append(room, 'fixture', 'owner', { rolledBack: true });
+      throw new Error('rolled back');
+    })).toThrow('rolled back');
+    await new Promise((resolve) => setImmediate(resolve));
+    const written = [runtime.core.store.append(room, 'fixture', 'owner', { i: 0 }).id];
+    runtime.core.store.transaction(() => {
+      for (let i = 1; i <= 1100; i++) written.push(runtime.core.store.append(room, 'fixture', 'owner', { i }).id);
+    });
+    expect(await ids(response, written.length)).toEqual(written);
+  } finally { vi.useRealTimers(); await close(); }
+}, 30000);
 it('tells a client holding a cursor from another store to resync instead of refusing the stream', async () => {
   const { server, cookie, close } = await paired();
   try {
