@@ -41,6 +41,23 @@ export const roomEvents = (state: Snapshot, roomId: string) =>
     .filter((event) => event.roomId === roomId)
     .sort((a, b) => (num(a, 'seq') ?? 0) - (num(b, 'seq') ?? 0));
 
+// The server sends one page of the selected room's events; pages loaded earlier go before it. Once new events move that
+// page past them they would leave a gap, so they are dropped until loaded again.
+export function withEarlier(state: Snapshot, earlier?: { roomId: string; events: RecordData[] }): Snapshot {
+  const first = earlier ? num(roomEvents(state, earlier.roomId)[0] ?? {}, 'seq') : undefined;
+  if (!earlier || first === undefined) return state;
+  const kept = earlier.events.filter((event) => (num(event, 'seq') ?? 0) < first);
+  if (!kept.length || Math.max(...kept.map((event) => num(event, 'seq') ?? 0)) < first - 1) return state;
+  return { ...state, events: [...kept, ...state.events] };
+}
+
+export function liveRoomId(state: Snapshot) {
+  return state.rooms
+    .filter((room) => room.status !== 'closed')
+    .map((room) => ({ id: string(room, 'id'), at: Math.max(num(room, 'lastEventAt') ?? 0, num(room, 'createdAt') ?? 0) }))
+    .sort((a, b) => b.at - a.at)[0]?.id;
+}
+
 export const roomSeats = (state: Snapshot, roomId: string) =>
   state.seats.filter((seat) => seat.roomId === roomId && seat.status !== 'left');
 

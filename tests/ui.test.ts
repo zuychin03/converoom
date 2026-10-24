@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClient, ApiError, parseSnapshot } from '../apps/ui/src/api.js';
 import { grantAction } from '../apps/ui/src/actions.js';
-import { capabilityLine, commandLabel, failureLabel, interruptedFor, requestDetails, seatState, turnEvidence, turnKind, turnTarget, visibleTurn, workerSeat } from '../apps/ui/src/model.js';
+import { capabilityLine, commandLabel, failureLabel, interruptedFor, liveRoomId, requestDetails, roomEvents, seatState, turnEvidence, turnKind, turnTarget, visibleTurn, withEarlier, workerSeat } from '../apps/ui/src/model.js';
 import { coalesce } from '../apps/ui/src/refresh.js';
 
 describe('browser command boundary', () => {
@@ -183,5 +183,36 @@ describe('browser command boundary', () => {
     const state = parseSnapshot({ rooms: [{ id: 'room1' }], events: [] });
     expect(state.rooms).toEqual([{ id: 'room1' }]);
     expect(state.tasks).toEqual([]);
+  });
+  it('opens the unclosed room with the latest activity from the server\'s last event times', () => {
+    const state = parseSnapshot({ rooms: [
+      { id: 'closed', status: 'closed', createdAt: 9, lastEventAt: 99 },
+      { id: 'quiet', status: 'open', createdAt: 5, lastEventAt: 20 },
+      { id: 'busy', status: 'paused', createdAt: 1, lastEventAt: 30 },
+      { id: 'new', status: 'open', createdAt: 25 },
+    ] });
+    expect(liveRoomId(state)).toBe('busy');
+    expect(liveRoomId(parseSnapshot({ rooms: [{ id: 'closed', status: 'closed' }] }))).toBeUndefined();
+  });
+  it('puts loaded earlier pages before the room\'s current window once and ignores another room\'s pages', () => {
+    const state = parseSnapshot({ events: [{ id: 'e3', roomId: 'room', seq: 3 }, { id: 'e4', roomId: 'room', seq: 4 }] });
+    const earlier = [{ id: 'e1', roomId: 'room', seq: 1 }, { id: 'e2', roomId: 'room', seq: 2 }, { id: 'e3', roomId: 'room', seq: 3 }];
+    expect(roomEvents(withEarlier(state, { roomId: 'room', events: earlier }), 'room').map((e) => e.id)).toEqual(['e1', 'e2', 'e3', 'e4']);
+    expect(withEarlier(state, { roomId: 'other', events: earlier })).toBe(state);
+    expect(withEarlier(state, { roomId: 'room', events: earlier.slice(0, 1) })).toBe(state);
+    expect(withEarlier(state, undefined)).toBe(state);
+  });
+  it('asks for the selected room\'s state and pages its earlier history', async () => {
+    const urls: string[] = [];
+    const client = createClient(async (url: string) => {
+      urls.push(url);
+      return new Response(JSON.stringify(url.includes('/events') ? { events: [{ id: 'e1', seq: 1 }] } : { rooms: [] }), { status: 200 });
+    });
+    await client.state('room one/2');
+    await client.state();
+    expect(await client.earlierEvents('room one/2', 101)).toEqual([{ id: 'e1', seq: 1 }]);
+    expect(urls).toEqual(['/api/state?room=room%20one%2F2', '/api/state', '/api/rooms/room%20one%2F2/events?before=101']);
+    const broken = createClient(async () => new Response(JSON.stringify({ events: 'none' }), { status: 200 }));
+    await expect(broken.earlierEvents('room', 5)).rejects.toThrow('Invalid room history');
   });
 });

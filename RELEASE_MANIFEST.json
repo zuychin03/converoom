@@ -3,19 +3,19 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "2f77a0b78b410d482570ca021128bb09c7a072f5f1d84ceae5667e44d94ecd42"
+      "sha256": "fad634f1da51b6c54033ee1a05f35055cc5e006128837a5b03af0bbd4169a724"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "1f4204c9249217891a2b6a83e5779ad7b013ddb399aa2d1df35b5b8b2d1aee15"
+      "sha256": "074094a9957d3c2dd9a93714848058b0c6d0f43d82c744a728d26bca2c6210dc"
     },
     {
       "path": "dist/server.js",
-      "sha256": "291bf65b89d9617a6a07c7dc7be21aa110d1234146ac001594dbf6bb55dedf9a"
+      "sha256": "a2cdde7b0afa312b7e2012dbbb0130f8863b40a90edce79390837c69c5f3e78b"
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "b34d32731bf5c0263673651d0520896ef12981a48e58f4e0a9818dda682fd8f4"
+      "sha256": "96a11d1cb64c623e87a199bfca10af9c6e12b37535f0eb3d4e98640528f9acff"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -30,12 +30,12 @@
       "sha256": "809306f8444febde9c633c98531c6db7d3505735545b2369881e8cce511a31f9"
     },
     {
-      "path": "dist/ui/assets/index-CGpLd8-b.js",
-      "sha256": "fa4c90aa6b9df23b3a5279b2bd1d18fb03a82ab1b180bcee12a0d261d7b7c605"
+      "path": "dist/ui/assets/index-BaswSwVN.js",
+      "sha256": "f1deebcdae7d989af8fe4b8c3a4e285581599d8ebe9d3f01ebc43d00dc13f267"
     },
     {
-      "path": "dist/ui/assets/index-CTZa4jwO.css",
-      "sha256": "4f6327d31aed57c50798494e1b73e58d70124c1dbde023ad5ba8f0451bc8196c"
+      "path": "dist/ui/assets/index-DfrYHSsA.css",
+      "sha256": "0e972f77266dcf7123de246fae5f4910526905dc56c5dbf88e4a98f74e7b789b"
     },
     {
       "path": "dist/ui/assets/martian-mono-cyrillic-ext-wght-normal-DAknEryR.woff2",
@@ -67,7 +67,7 @@
     },
     {
       "path": "dist/ui/index.html",
-      "sha256": "d8d6cc08fac077f677ccbe39afe717d067db3762968a9fa5f50823c353378f18"
+      "sha256": "c8931d8f20406e3d92490c51d6e2d88355fbc370f65e88c28d07be750e69243c"
     },
     {
       "path": "plugins/README.md",

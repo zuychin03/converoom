@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import {
   ConveroomError,
   type Actor,
-  type Event,
   type Product,
+  type Room,
   type Runtime,
   type Seat,
   type Turn,
@@ -69,40 +69,53 @@ export function issueBridgeCredential(
 export function redact(value: unknown): unknown {
   return redactTransport(value);
 }
-const entities = {
-  rooms: 'room',
-  seats: 'seat',
+const installation = {
   profiles: 'profile',
+  repos: 'repo',
+  resources: 'resource',
+  remoteConnections: 'remote_connection',
+  remoteProposals: 'remote_proposal',
+};
+const roomScoped = {
+  seats: 'seat',
   interactions: 'interaction',
   turns: 'turn',
   permissions: 'permission',
   tasks: 'task',
   attempts: 'attempt',
-  repos: 'repo',
   manifests: 'manifest',
   verifications: 'verification',
   reviews: 'review',
   candidates: 'candidate',
-  resources: 'resource',
-  remoteConnections: 'remote_connection',
-  remoteProposals: 'remote_proposal',
   members: 'human_membership',
   ownerConsents: 'owner_consent',
-  sharedArtefacts: 'shared_artefact',
 };
-export function snapshot(runtime: Runtime): Record<string, unknown> {
+const ACTIVE_TURNS = ['dispatching', 'running', 'cancelling'];
+// The store reads at most 1,000 events per call.
+export const ROOM_EVENT_PAGE = 1000;
+// Turn, permission and interaction records are never pruned, so only the selected room's are sent; other rooms add the
+// approvals waiting and the turns in flight that the shell shows across rooms.
+export function snapshot(runtime: Runtime, roomId?: string): Record<string, unknown> {
+  const store = runtime.core.store, room = roomId ? store.get<Room>('room', roomId) : undefined;
+  const now = Date.now(), elsewhere = (row: { roomId: string }) => row.roomId !== room?.id;
   const state: Record<string, unknown> = {};
-  for (const [key, kind] of Object.entries(entities))
-    state[key] = redact(runtime.core.store.list(kind));
-  state.events = redact(allEvents(runtime));
-  state.sharedArtefacts = runtime.core.store.list<SharedArtefact>('shared_artefact').map(artefactMetadata);
-  state.invitations = runtime.core.store.list<Record<string, unknown>>('invitation').map((row) => {
+  for (const [key, kind] of Object.entries(installation)) state[key] = redact(store.list(kind));
+  const scoped: Record<string, Array<{ roomId: string }>> = {};
+  for (const [key, kind] of Object.entries(roomScoped)) scoped[key] = room ? store.list(kind, { roomId: room.id }) : [];
+  scoped.permissions!.push(...store.list<{ roomId: string; expiresAt: number }>('permission', { status: ['pending'] })
+    .filter((p) => elsewhere(p) && p.expiresAt > now));
+  scoped.turns!.push(...store.list<Turn>('turn', { status: ACTIVE_TURNS }).filter(elsewhere));
+  for (const [key, rows] of Object.entries(scoped)) state[key] = redact(rows);
+  const lastEventAt = (r: Room) => store.events(r.id, r.seq - 1, 1)[0]?.at;
+  state.rooms = redact(store.list<Room>('room').map((r) => r.id === room?.id
+    ? { ...r, lastEventAt: lastEventAt(r), messageCount: store.eventCount(r.id, 'message') }
+    : r.status === 'closed' ? r : { ...r, lastEventAt: lastEventAt(r) }));
+  state.events = room ? redact(store.events(room.id, Math.max(0, room.seq - ROOM_EVENT_PAGE), ROOM_EVENT_PAGE)) : [];
+  state.sharedArtefacts = room ? store.list<SharedArtefact>('shared_artefact', { roomId: room.id }).map(artefactMetadata) : [];
+  state.invitations = room ? store.list<Record<string, unknown>>('invitation', { roomId: room.id }).map((row) => {
     const { codeHash: _hash, ...metadata } = row; return metadata;
-  });
+  }) : [];
   return state;
-}
-function allEvents(runtime: Runtime): Event[] {
-  return runtime.core.store.recentEvents(1000);
 }
 export interface ServerOptions {
   port?: number;
@@ -245,9 +258,19 @@ export async function createServer(
     return { paired: true };
   });
   app.get('/api/session', async (request) => ({ csrf: humanSession(request).csrf, actor: human }));
-  app.get('/api/state', async (request) => {
+  app.get<{ Querystring: { room?: unknown } }>('/api/state', async (request) => {
     humanSession(request);
-    return { ...snapshot(runtime), interruptedCommands: redact(await runtime.core.dispatch(human, 'interrupted_command_list', {})) };
+    const room = typeof request.query.room === 'string' ? request.query.room : undefined;
+    return { ...snapshot(runtime, room), interruptedCommands: redact(await runtime.core.dispatch(human, 'interrupted_command_list', {})) };
+  });
+  app.get<{ Params: { id: string }; Querystring: { before?: unknown } }>('/api/rooms/:id/events', async (request) => {
+    humanSession(request);
+    const room = runtime.core.store.get<Room>('room', request.params.id);
+    if (!room) throw new ConveroomError('room_not_found', 'Room not found', 404);
+    const before = Number(request.query.before);
+    if (!Number.isInteger(before) || before < 1) throw new ConveroomError('invalid_argument', 'Expected a positive event number', 400);
+    const end = Math.min(before - 1, room.seq), start = Math.max(0, end - ROOM_EVENT_PAGE);
+    return { events: end > start ? redact(runtime.core.store.events(room.id, start, end - start)) : [] };
   });
   const humanCommands = new Set([
     'seat_add',

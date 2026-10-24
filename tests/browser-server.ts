@@ -64,6 +64,16 @@ const fixtureControl = createHttpServer(async (request, response) => {
     response.writeHead(204).end();
     return;
   }
+  // Enough newer events elsewhere that no window of recent events across rooms reaches the flow's own room.
+  if (request.method === 'POST' && requestUrl.pathname === '/busy') {
+    const owner = humanIdentity(runtime);
+    const room = await runtime.core.dispatch(owner, 'room_create', { title: 'Busy fixture room', objective: 'Newer events elsewhere' }) as Room;
+    runtime.core.store.transaction(() => { for (let i = 0; i < 1100; i++) runtime.core.store.append(room.id, 'fixture', 'fixture', { i }); });
+    await runtime.core.dispatch(owner, 'room_close', { roomId: room.id });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ roomId: room.id }));
+    return;
+  }
   if (request.method === 'POST' && requestUrl.pathname === '/workspace') {
     const roomId = requestUrl.searchParams.get('roomId') ?? '';
     const room = runtime.core.store.get<Room>('room', roomId);

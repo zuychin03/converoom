@@ -198,6 +198,7 @@ export function RoomView({
   focusSeq,
   setFocusSeq,
   onAllRooms,
+  loadEarlier,
   shared = false,
 }: {
   room: RecordData;
@@ -208,6 +209,7 @@ export function RoomView({
   focusSeq: number | null;
   setFocusSeq: (seq: number | null) => void;
   onAllRooms: () => void;
+  loadEarlier?: () => Promise<void>;
   shared?: boolean;
 }) {
   const now = useNow(5000);
@@ -229,7 +231,8 @@ export function RoomView({
   const feed = useRef<HTMLDivElement>(null);
   const status = roomStatus(room, state);
   const host = seats.find((s) => s.id === room.hostSeatId);
-  const messages = events.filter((e) => e.type === 'message').length;
+  const messages = num(room, 'messageCount') ?? events.filter((e) => e.type === 'message').length;
+  const first = num(events[0] ?? {}, 'seq') ?? 1;
 
   const visible = events.filter(
     (event) =>
@@ -268,6 +271,17 @@ export function RoomView({
       await run(command, { roomId: id });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The room did not change. Try again.');
+    } finally {
+      setBusy('');
+    }
+  }
+  async function earlierEvents() {
+    setBusy('earlier');
+    setError('');
+    try {
+      await loadEarlier!();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Earlier events did not load. Try again.');
     } finally {
       setBusy('');
     }
@@ -368,6 +382,13 @@ export function RoomView({
         )}
         <div className="feed" ref={feed}>
           <h2 className="sr-only">Catalogue</h2>
+          {loadEarlier && first > 1 && (
+            <p className="feed-earlier">
+              <button type="button" className="text-button" disabled={busy === 'earlier'} onClick={() => void earlierEvents()}>
+                Load earlier events
+              </button>
+            </p>
+          )}
           <ol className="catalogue" aria-label="Room catalogue">
             {blocks.flatMap((block) => {
               const seqs = block.events.map((event) => num(event, 'seq') ?? 0);

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Moon, RefreshCw, Search, Sun, Wifi, WifiOff } from 'lucide-react';
-import { ApiError, createClient, isRecord, string, type Snapshot } from './api.js';
+import { ApiError, createClient, isRecord, string, type RecordData, type Snapshot } from './api.js';
 import { closeRoomAction, createRoomAction, joinRoomAction, requestTurnAction } from './actions.js';
 import { ApprovalQueue } from './Approvals.js';
 import { CommandIndex, type IndexItem } from './CommandIndex.js';
 import { ActionDialog, ErrorNotice, Status, useNow, type Action } from './components.js';
-import { ACTIVE_TURN, data, num, pad, pendingPermissions, roomEvents, shortId, turnTarget } from './model.js';
+import { ACTIVE_TURN, data, liveRoomId, num, pad, pendingPermissions, roomEvents, shortId, turnTarget, withEarlier } from './model.js';
 import { NoRoom, RoomIndex, RoomView } from './RoomView.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import { coalesce } from './refresh.js';
@@ -22,21 +22,16 @@ const VIEWS: Array<[View, string]> = [
 ];
 const INDEXED = new Set(['message', 'agenda', 'decision', 'turn.queued', 'permission.requested']);
 
-function liveRoomId(state: Snapshot) {
-  const lastActivity = (id: string) =>
-    Math.max(0, ...state.events.filter((e) => e.roomId === id).map((e) => num(e, 'at') ?? 0));
-  return state.rooms
-    .filter((room) => room.status !== 'closed')
-    .map((room) => ({ id: string(room, 'id'), at: Math.max(lastActivity(string(room, 'id')), num(room, 'createdAt') ?? 0) }))
-    .sort((a, b) => b.at - a.at)[0]?.id;
-}
-
 export function App() {
   const [phase, setPhase] = useState<'checking' | 'pair' | 'ready'>('checking');
   const [humanId, setHumanId] = useState('');
   const [ownerId, setOwnerId] = useState('');
-  const [snapshot, setSnapshot] = useState<Snapshot>();
+  const [fetched, setSnapshot] = useState<Snapshot>();
   const [roomId, setRoomId] = useState(() => new URL(window.location.href).searchParams.get('room') ?? '');
+  const [loadedRoom, setLoadedRoom] = useState<string>();
+  const [earlier, setEarlier] = useState<{ roomId: string; events: RecordData[] }>();
+  const snapshot = useMemo(() => fetched && withEarlier(fetched, earlier), [fetched, earlier]);
+  const selected = useRef(roomId);
   const [view, setView] = useState<View>('room');
   const [connection, setConnection] = useState<'connecting' | 'live' | 'reconnecting' | 'offline'>('connecting');
   const [error, setError] = useState('');
@@ -51,22 +46,17 @@ export function App() {
   const theme = useTheme();
   const now = useNow(5000);
 
-  const selectRoom = useCallback((id: string) => {
-    setRoomId(id);
-    setFocusSeq(null);
-    const url = new URL(window.location.href);
-    if (id) url.searchParams.set('room', id);
-    else url.searchParams.delete('room');
-    window.history.replaceState(null, '', url);
-  }, []);
   const resetSession = useCallback(() => {
     setSnapshot(undefined);
     setAction(undefined);
     setPhase('pair');
   }, []);
+  // The state carries one room's records and events, so it is fetched for the room selected when the request starts.
   const refresh = useMemo(() => coalesce(async () => {
+    const requested = selected.current;
     try {
-      setSnapshot(await client.state());
+      setSnapshot(await client.state(requested || undefined));
+      setLoadedRoom(requested);
       setError('');
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) resetSession();
@@ -74,6 +64,22 @@ export function App() {
       setConnection('offline');
     }
   }), [resetSession]);
+  const selectRoom = useCallback((id: string) => {
+    selected.current = id;
+    setRoomId(id);
+    setEarlier(undefined);
+    setFocusSeq(null);
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set('room', id);
+    else url.searchParams.delete('room');
+    window.history.replaceState(null, '', url);
+    void refresh();
+  }, [refresh]);
+  const loadEarlier = async () => {
+    const id = roomId, first = num(roomEvents(snapshot!, id)[0] ?? {}, 'seq') ?? 1;
+    const events = await client.earlierEvents(id, first);
+    setEarlier((current) => ({ roomId: id, events: [...events, ...(current?.roomId === id ? current.events : [])] }));
+  };
   const adoptSession = (value: unknown) => {
     const actor = isRecord(value) && isRecord(value.actor) ? value.actor : {};
     setHumanId(string(actor, 'principalId'));
@@ -190,6 +196,7 @@ export function App() {
   }
 
   const room = snapshot?.rooms.find((item) => item.id === roomId);
+  const opening = !!room && loadedRoom !== roomId;
   const pending = snapshot ? pendingPermissions(snapshot, now) : [];
   const running = snapshot ? snapshot.turns.filter((t) => ACTIVE_TURN.includes(string(t, 'status'))).length : 0;
   const items = useMemo<IndexItem[]>(() => {
@@ -393,7 +400,11 @@ export function App() {
         ) : view === 'room' ? (
           <div className={`room-layout${room ? ' has-room' : ''}`}>
             <RoomIndex state={snapshot} roomId={roomId} setRoomId={selectRoom} createRoom={createRoom} joinRoom={joinRoom} />
-            {room ? (
+            {opening ? (
+              <div className="boot" role="status">
+                <p>Opening room…</p>
+              </div>
+            ) : room ? (
               <RoomView
                 key={roomId}
                 room={room}
@@ -404,10 +415,15 @@ export function App() {
                 focusSeq={focusSeq}
                 setFocusSeq={setFocusSeq}
                 onAllRooms={() => selectRoom('')}
+                loadEarlier={loadEarlier}
               />
             ) : (
               <NoRoom hasRooms={snapshot.rooms.length > 0} createRoom={createRoom} />
             )}
+          </div>
+        ) : opening && view !== 'connections' && view !== 'approvals' ? (
+          <div className="boot" role="status">
+            <p>Opening room…</p>
           </div>
         ) : view === 'members' ? <MembersView key={roomId} room={room} state={snapshot} ownerId={ownerId} run={run} openAction={setAction} />
           : view === 'connections' ? <ConnectionsView state={snapshot} run={run} openAction={setAction} />

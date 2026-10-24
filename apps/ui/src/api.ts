@@ -86,7 +86,7 @@ export function createClient(transport: Transport = (url, init) => fetch(url, in
       if (shared) { roomId = string(value, 'roomId'); generation = Number(value.generation); }
       return value;
     },
-    async state() {
+    async state(selectedRoom?: string) {
       if (shared) {
         const value = await request('/shared/v1/browser/state');
         if (!isRecord(value) || !isRecord(value.room)) throw new Error('Invalid shared room state');
@@ -94,7 +94,13 @@ export function createClient(transport: Transport = (url, init) => fetch(url, in
         return parseSnapshot({ rooms: [value.room], seats: value.seats, events: value.events, turns: value.turns, interactions: value.interactions,
           members: value.members, ownerConsents: value.ownerConsents, sharedArtefacts: value.artefacts });
       }
-      return parseSnapshot(await request('/api/state'));
+      return parseSnapshot(await request('/api/state' + (selectedRoom ? '?room=' + encodeURIComponent(selectedRoom) : '')));
+    },
+    async earlierEvents(id: string, before: number) {
+      const value = await request('/api/rooms/' + encodeURIComponent(id) + '/events?before=' + before);
+      if (!isRecord(value) || !Array.isArray(value.events) || value.events.some((event) => !isRecord(event)))
+        throw new Error('Invalid room history received. Try again.');
+      return value.events as RecordData[];
     },
     async command(name: string, args: RecordData) {
       if (!csrf) throw new ApiError('Pair this browser before making changes.', 401);
