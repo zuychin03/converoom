@@ -13,6 +13,7 @@ import {
 } from '../../../packages/store/src/index.js';
 import {
   createCore,
+  exhaustBudgets,
   expirePollingTurns,
   RESULT_EXPIRY_BATCH,
   RESULT_RETENTION_MS,
@@ -373,6 +374,8 @@ export async function createRuntime(
     ticking = true;
     try {
       store.transaction(() => expirePollingTurns(store));
+      for (const r of store.list<Room>('room', { status: ['open', 'paused'] }))
+        if (roomTimeExhausted(r) && !r.exhaustedBudgets?.includes('time')) exhaustBudgets(store, r.id);
       if (Date.now() - resultsExpiredAt >= 3600000) {
         resultsExpiredAt = Date.now();
         const before = resultsExpiredAt - RESULT_RETENTION_MS;
@@ -425,6 +428,7 @@ export async function createRuntime(
           });
           continue;
         }
+        if (exhaustBudgets(store, t.roomId)) continue;
         const room = store.get<Room>('room', t.roomId),
           seat = store.get<Seat>('seat', t.seatId);
         if (
@@ -457,12 +461,6 @@ export async function createRuntime(
           .filter((v) => v.completedAt)
           .reduce((last, v) => Math.max(last, Number(v.completedAt)), 0);
         if (Date.now() - previous < Number(room.policy.cooldownMs)) continue;
-        const exhausted = roomTimeExhausted(room) ? 'time'
-          : store.eventCount(room.id, 'message') >= Number(room.policy.maxMessages) ? 'message' : undefined;
-        if (exhausted) {
-          store.put('turn', t.id, { ...t, status: 'cancelled', error: 'Room ' + exhausted + ' budget exhausted' });
-          continue;
-        }
         if (stopped) break;
         store.put('turn', t.id, { ...t, status: 'dispatching', dispatchBoundaryAt: Date.now() });
         emit(t, 'turn.dispatching', { turnId: t.id });

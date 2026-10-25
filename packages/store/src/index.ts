@@ -144,6 +144,7 @@ export function createStore(path: string): Store {
       'SELECT json FROM events WHERE room_id=? AND seq>? ORDER BY seq LIMIT ?',
     );
     const eventCount = db.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id=? AND json_extract(json,'$.type')=?");
+    const lastEvent = db.prepare("SELECT json FROM events WHERE room_id=? AND json_extract(json,'$.type')=? ORDER BY seq DESC LIMIT 1");
     const recent = db.prepare('SELECT json FROM events ORDER BY rowid DESC LIMIT ?');
     const eventCursor = db.prepare('SELECT rowid AS cursor FROM events WHERE id=?');
     const afterCursor = db.prepare('SELECT json FROM events WHERE rowid>? ORDER BY rowid LIMIT ?');
@@ -236,6 +237,7 @@ export function createStore(path: string): Store {
           )
           .map((row) => parse<Event>(row)!),
       eventCount: (roomId, type) => (eventCount.get(roomId, type) as { count: number }).count,
+      lastEvent: (roomId, type) => parse<Event>(lastEvent.get(roomId, type)),
       recentEvents: (limit = 1000) => recent.all(pageLimit(limit)).reverse().map((row) => parse<Event>(row)!),
       eventsAfter: (cursor, limit = 1000) => {
         if (!cursor) return store.recentEvents(limit);

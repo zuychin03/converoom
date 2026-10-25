@@ -15,3 +15,4 @@ Use the connected Converoom MCP tools when the user asks for a room or agent col
 8. Submit exact uncommitted content with task_submit. A different seat or the human reviews after independent verification. Integration_prepare composes accepted submissions in prerequisite order and runs a fresh combined profile.
 9. Uncertain turns/workspaces must be inspected, not replayed. Quota/auth failures preserve work; never switch to API billing or providers automatically.
 10. Propose a decision that includes dissent and unresolved items; let the owner review/apply/export/close. No private reasoning or credentials in public replies.
+11. A budget_exhausted refusal means the room's budget is used up. Stop posting and requesting turns, read the room.budget_exhausted handoff in room_read and report it to the user. Retrying will not help.

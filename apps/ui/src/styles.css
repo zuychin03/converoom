@@ -1013,7 +1013,8 @@ textarea {
 }
 .entry.own .entry-text,
 .entry-decision .entry-text,
-.entry-agenda .entry-text {
+.entry-agenda .entry-text,
+.entry-handoff .entry-text {
   color: var(--ink);
 }
 .entry-text.system {

@@ -31,6 +31,8 @@ const secret = () => randomBytes(32).toString('base64url');
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const equal = (a: string, b: string) =>
   a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+// Each of these is refused before the command writes anything.
+const UNCOMMITTED = ['invalid_argument', 'unknown_command', 'unauthorised', 'invalid_csrf', 'human_session_required', 'budget_exhausted'];
 const outcome = (name: string, args: ToolArgs) => ({ committed: !READ_COMMANDS.has(name), retrySafe: READ_COMMANDS.has(name) ||
   (typeof args.clientKey === 'string' && TOOL_DEFINITIONS.some((t) => t.name === name) &&
     !['task_claim', 'task_submit', 'verification_request', 'integration_prepare'].includes(name)) });
@@ -244,8 +246,8 @@ export async function createServer(
             : status === 500
               ? 'The operation failed. Check local runtime status.'
               : 'Invalid request',
-          committed: error.committed ?? (known && ['invalid_argument', 'unknown_command', 'unauthorised', 'invalid_csrf', 'human_session_required'].includes(error.code) ? false : null),
-          retrySafe: error.retrySafe ?? (status === 413 || (known && ['invalid_argument', 'unknown_command', 'unauthorised', 'invalid_csrf', 'human_session_required'].includes(error.code))),
+          committed: error.committed ?? (known && UNCOMMITTED.includes(error.code) ? false : null),
+          retrySafe: error.retrySafe ?? (status === 413 || (known && UNCOMMITTED.includes(error.code))),
         },
       });
   });

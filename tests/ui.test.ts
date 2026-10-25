@@ -3,6 +3,7 @@ import { createClient, ApiError, parseSnapshot } from '../apps/ui/src/api.js';
 import { grantAction } from '../apps/ui/src/actions.js';
 import { capabilityLine, commandLabel, failureLabel, interruptedFor, liveRoomId, requestDetails, roomEvents, seatState, turnEvidence, turnKind, turnTarget, visibleTurn, withEarlier, workerSeat } from '../apps/ui/src/model.js';
 import { coalesce } from '../apps/ui/src/refresh.js';
+import { roomStatus } from '../apps/ui/src/RoomView.js';
 
 describe('browser command boundary', () => {
   it('offers turns and coding work only to seats the backend admits', () => {
@@ -105,6 +106,13 @@ describe('browser command boundary', () => {
   });
   it('names a room budget refusal instead of a generic failure', () => {
     expect(failureLabel({ status: 'failed', failure: 'budget' })).toBe('Failed · budget');
+    expect(failureLabel({ status: 'failed', failure: 'budget_exhausted' })).toBe('Failed · budget');
+  });
+  it('marks a room whose budget is used up, after closed and paused', () => {
+    const state = parseSnapshot({ turns: [{ id: 't', roomId: 'r', status: 'running' }] });
+    expect(roomStatus({ id: 'r', status: 'open', exhaustedBudgets: ['message'] }, state)).toEqual({ kind: 'warn', label: 'Budget used up · 1 running' });
+    expect(roomStatus({ id: 'other', status: 'open', exhaustedBudgets: ['turn'] }, state)).toEqual({ kind: 'warn', label: 'Budget used up' });
+    expect(roomStatus({ id: 'r', status: 'paused', exhaustedBudgets: ['time'] }, state)).toEqual({ kind: 'paused', label: 'Paused' });
   });
   it('keeps the reason on uncertain turns', () => {
     const state = parseSnapshot({});

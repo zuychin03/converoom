@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, CornerDownRight, Pause, Play, Plus, Search, Square } from 'lucide-react';
-import { isRecord, list, string, type RecordData, type Snapshot } from './api.js';
+import { isRecord, list, objects, string, type RecordData, type Snapshot } from './api.js';
 import { addAgentAction, closeRoomAction, inspectTurnAction, requestTurnAction } from './actions.js';
 import { GrantSlip } from './Approvals.js';
 import { Composer } from './Composer.js';
@@ -65,7 +65,12 @@ const RECEIPT: Record<string, [Kind, string]> = {
 };
 const receipt = (interaction: RecordData): [Kind, string] =>
   RECEIPT[string(interaction, 'status')] ?? ['idle', string(interaction, 'status')];
-const CONVERSATION = new Set(['message', 'agenda', 'decision', 'turn.queued', 'permission.requested']);
+const CONVERSATION = new Set(['message', 'agenda', 'decision', 'turn.queued', 'permission.requested', 'room.budget_exhausted']);
+const BUDGET_LINES: Record<string, (usage: RecordData, limits: RecordData) => string> = {
+  message: (u, l) => `Message budget used up: ${num(u, 'messages') ?? '?'} of ${num(l, 'maxMessages') ?? '?'} messages.`,
+  turn: (u, l) => `Turn budget used up: ${num(u, 'turns') ?? '?'} of ${num(l, 'maxMessages') ?? '?'} turns.`,
+  time: (u, l) => `Time budget used up: ${fmtDuration(num(u, 'elapsedMs') ?? 0)} of ${fmtDuration(num(l, 'maxDurationMs') ?? 0)}.`,
+};
 const SYSTEM_LABELS: Record<string, string> = {
   'room.created': 'room opened',
   'seat.joined': 'seat joined',
@@ -110,6 +115,7 @@ export function roomStatus(room: RecordData, state: Snapshot): { kind: Kind; lab
   const running = state.turns.filter(
     (t) => t.roomId === room.id && ACTIVE_TURN.includes(string(t, 'status')),
   ).length;
+  if (list(room, 'exhaustedBudgets').length) return { kind: 'warn', label: running ? `Budget used up · ${running} running` : 'Budget used up' };
   return running ? { kind: 'live', label: `${running} running` } : { kind: 'idle', label: 'Open' };
 }
 
@@ -216,6 +222,8 @@ export function RoomView({
   const id = string(room, 'id');
   const open = room.status === 'open';
   const closed = room.status === 'closed';
+  const used = list(room, 'exhaustedBudgets');
+  const silenced = used.includes('message') || used.includes('time');
   const policy = isRecord(room.policy) ? room.policy : {};
   const seats = roomSeats(state, id);
   const events = useMemo(() => roomEvents(state, id), [state, id]);
@@ -439,7 +447,8 @@ export function RoomView({
             </p>
           )}
         </div>
-        <Composer roomId={id} seats={seats} run={run} disabled={!open} />
+        <Composer roomId={id} seats={seats} run={run} disabled={!open || silenced}
+          reason={open && silenced ? 'This room’s budget is used up. See the handoff above.' : undefined} />
       </section>
       <aside className="activity" aria-label="Agents and turns">
         <section className="panel">
@@ -479,7 +488,7 @@ export function RoomView({
                 key={string(seat, 'id')}
                 seat={seat}
                 st={states.get(string(seat, 'id'))!}
-                roomOpen={open}
+                roomOpen={open && !used.length}
                 run={run}
                 selected={selected === seat.id}
                 onSelect={setSelected}
@@ -801,7 +810,7 @@ function Entry({
 }
 
 interface EntryView {
-  variant: 'message' | 'agenda' | 'decision' | 'turn' | 'request' | 'system';
+  variant: 'message' | 'agenda' | 'decision' | 'turn' | 'request' | 'handoff' | 'system';
   author: string;
   meta?: string;
   seatId?: string;
@@ -847,6 +856,7 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
                   recipient.consent === true &&
                   turnTarget(recipient) &&
                   ctx.room.status === 'open' &&
+                  !list(ctx.room, 'exhaustedBudgets').length &&
                   !i.turnId &&
                   !['responded', 'resolved'].includes(string(i, 'status'));
                 return (
@@ -913,6 +923,76 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
               ))}
               {unresolved > 0 && <Status kind="warn">{unresolved} open obligations at the time</Status>}
             </div>
+          )}
+        </>
+      ),
+    };
+  }
+  if (type === 'room.budget_exhausted') {
+    const h = isRecord(d.handoff) ? d.handoff : {};
+    const usage = isRecord(d.usage) ? d.usage : {}, limits = isRecord(d.limits) ? d.limits : {};
+    const unresolved = objects(h, 'unresolved'), attempts = objects(h, 'attempts');
+    const count = (key: string) => list(h, key).length;
+    const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const work = [
+      count('stoppedTurnIds') && `${plural(count('stoppedTurnIds'), 'queued turn')} cancelled before starting`,
+      count('retainedTurnIds') && `${plural(count('retainedTurnIds'), 'answer')} kept for the owner, not posted`,
+      count('uncertainTurnIds') && `${plural(count('uncertainTurnIds'), 'uncertain turn')} to inspect before any rerun`,
+      ...attempts.map((a) => `Coding attempt ${shortId(string(a, 'id'))} for task ${string(a, 'taskId')} · ${string(a, 'status')}`),
+    ].filter((line): line is string => !!line);
+    const jumpTo = (seq: unknown, label: string) => typeof seq === 'number' && (
+      <button type="button" className="text-button" onClick={() => ctx.jump(seq)}>{label} {pad(seq)}</button>
+    );
+    const running = state.turns.filter((t) => t.roomId === ctx.room.id && ACTIVE_TURN.includes(string(t, 'status'))).length;
+    return {
+      variant: 'handoff',
+      author: actor,
+      meta: 'Budget used up · handoff',
+      body: (
+        <>
+          <p className="entry-text">
+            {list(d, 'budgets').map((b) => BUDGET_LINES[b]?.(usage, limits) ?? `The ${b} budget is used up.`).join(' ')} New turns are refused.
+            Nothing was approved or accepted.
+          </p>
+          {(unresolved.length > 0 || work.length > 0) && (
+            <div className="entry-lists">
+              {unresolved.length > 0 && (
+                <div>
+                  <span className="list-label">Open obligations</span>
+                  <ul>
+                    {unresolved.map((i) => {
+                      const at = num(state.events.find((e) => e.id === i.messageId) ?? {}, 'seq');
+                      return (
+                        <li key={string(i, 'id')}>
+                          {string(i, 'intent')} → {names.seat(i.recipientId)}
+                          {at !== undefined && <> · {jumpTo(at, 'Message')}</>}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+              {work.length > 0 && (
+                <div>
+                  <span className="list-label">Work</span>
+                  <ul>
+                    {work.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="entry-foot">
+            {jumpTo(h.agendaSeq, 'Agenda')}
+            {jumpTo(h.decisionSeq, 'Proposed decision')}
+            {running > 0 && <Status kind="live">{running} still running</Status>}
+          </div>
+          {!ctx.shared && (
+            <p className="entry-text system">
+              To continue, raise a limit you lowered under Room controls, or close this room and start a new one from this handoff.
+            </p>
           )}
         </>
       ),

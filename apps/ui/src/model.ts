@@ -81,6 +81,7 @@ const FAILURE_REASONS: Record<string, string> = {
   turn_timeout: 'timed out',
   worker_binding: 'workspace',
   budget: 'budget',
+  budget_exhausted: 'budget',
 };
 const withReason = (base: string, turn: RecordData) =>
   FAILURE_REASONS[string(turn, 'failure')] ? base + ' · ' + FAILURE_REASONS[string(turn, 'failure')] : base;

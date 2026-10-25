@@ -81,7 +81,7 @@ async function budgetRoom(maxMessages: number, prompt: () => Promise<string>, ca
     return String(turn.id);
   };
   const turn = (id: string) => runtime.core.store.get<Turn & { failure?: string; retainedAnswer?: ToolArgs }>('turn', id)!;
-  return { runtime, call, room, request, turn, started: () => started, close: async () => { await runtime.stop(); await rm(dir, { recursive: true, force: true }); } };
+  return { runtime, call, room, seat, request, turn, started: () => started, close: async () => { await runtime.stop(); await rm(dir, { recursive: true, force: true }); } };
 }
 it('retains a finished managed answer that the exhausted room budget no longer lets it publish', async () => {
   let release!: (text: string) => void, running!: () => void;
@@ -93,7 +93,7 @@ it('retains a finished managed answer that the exhausted room budget no longer l
     await fixture.call('room_post', { roomId: fixture.room.id, text: 'The last allowed message' });
     release('<thinking>private plan</thinking>Expensive public answer');
     await expect.poll(() => fixture.turn(id).status).toBe('failed');
-    expect(fixture.turn(id)).toMatchObject({ failure: 'budget', retainedAnswer: { truncated: false } });
+    expect(fixture.turn(id)).toMatchObject({ failure: 'budget_exhausted', retainedAnswer: { truncated: false } });
     expect(String(fixture.turn(id).retainedAnswer?.text)).toContain('Expensive public answer');
     expect(String(fixture.turn(id).retainedAnswer?.text)).not.toContain('private plan');
     const events = fixture.runtime.core.store.events(String(fixture.room.id));
@@ -160,13 +160,15 @@ it.each([[true, 'completed'], [false, 'uncertain']] as const)('records whether t
     expect(turn.sessionStoppedAt === undefined).toBe(!confirmed);
   } finally { await fixture.close(); }
 });
-it('does not start approved managed work once the room message budget is exhausted', async () => {
+it('does not start managed work that was waiting for approval once the room message budget is used up', async () => {
   const fixture = await budgetRoom(1, async () => 'Unpostable answer');
   try {
+    const queued = await fixture.call('turn_request', { roomId: fixture.room.id, seatId: fixture.seat.id, prompt: 'Approved too late' });
     await fixture.call('room_post', { roomId: fixture.room.id, text: 'The last allowed message' });
-    const id = await fixture.request();
-    await expect.poll(() => fixture.turn(id).status).toBe('cancelled');
-    expect(fixture.turn(id).error).toMatch(/message budget/i);
+    await expect(fixture.call('permission_grant', { requestId: queued.permissionRequestId })).rejects.toThrow(/expired or resolved/i);
+    expect(fixture.turn(String(queued.id))).toMatchObject({ status: 'cancelled', error: expect.stringMatching(/message budget/i) });
+    await expect(fixture.request()).rejects.toMatchObject({ code: 'budget_exhausted' });
+    await new Promise((resolve) => setTimeout(resolve, 100));
     expect(fixture.started()).toBe(0);
   } finally { await fixture.close(); }
 });

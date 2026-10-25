@@ -19,6 +19,7 @@ export interface Event {
   at: number;
   data: ToolArgs;
 }
+export type RoomBudget = 'message' | 'turn' | 'time';
 export interface Room {
   id: string;
   title: string;
@@ -33,6 +34,7 @@ export interface Room {
   seq: number;
   rounds?: number;
   remoteConnectionId?: string;
+  exhaustedBudgets?: RoomBudget[];
 }
 export interface Seat {
   id: string;
@@ -192,6 +194,7 @@ export interface Store {
   append(roomId: string, type: string, actorId: string, data: ToolArgs): Event;
   events(roomId: string, after?: number, limit?: number): Event[];
   eventCount(roomId: string, type: string): number;
+  lastEvent(roomId: string, type: string): Event | undefined;
   recentEvents(limit?: number): Event[];
   eventsAfter(cursor: string, limit?: number): Event[];
   onAppend(listener: () => void): () => void;

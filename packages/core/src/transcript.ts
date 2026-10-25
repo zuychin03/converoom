@@ -77,6 +77,28 @@ export function transcriptMarkdown(t: TranscriptSource): string {
   const obligations = (d: ToolArgs) => items(d.unresolved).length ? [plural(items(d.unresolved).length, 'open obligation') + ' at the time.'] : [];
   const list = (label: string, values: unknown[]) => values.length
     ? [label + ':\n\n' + values.map((v) => '- ' + inline(typeof v === 'string' ? v : JSON.stringify(v))).join('\n')] : [];
+  const BUDGETS: Record<string, (u: ToolArgs, l: ToolArgs) => string> = {
+    message: (u, l) => `Message budget used up: ${Number(u.messages)} of ${Number(l.maxMessages)} messages.`,
+    turn: (u, l) => `Turn budget used up: ${Number(u.turns)} of ${Number(l.maxMessages)} turns.`,
+    time: (u, l) => `Time budget used up: ${duration(u.elapsedMs)} of ${duration(l.maxDurationMs)}.`,
+  };
+  const exhausted = (d: ToolArgs) => {
+    const h = record(d.handoff), stopped = items(h.stoppedTurnIds).length, open = items(h.unresolved).map(record);
+    const latest = [h.agendaSeq ? `Latest agenda #${Number(h.agendaSeq)}.` : '',
+      h.decisionSeq ? `Latest proposed decision #${Number(h.decisionSeq)}, not accepted.` : ''].filter(Boolean).join(' ');
+    const listed = (label: string, ids: unknown[]) => (ids.length ? [`${label}: ${ids.map(turn).join(', ')}.`] : []);
+    return [
+      items(d.budgets).map((b) => BUDGETS[String(b)]?.(record(d.usage), record(d.limits)) ?? end(capital(inline(b)) + ' budget used up')).join(' '),
+      'New turns are refused. Nothing was approved or accepted.',
+      ...(stopped ? [`${plural(stopped, 'queued turn')} ${stopped === 1 ? 'was' : 'were'} cancelled before ${stopped === 1 ? 'it' : 'they'} started.`] : []),
+      ...(latest ? [latest] : []),
+      ...(open.length ? ['Open obligations:\n\n' + open.map((i) => `- ${inline(i.intent)} for ${seatName(i.recipientId)} in ${ref(i.messageId)}, ${inline(i.status)}`).join('\n')] : []),
+      ...listed('Answers kept for the owner and not posted', items(h.retainedTurnIds)),
+      ...listed('Uncertain turns to inspect before any rerun', items(h.uncertainTurnIds)),
+      ...(items(h.attempts).length ? ['Coding attempts still open: ' + items(h.attempts).map(record)
+        .map((a) => `${code(String(a.id).slice(0, 8))} for task ${inline(a.taskId)}, ${inline(a.status)}`).join('; ') + '.'] : []),
+    ];
+  };
   const outcome = (d: ToolArgs, expiry: boolean) => [
     request(d.requestId), d.action ? ' (' + inline(String(d.action).replaceAll('_', ' ')) + ')' : '',
     d.scopeDigest ? ', scope digest ' + code(d.scopeDigest) : '', expiry && d.expiresAt ? ', valid until ' + time(d.expiresAt) : '',
@@ -151,6 +173,7 @@ export function transcriptMarkdown(t: TranscriptSource): string {
       ...list('Positions', items(d.positions)), ...list('Dissent', items(d.dissent)), ...list('Evidence', items(d.evidence)), ...obligations(d)] };
     if (e.type === 'turn.queued' && typeof d.prompt === 'string')
       return { title: actor + ' · turn requested for ' + seatName(d.seatId), body: [fenced(d.prompt)] };
+    if (e.type === 'room.budget_exhausted') return { title: actor + ' · budget used up', body: exhausted(d) };
     if (e.type === 'permission.requested') return { title: actor + ' · approval requested', body: [
       end(capital(inline(String(d.action ?? '').replaceAll('_', ' '))) + ': ' + inline(d.summary)),
       `Scope digest ${code(d.scopeDigest)}, expires ${time(d.expiresAt)}.`, fenced(JSON.stringify(d.scope ?? {}, null, 2), 'json')] };

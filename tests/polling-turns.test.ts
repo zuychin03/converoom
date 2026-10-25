@@ -102,8 +102,8 @@ it('releases a cancellation the external agent never acknowledges after its wind
 it('rolls back completion when publishing the reply exceeds its message budget', async () => {
   const { room, actor, args, turn } = await fixture();
   await call('policy_update', { roomId: room.id, policy: { maxMessages: 1 } });
-  await call('room_post', { roomId: room.id, text: 'Budget used' });
   await call('turn_claim', args, actor);
+  await call('room_post', { roomId: room.id, text: 'Budget used' });
   await expect(call('turn_complete', { ...args, text: 'Excess', clientKey: 'complete' }, actor)).rejects.toThrow(/budget/i);
   expect(store.get('turn', turn.id)).toMatchObject({ status: 'running' });
   expect(store.events(String(room.id)).filter((e) => e.type === 'message')).toHaveLength(1);

@@ -9,6 +9,7 @@ import {
   type Store,
   type ToolArgs,
   type Room,
+  type RoomBudget,
   type Seat,
   type Turn,
   type CommandHandler,
@@ -38,6 +39,54 @@ export const RESULT_EXPIRY_BATCH = 1000;
 // A remote connection's local room is bounded by its turn budget and per-turn time, not discussion duration.
 export function roomTimeExhausted(r: Room, now = Date.now()): boolean {
   return !r.remoteConnectionId && now - r.createdAt > Number(r.policy.maxDurationMs);
+}
+// A queued turn could never post its answer under these; turns accepted within the turn budget still run.
+const DISPATCH_BUDGETS: readonly RoomBudget[] = ['message', 'time'];
+const OPEN_ATTEMPTS = ['provisioning', 'ready', 'running', 'completed', 'quarantined', 'uncertain'];
+export function usedBudgets(store: Store, r: Room, now = Date.now()): RoomBudget[] {
+  const max = Number(r.policy.maxMessages);
+  return (['message', 'turn', 'time'] as const).filter((b) => b === 'message' ? store.eventCount(r.id, 'message') >= max
+    : b === 'turn' ? store.count('turn', { roomId: r.id }) >= max : roomTimeExhausted(r, now));
+}
+function handoff(store: Store, r: Room, stopped: Turn[]): ToolArgs {
+  const turns = store.list<Turn & { retainedAnswer?: unknown }>('turn', { roomId: r.id });
+  return {
+    agendaSeq: store.lastEvent(r.id, 'agenda')?.seq ?? null,
+    decisionSeq: store.lastEvent(r.id, 'decision')?.seq ?? null,
+    unresolved: store.list<I>('interaction', { roomId: r.id }).filter((i) => i.status !== 'resolved').map((i) =>
+      ({ id: i.id, messageId: i.messageId, senderId: i.senderId, recipientId: i.recipientId, intent: i.intent, status: i.status })),
+    stoppedTurnIds: stopped.map((t) => t.id),
+    retainedTurnIds: turns.filter((t) => t.retainedAnswer).map((t) => t.id),
+    uncertainTurnIds: turns.filter((t) => t.status === 'uncertain' && !t.inspection).map((t) => t.id),
+    attempts: store.list<ToolArgs>('attempt', { roomId: r.id }).filter((a) => OPEN_ATTEMPTS.includes(String(a.status)))
+      .map((a) => ({ id: a.id, taskId: a.taskId, seatId: a.seatId, status: a.status })),
+  };
+}
+// FR-16: records each used-up budget once with a handoff. Returns whether new dispatch is blocked.
+export function exhaustBudgets(store: Store, roomId: string, now = Date.now()): boolean {
+  const r = store.get<Room>('room', roomId);
+  if (!r || r.status === 'closed') return false;
+  const used = usedBudgets(store, r, now), blocking = used.find((b) => DISPATCH_BUDGETS.includes(b));
+  const fresh = used.filter((b) => !r.exhaustedBudgets?.includes(b));
+  if (!fresh.length && !(blocking && store.count('turn', { roomId, status: ['queued'] }))) return !!blocking;
+  store.transaction(() => {
+    const stopped = blocking ? store.list<Turn>('turn', { roomId, status: ['queued'] }) : [];
+    for (const t of stopped) {
+      store.put('turn', t.id, { ...t, status: 'cancelled', error: 'Room ' + blocking + ' budget used up before the turn started' });
+      const p = t.permissionRequestId ? store.get<Permission>('permission', t.permissionRequestId) : undefined;
+      if (p?.status === 'pending') {
+        store.put('permission', p.id, { ...p, status: 'cancelled' });
+        store.append(roomId, 'permission.cancelled', 'runtime', { requestId: p.id });
+      }
+      store.append(roomId, 'turn.cancelled', 'runtime', { turnId: t.id, reason: 'budget_exhausted' });
+    }
+    if (!fresh.length) return;
+    store.put('room', roomId, { ...store.get<Room>('room', roomId)!, exhaustedBudgets: [...(r.exhaustedBudgets ?? []), ...fresh] });
+    authority(store, { principalId: 'runtime' }, r, 'room.budget_exhausted', { budgets: fresh,
+      usage: { messages: store.eventCount(roomId, 'message'), turns: store.count('turn', { roomId }), elapsedMs: now - r.createdAt },
+      limits: { maxMessages: r.policy.maxMessages, maxDurationMs: r.policy.maxDurationMs }, handoff: handoff(store, r, stopped) });
+  });
+  return !!blocking;
 }
 function pollingDeadline(store: Store, t: Turn): number {
   const frozen = store.get<{ policy: ToolArgs }>('policy', t.roomId + ':' + t.policyVersion)?.policy;
@@ -275,10 +324,22 @@ export function createCore(store: Store): Core {
         'remote_connection_disconnect',
         'remote_connection_enable',
       ];
-      if (typeof x.clientKey === 'string' && !external.includes(n) && !READ_COMMANDS.has(n))
-        return store.idempotent(a.principalId, n, x.clientKey, x, () => h(a, x));
-      return h(a, x);
+      const roomId = typeof x.roomId === 'string' ? x.roomId : undefined;
+      try {
+        const result = typeof x.clientKey === 'string' && !external.includes(n) && !READ_COMMANDS.has(n)
+          ? store.idempotent(a.principalId, n, x.clientKey, x, () => h(a, x)) : await h(a, x);
+        if (roomId && !READ_COMMANDS.has(n)) exhaustBudgets(store, roomId);
+        return result;
+      } catch (e) {
+        // The refusal rolled back its own transaction, so the budget is recorded separately.
+        if (roomId && e instanceof E && e.code === 'budget_exhausted') exhaustBudgets(store, roomId);
+        throw e;
+      }
     },
+  };
+  const refuseUsed = (r: Room, budgets: RoomBudget[]) => {
+    const used = usedBudgets(store, r).find((b) => budgets.includes(b));
+    if (used) throw new E('budget_exhausted', 'Room ' + used + ' budget is used up; the handoff is in the room history', 409);
   };
   c.register('room_create', (a, x) => {
     const r: Room = {
@@ -361,7 +422,10 @@ export function createCore(store: Store): Core {
         throw new E('policy', 'Invalid policy');
       p[k] = Math.min(v, k === 'maxActiveTurns' ? 5 : limits[k as keyof typeof limits]);
     }
-    const next = { ...r, policy: p, policyVersion: r.policyVersion + 1 };
+    const next: Room = { ...r, policy: p, policyVersion: r.policyVersion + 1 };
+    const still = r.exhaustedBudgets?.filter((b) => usedBudgets(store, next).includes(b));
+    if (still?.length) next.exhaustedBudgets = still;
+    else delete next.exhaustedBudgets;
     store.put('room', r.id, next);
     store.put('policy', r.id + ':' + next.policyVersion, {
       roomId: r.id,
@@ -375,8 +439,7 @@ export function createCore(store: Store): Core {
     const r = write(a, str(x, 'roomId')),
       text = str(x, 'text'),
       sender = a.kind === 'human' ? a.principalId : member(a, r.id).id;
-    if (store.eventCount(r.id, 'message') >= Number(r.policy.maxMessages) || roomTimeExhausted(r))
-      throw new E('budget', 'Message/time budget exhausted; prepare handoff', 409);
+    refuseUsed(r, ['message', 'time']);
     const mentions = (x.mentions ?? []) as { seatId: string; intent: string }[];
     if (!Array.isArray(mentions) || mentions.length > 5)
       throw new E('mentions', 'Invalid mentions');
@@ -523,7 +586,7 @@ export function createCore(store: Store): Core {
       const rounds = Number(r.rounds ?? 0);
       if (n === 'room_set_agenda') {
         if (rounds >= Number(r.policy.maxRounds))
-          throw new E('budget', 'Round budget exhausted; prepare handoff', 409);
+          throw new E('budget_exhausted', 'Round budget is used up', 409);
         store.put('room', r.id, { ...r, rounds: rounds + 1 });
       }
       return ev(a, r.id, n === 'room_set_agenda' ? 'agenda' : 'decision', {
@@ -591,12 +654,11 @@ export function createCore(store: Store): Core {
         throw new E('consent', 'Target owner sender consent required', 403);
       const owned = new Set(store.list<Seat>('seat', { roomId: r.id }).filter((v) => v.ownerId === s.ownerId).map((v) => v.id));
       if (store.list<Turn>('turn', { roomId: r.id }).filter((v) => owned.has(v.seatId)).length >= consent.maxTurns)
-        throw new E('budget', 'Target owner turn budget exhausted', 409);
+        throw new E('budget_exhausted', 'Target owner turn budget exhausted', 409);
     }
     if (s.mode === 'managed' && !s.consent)
       throw new E('consent', 'Target owner consent required', 403);
-    if (store.count('turn', { roomId: r.id }) >= Number(r.policy.maxMessages) || roomTimeExhausted(r))
-      throw new E('budget', 'Turn/time budget exhausted', 409);
+    refuseUsed(r, ['message', 'turn', 'time']);
     const interaction = x.interactionId
       ? store.get<I>('interaction', str(x, 'interactionId'))
       : undefined;
@@ -714,7 +776,7 @@ export function createCore(store: Store): Core {
     const previous = store.list<Turn>('turn', { seatId: s.id })
       .reduce((last, v) => Math.max(last, v.completedAt ?? 0), 0);
     if (Date.now() - previous < Number(r.policy.cooldownMs)) throw new E('cooldown', 'Seat cooldown is active', 409);
-    if (roomTimeExhausted(r)) throw new E('budget', 'Room time budget exhausted', 409);
+    refuseUsed(r, ['message', 'time']);
     const next = { ...t, status: 'running' as const, startedAt: Date.now() };
     store.put('turn', t.id, next);
     ev(a, r.id, 'turn.started', { turnId: t.id, externalPolling: true, newManagedSession: false });
@@ -729,7 +791,7 @@ export function createCore(store: Store): Core {
       if (t.status !== 'running' || !['completed', 'failed'].includes(String(outcome)))
         throw new E('turn', 'Own active turn and valid outcome required', 409);
       if (outcome === 'completed' && Date.now() >= pollingDeadline(store, t))
-        throw new E('budget', 'Turn time budget exhausted', 409);
+        throw new E('budget_exhausted', 'Turn time budget exhausted', 409);
     }
     const next: Turn = { ...t, status: outcome as Turn['status'], completedAt: Date.now(),
       ...(outcome === 'failed' ? { error: redactPublic(str(x, 'reason')) } : {}) };
@@ -815,6 +877,7 @@ export function createCore(store: Store): Core {
       messages: store.eventCount(r.id, 'message'),
       turns: store.count('turn', { roomId: r.id }),
       policy: r.policy,
+      exhaustedBudgets: r.exhaustedBudgets ?? [],
       quota: 'unknown',
     };
   });

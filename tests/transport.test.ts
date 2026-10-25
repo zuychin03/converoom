@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, issueBridgeCredential } from '../apps/daemon/src/server.js';
-import type { Actor, Runtime, Store } from '../packages/shared/src/contracts.js';
+import { ConveroomError, type Actor, type Runtime, type Store } from '../packages/shared/src/contracts.js';
 import { humanCommand } from '../apps/cli/src/human.js';
 import { createHash } from 'node:crypto';
 
@@ -58,6 +58,22 @@ describe('local identity boundary', () => {
     expect(response.body).not.toContain('fixture-private-token');
     const credential = issueBridgeCredential(runtime, 'codex');
     expect((await server.app.inject({ method: 'POST', url: '/agent/commands', headers: { host: headers.host, authorization: 'Bearer ' + credential.token }, payload: { name: 'remote_connection_prepare', args: {} } })).statusCode).toBe(400);
+  });
+  it('reports a budget refusal as uncommitted to both the browser and agents', async () => {
+    const { server, runtime, headers } = await fixture();
+    runtime.core.dispatch = async () => { throw new ConveroomError('budget_exhausted', 'Room message budget is used up; the handoff is in the room history', 409); };
+    const pair = await server.app.inject({ method: 'POST', url: '/api/pair', headers, payload: { code: 'local-pair-code' } });
+    const cookie = String(pair.headers['set-cookie']).split(';')[0];
+    const session = await server.app.inject({ method: 'GET', url: '/api/session', headers: { ...headers, cookie } });
+    const browser = await server.app.inject({ method: 'POST', url: '/api/commands', headers: { ...headers, cookie, 'x-csrf-token': session.json().csrf },
+      payload: { name: 'room_post', args: { roomId: 'room', text: 'Late', clientKey: 'late' } } });
+    const credential = issueBridgeCredential(runtime, 'codex');
+    const agent = await server.app.inject({ method: 'POST', url: '/agent/commands', headers: { host: headers.host, authorization: 'Bearer ' + credential.token },
+      payload: { name: 'room_post', args: { roomId: 'room', text: 'Late', clientKey: 'late' } } });
+    for (const response of [browser, agent]) {
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error).toMatchObject({ code: 'budget_exhausted', committed: false, retrySafe: true });
+    }
   });
   it('routes interrupted command inspection and clearing to the paired human only', async () => {
     const { server, runtime, headers } = await fixture();

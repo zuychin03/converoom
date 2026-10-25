@@ -59,7 +59,7 @@ const eventFields: Record<string, string[]> = {
   message: ['text', 'senderId', 'mentions', 'replyToId'], agenda: ['agenda', 'unresolved'],
   decision: ['decision', 'positions', 'dissent', 'evidence', 'unresolved'],
   'seat.joined': ['id', 'ownerId', 'name', 'product', 'mode', 'role', 'status'], 'seat.left': ['seatId'],
-  'room.paused': ['status'], 'room.open': ['status'], 'room.closed': ['status'],
+  'room.paused': ['status'], 'room.open': ['status'], 'room.closed': ['status'], 'room.budget_exhausted': ['budgets', 'usage', 'limits'],
   'policy.changed': ['version'], 'host.transferred': ['seatId'],
   'membership.confirmed': ['memberId', 'ownerId', 'generation', 'role'],
   'membership.revoked': ['memberId', 'ownerId', 'generation'],
