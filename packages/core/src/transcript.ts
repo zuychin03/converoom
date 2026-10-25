@@ -151,6 +151,7 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     'attempt.release_requested': (d) => reason(`Release requested for attempt ${code(String(d.attemptId).slice(0, 8))}`, d.reason),
     'attempt.released': (d) => `Attempt ${code(String(d.attemptId).slice(0, 8))} released; its workspace is preserved.`,
     'command.cleared': (d) => `Interrupted ${inline(d.command)} cleared; its client key can run again.`,
+    'workspaces.removed': (d) => `Removed ${plural(items(d.removed).length, 'coding workspace')} (${Number(d.bytes)} bytes) after the owner confirmed a cleanup preview.`,
     'bridge.authorized': (d) => `Room connection approved for a participant bridge, membership generation ${Number(d.generation)}.`,
     'bridge.revoked': () => 'Room connection revoked for a participant bridge.',
     'bridge.cleanup_needed': (d) => `A managed credential file for ${turn(d.turnId)} needs cleanup.`,

@@ -304,6 +304,7 @@ export async function createServer(
     'candidate_review',
     'candidate_apply',
     'workspace_cleanup',
+    'workspace_cleanup_preview',
     'attempt_release',
     'interrupted_command_list',
     'interrupted_command_clear',

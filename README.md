@@ -89,6 +89,8 @@ Checks run in fresh clones against exact content. An optional `local-kv` fixture
 
 Accept each exact submission after independent checks, then prepare the combined candidate. Review the final combined evidence before applying. Apply refuses a dirty or changed original target. It creates no commit, push, merge or deployment.
 
+Every attempt, combined candidate and check keeps its clone until you clean it up. `converoom cleanup`, or Workspace cleanup in the Work view, previews every clone with its size and either that it can be removed or why it is kept. A clone can be removed once its work is submitted or recorded and the room has been exported since; a released attempt also needs 7 days to pass and no unsubmitted changes. Dirty, unexported and uncertain work is always kept. `converoom cleanup --confirm CODE` removes only what that preview listed, and nothing if anything changed since.
+
 ## Tests and diagnostics
 
 `npm test` covers behaviour, persistence, identity, scheduling, content, workspace, fixture, agent protocols and Windows installation boundaries. See the [preview evidence](docs/PREVIEW_ACCEPTANCE.md) for recorded counts and limitations. `npm run test:e2e` runs four non-inference desktop/mobile flows for solo rooms and shared consent, review, denial, revocation and recovery. Live vendor tests are recorded separately and never inferred from fixture success. Windows CI checks the exact source commit; local checks and earlier CI runs do not validate a later revision.

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { isRecord, list, string, type RecordData, type Snapshot } from './api.js';
+import { isRecord, list, objects, string, type RecordData, type Snapshot } from './api.js';
 import {
   Countdown,
   Elapsed,
@@ -12,18 +12,20 @@ import {
   type Action,
   type Run,
 } from './components.js';
-import { STAGES, acceptedOrder, commandLabel, interruptedFor, num, requestDetails, shortId, taskProgress, workerSeat, type Kind } from './model.js';
+import { STAGES, acceptedOrder, commandLabel, fmtBytes, interruptedFor, num, requestDetails, shortId, taskProgress, workerSeat, type Kind } from './model.js';
 
 export function WorkspaceView({
   state,
   room,
   run,
+  read,
   openAction,
   onPickRoom,
 }: {
   state: Snapshot;
   room?: RecordData;
   run: Run;
+  read: Run;
   openAction: (action: Action) => void;
   onPickRoom: (id: string) => void;
 }) {
@@ -271,6 +273,7 @@ export function WorkspaceView({
           })}
         </ul>
       </section>
+      <WorkspaceCleanup read={read} openAction={openAction} />
       <details className="work-section resources">
         <summary>Resource lifetimes ({state.resources.filter((r) => !roomId || r.roomId === roomId).length})</summary>
         <p className="rail-note">
@@ -292,6 +295,106 @@ export function WorkspaceView({
         </ul>
       </details>
     </div>
+  );
+}
+
+const CLEANUP_KINDS: Record<string, string> = { attempt: 'Attempt', candidate: 'Candidate', verification: 'Check', foundation: 'Foundation', unknown: 'Unknown' };
+const KEEP_REASONS: Record<string, string> = { active: 'In use', uncertain: 'Uncertain', unexported: 'Not exported', changed: 'Edited',
+  dirty: 'Unsubmitted changes', retention: 'Released recently', unknown: 'Unrecognised' };
+
+function WorkspaceCleanup({ read, openAction }: { read: Run; openAction: (action: Action) => void }) {
+  const [preview, setPreview] = useState<RecordData>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  async function load() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await read('workspace_cleanup_preview', {});
+      setPreview(isRecord(result) ? result : undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The preview did not load. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  const entries = preview ? objects(preview, 'entries') : [];
+  const removable = entries.filter((e) => e.removable === true);
+  const groups: [string, RecordData[]][] = [['Can be removed', removable], ['Kept', entries.filter((e) => e.removable !== true)]];
+  const total = fmtBytes(preview && isRecord(preview.removable) ? (num(preview.removable, 'bytes') ?? 0) : 0);
+  const count = `${removable.length} ${removable.length === 1 ? 'workspace' : 'workspaces'}`;
+  return (
+    <section className="work-section" aria-labelledby="cleanup-title">
+      <div className="section-head">
+        <h2 id="cleanup-title" className="section-label">
+          Workspace cleanup
+        </h2>
+        <div className="row-actions">
+          <button type="button" className="button small" disabled={busy} onClick={() => void load()}>
+            {preview ? 'Preview again' : 'Preview cleanup'}
+          </button>
+          {removable.length > 0 && (
+            <button
+              type="button"
+              className="button small"
+              onClick={() =>
+                openAction({
+                  title: 'Remove workspaces',
+                  command: 'workspace_cleanup',
+                  args: { preview: string(preview!, 'code'), confirm: true },
+                  label: 'Remove',
+                  danger: true,
+                  description: `Removes the ${count} listed under Can be removed (${total}) with their temporary build and test folders. Kept workspaces stay. If anything changed since this preview, nothing is removed.`,
+                  confirm: `Permanently delete these ${count} from this computer.`,
+                  onSuccess: () => void load(),
+                })
+              }
+            >
+              Remove {count}
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="rail-note">
+        Each attempt, combined candidate and check runs in its own clone. Cleanup removes a clone only once its work is
+        submitted or recorded and the room has been exported since. Dirty, unexported and uncertain work is always kept, and
+        nothing is removed until you confirm.
+      </p>
+      {error && <ErrorNotice dismiss={() => setError('')}>{error}</ErrorNotice>}
+      {preview && !entries.length && <p className="rail-note">No coding workspaces on this computer.</p>}
+      {groups.map(([label, items]) =>
+        items.length > 0 && (
+          <div key={label} className="cleanup-group">
+            <h3 className="section-label">
+              {label} ({items.length}{label === 'Can be removed' ? `, ${total}` : ''})
+            </h3>
+            <ul className="sources">
+              {items.map((e) => (
+                <li key={string(e, 'name')} className="source cleanup-entry">
+                  <span className="source-kind">{CLEANUP_KINDS[string(e, 'kind')] ?? 'Folder'}</span>
+                  <span className="source-name">
+                    {string(e, 'roomTitle') || (e.repoName ? `Repository ${string(e, 'repoName')}` : 'No room')}
+                    {e.taskId ? ` · task ${string(e, 'taskId')}` : ''}
+                  </span>
+                  <code className="source-path">{string(e, 'path')}</code>
+                  <span className="source-end">
+                    <Status kind={e.removable === true ? 'ok' : e.reason === 'retention' || e.reason === 'active' ? 'idle' : 'warn'}>
+                      {e.removable === true ? 'Removable' : (KEEP_REASONS[string(e, 'reason')] ?? 'Kept')}
+                    </Status>
+                    <span className="source-meta">
+                      {string(e, 'detail')}
+                      {typeof e.keepUntil === 'number' ? ` until ${new Date(e.keepUntil).toLocaleDateString('en-AU')}` : ''} ·{' '}
+                      {fmtBytes(num(e, 'bytes') ?? 0)}
+                      {e.status ? ` · ${string(e, 'status')}` : ''}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ),
+      )}
+    </section>
   );
 }
 

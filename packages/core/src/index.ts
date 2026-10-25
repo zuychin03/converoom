@@ -20,7 +20,7 @@ import { activeMembership, currentSeat, currentTurnAuthority, mountMembership, r
 import { authority } from './audit.js';
 // Reads rerun on retry, so their results are never stored under a client key.
 export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
-  'resource_profile_list', 'adapter_status', 'room_export', 'interrupted_command_list']);
+  'resource_profile_list', 'adapter_status', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview']);
 const limits = {
   maxActiveTurns: 2,
   maxRounds: 6,

@@ -1521,6 +1521,12 @@ textarea {
   border-top: 1px solid var(--hairline);
   font-size: var(--text-sm);
 }
+.source.cleanup-entry {
+  grid-template-columns: 6.5rem minmax(0, 12rem) minmax(0, 1fr) minmax(0, 18rem);
+}
+.cleanup-group {
+  margin-top: var(--space-4);
+}
 .source-name {
   font-weight: 600;
 }
@@ -1879,7 +1885,8 @@ textarea {
   .task-changes {
     grid-column: 1;
   }
-  .source {
+  .source,
+  .source.cleanup-entry {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
   }

@@ -3,19 +3,19 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "d6f103dc06b4b6c181bbef2d06a74ab1430a11caf471a5bef98916cdd0514484"
+      "sha256": "892d90a6196f0b55d8d17e1b389cc1686bdb09470f7b1e011afa9cb5a92e6c39"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "fdadcd68168b5ecaa10e196e0eea06071e51ff80d644008653808d5bb64f3eb0"
+      "sha256": "cc01f8958b98f7ad345f97babc3f2ec3f7ee52a7f2d44b67cac06868f350c3e8"
     },
     {
       "path": "dist/server.js",
-      "sha256": "72c3e1eef487fd2243b140d8411649ceeaca6012aef5ca4604a5b1500e411255"
+      "sha256": "52896c241b7ccdea69b5e20881dee56b5faee6ea922c97a9ed726a2f2262772d"
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "144c92a28ba34154f8a96a569643dfb0012dc32a127a37643121789e6db7ed76"
+      "sha256": "c83f870d773d70cc89a43707f52bcd50a89c4386a5636d2f04889374559a8ebe"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -30,12 +30,12 @@
       "sha256": "809306f8444febde9c633c98531c6db7d3505735545b2369881e8cce511a31f9"
     },
     {
-      "path": "dist/ui/assets/index-D4ZlgtlV.css",
-      "sha256": "ff5b1f468b55a9d8cf02c7513c96ab1d7835bf437dbe02aea7c81732df7361c7"
+      "path": "dist/ui/assets/index-B5YO21-6.js",
+      "sha256": "702a004aebf08341dc38a8724e2dbfcfc3c15893a3d6b407f6b8f402e935eb58"
     },
     {
-      "path": "dist/ui/assets/index-DqMzLnuW.js",
-      "sha256": "b9fb14c7c19779184f05ec27746bf896303d1246514a13bf3fa43b080f51f592"
+      "path": "dist/ui/assets/index-CzIrJZKI.css",
+      "sha256": "fc54c449c3e17686627216d5654a6b8cbd455ef6e4eb785bab5137798b4a7da7"
     },
     {
       "path": "dist/ui/assets/martian-mono-cyrillic-ext-wght-normal-DAknEryR.woff2",
@@ -67,7 +67,7 @@
     },
     {
       "path": "dist/ui/index.html",
-      "sha256": "de949353e90fd90a94439c550d7eeb252281408bdd5dcdec35e89130115597b6"
+      "sha256": "eada3a8c60af0d1cf82125db8302bdd0ee53044068cf38fc6aa2cad6e6f0848d"
     },
     {
       "path": "plugins/README.md",
@@ -83,7 +83,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "740274c4bb78d3ca38ec1a298ccae80bdd3db48b14d35d1c4de3a7e94bb8b54f"
+      "sha256": "ba4705f0e42e2360c53cc64034a30c2591877df30828af2cccfbac661b131588"
     },
     {
       "path": "docs/WINDOWS_SHARED_PILOT.md",

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClient, ApiError, parseSnapshot } from '../apps/ui/src/api.js';
 import { grantAction } from '../apps/ui/src/actions.js';
-import { capabilityLine, commandLabel, failureLabel, interruptedFor, liveRoomId, requestDetails, roomEvents, seatState, turnEvidence, turnKind, turnTarget, visibleTurn, withEarlier, workerSeat } from '../apps/ui/src/model.js';
+import { capabilityLine, commandLabel, failureLabel, fmtBytes, interruptedFor, liveRoomId, requestDetails, roomEvents, seatState, turnEvidence, turnKind, turnTarget, visibleTurn, withEarlier, workerSeat } from '../apps/ui/src/model.js';
 import { coalesce } from '../apps/ui/src/refresh.js';
 import { roomStatus } from '../apps/ui/src/RoomView.js';
 
@@ -107,6 +107,9 @@ describe('browser command boundary', () => {
   it('names a room budget refusal instead of a generic failure', () => {
     expect(failureLabel({ status: 'failed', failure: 'budget' })).toBe('Failed · budget');
     expect(failureLabel({ status: 'failed', failure: 'budget_exhausted' })).toBe('Failed · budget');
+  });
+  it('formats workspace sizes in binary units', () => {
+    expect([0, 1023, 2048, 1572864, 5 * 1073741824].map(fmtBytes)).toEqual(['0 bytes', '1023 bytes', '2.0 KiB', '1.5 MiB', '5.0 GiB']);
   });
   it('marks a room whose budget is used up, after closed and paused', () => {
     const state = parseSnapshot({ turns: [{ id: 't', roomId: 'r', status: 'running' }] });

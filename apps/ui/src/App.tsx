@@ -433,6 +433,7 @@ export function App() {
             state={snapshot}
             room={room}
             run={run}
+            read={(name, args) => client.command(name, args)}
             openAction={setAction}
             onPickRoom={selectRoom}
           />

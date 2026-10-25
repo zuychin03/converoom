@@ -13,6 +13,7 @@ import { createServer } from '../../daemon/src/server.js';
 import { createSharedServer } from '../../daemon/src/shared-server.js';
 import { sharedStartOptions } from './shared.js';
 import { assertCurrent, ensureInstalled, installationStatus, recover, uninstall, upgrade } from './lifecycle.js';
+import { cleanupPreviewLines, cleanupResultLines } from './cleanup.js';
 import { serveMcp } from '../../../packages/mcp/src/index.js';
 import {
   dataDirectory,
@@ -96,7 +97,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'Converoom ' +
         VERSION +
         '\nProducts: ' + products.join(', ') +
-        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor | upgrade | recover [--rollback [--confirm]] | uninstall [--confirm [--delete-data DATA_DIR]]\nonboard --products codex,cursor [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
+        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor | upgrade | recover [--rollback [--confirm]] | uninstall [--confirm [--delete-data DATA_DIR]]\nonboard --products codex,cursor [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup [--confirm CODE] | cleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
     );
     return;
   }
@@ -364,14 +365,16 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === 'cleanup') {
-    console.log(
-      JSON.stringify(
-        await call('workspace_cleanup', {
-          attemptId: flag('--attempt'),
-          confirm: argv.includes('--confirm'),
-        }),
-      ),
-    );
+    if (flag('--attempt')) {
+      console.log(JSON.stringify(await call('workspace_cleanup', { attemptId: flag('--attempt'), confirm: argv.includes('--confirm') })));
+      return;
+    }
+    const token = flag('--confirm');
+    if (argv.includes('--confirm') && (!token || token.startsWith('--')))
+      throw new Error('Repeat the code from the preview: converoom cleanup --confirm CODE');
+    console.log((argv.includes('--confirm')
+      ? cleanupResultLines(await call('workspace_cleanup', { preview: token, confirm: true }) as Parameters<typeof cleanupResultLines>[0])
+      : cleanupPreviewLines(await call('workspace_cleanup_preview') as Parameters<typeof cleanupPreviewLines>[0])).join('\n'));
     return;
   }
   if (command === 'interrupted') {

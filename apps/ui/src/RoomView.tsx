@@ -27,6 +27,7 @@ import {
   activity,
   capabilityLine,
   data,
+  fmtBytes,
   fmtClock,
   fmtDuration,
   num,
@@ -91,6 +92,7 @@ const SYSTEM_LABELS: Record<string, string> = {
   'candidate.accepted': 'candidate accepted',
   'candidate.applied': 'candidate applied',
   'turn.inspected': 'inspection',
+  'workspaces.removed': 'workspaces removed',
   'bridge.authorized': 'room connection approved',
   'bridge.revoked': 'room connection revoked',
   'remote.connected': 'connected',
@@ -1216,6 +1218,10 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `Candidate applied to the checkout · ${string(d, 'resultDigest').slice(0, 12)}`;
     case 'command.cleared':
       return `Interrupted ${string(d, 'command')} cleared · its client key can run again`;
+    case 'workspaces.removed': {
+      const n = objects(d, 'removed').length;
+      return `${n} coding ${n === 1 ? 'workspace' : 'workspaces'} removed after a confirmed cleanup · ${fmtBytes(num(d, 'bytes') ?? 0)}`;
+    }
     case 'turn.inspected':
       return `Uncertain turn inspected · ${FINDINGS[string(d, 'finding')] ?? 'finding recorded'}`;
     case 'bridge.authorized':

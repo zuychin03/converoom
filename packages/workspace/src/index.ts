@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, writeFile, readFile, readdir, realpath, rm, lstat, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
   ConveroomError as E,
@@ -12,7 +13,7 @@ import {
 } from '../../shared/src/contracts.js';
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
 import { RESULT_EXPIRY_BATCH, RESULT_RETENTION_MS } from '../../core/src/index.js';
-import { run, canonicalRoot, inside } from '../../adapters/src/process.js';
+import { run, canonicalRoot } from '../../adapters/src/process.js';
 import {
   snapshot,
   writeSnapshot,
@@ -130,6 +131,30 @@ interface Verification {
   workspace: string;
   checks: ToolArgs[];
 }
+export interface CleanupEntry {
+  name: string;
+  path: string;
+  kind: 'attempt' | 'candidate' | 'verification' | 'foundation' | 'unknown';
+  id?: string;
+  roomId?: string;
+  roomTitle?: string;
+  repoName?: string;
+  taskId?: string;
+  status?: string;
+  resourceId?: string;
+  bytes: number;
+  createdAt?: number;
+  removable: boolean;
+  reason?: string;
+  detail: string;
+  keepUntil?: number;
+  contentDigest?: string;
+}
+// SPEC retention proposal: temporary cancelled workspaces stay for 7 days.
+const RELEASE_RETENTION_MS = 7 * 86400000;
+const ACTIVE_ATTEMPT = ['provisioning', 'ready', 'running', 'submitting', 'completed', 'draining'];
+const ACTIVE_CANDIDATE = ['prepared', 'verified', 'accepted', 'applying'];
+const RESUMED = 'An earlier removal did not finish';
 export function mountWorkspace(
   core: Core,
   dataDir: string,
@@ -1150,29 +1175,148 @@ export function mountWorkspace(
       });
     }),
   );
+  const workspaceRoot = join(dataDir, 'workspaces');
+  const sizeOf = async (path: string) => {
+    let total = 0;
+    for (const entry of await readdir(path, { recursive: true, withFileTypes: true }).catch(() => []))
+      if (entry.isFile()) total += (await lstat(join(entry.parentPath, entry.name)).catch(() => ({ size: 0 }))).size;
+    return total;
+  };
+  const exportedAfter = (roomId: string, at: number) => Number(s.get<{ at: number }>('exported', roomId)?.at ?? -1) >= at;
+  // F8: nothing is removed without a confirmed preview, and dirty, unexported or uncertain work is always kept.
+  const classify = async (name: string): Promise<CleanupEntry> => {
+    const path = join(workspaceRoot, name), born = (await stat(path).catch(() => undefined))?.birthtimeMs;
+    const base = { name, path, bytes: 0, ...(born ? { createdAt: Math.round(born) } : {}) };
+    const keep = (reason: string, detail: string, info: Partial<CleanupEntry> = {}): CleanupEntry =>
+      ({ ...base, kind: 'unknown', ...info, removable: false, reason, detail });
+    const remove = (detail: string, info: Partial<CleanupEntry>): CleanupEntry => ({ ...base, kind: 'unknown', ...info, removable: true, detail });
+    const room = (roomId: string) => ({ roomId, roomTitle: String(s.get<ToolArgs>('room', roomId)?.title ?? '') });
+    const resumed = !!s.get('cleanup', name), unexported = 'Not in a room export taken after this work';
+    const at = s.get<Attempt>('attempt', name);
+    if (at) {
+      const info: Partial<CleanupEntry> = { kind: 'attempt', id: at.id, ...room(at.roomId), taskId: at.taskId, status: at.status, resourceId: at.resourceId };
+      const p = s.get<Profile>('profile', at.profileId);
+      if (resumed || at.status === 'removed') return remove(RESUMED, info);
+      if (ACTIVE_ATTEMPT.includes(at.status)) return keep('active', 'Still in use by its task', info);
+      if (['quarantined', 'uncertain'].includes(at.status) || !p)
+        return keep('uncertain', 'Its worker stop is not confirmed. Inspect and release it first', info);
+      if (['submitted', 'retained'].includes(at.status)) {
+        const m = s.list<Manifest>('manifest').find((v) => v.attemptId === at.id);
+        if (!m || !exportedAfter(at.roomId, m.createdAt)) return keep('unexported', unexported, info);
+        const digest = (await snapshot(path, p.generatedPaths)).digest;
+        return digest === m.resultDigest ? remove('Submitted and exported; its manifest keeps the submitted content', { ...info, contentDigest: digest })
+          : keep('changed', 'Edited after it was submitted', info);
+      }
+      if (at.status === 'released') {
+        const released = Number(s.get<ToolArgs>('resource', at.resourceId)?.releasedAt ?? 0);
+        const digest = (await snapshot(path, p.generatedPaths)).digest;
+        if (digest !== at.effectiveBase) return keep('dirty', 'Holds changes that were never submitted', info);
+        if (Date.now() < released + RELEASE_RETENTION_MS)
+          return keep('retention', 'Released less than 7 days ago', { ...info, keepUntil: released + RELEASE_RETENTION_MS });
+        if (!exportedAfter(at.roomId, released)) return keep('unexported', unexported, info);
+        return remove('Released over 7 days ago with no unsubmitted changes', { ...info, contentDigest: digest });
+      }
+      return keep('unknown', 'Its state is not one cleanup recognises', info);
+    }
+    const c = name.startsWith('candidate-') ? s.get<Candidate>('candidate', name.slice(10)) : undefined;
+    if (c) {
+      const info: Partial<CleanupEntry> = { kind: 'candidate', id: c.id, ...room(c.roomId), status: c.status };
+      const p = s.get<Profile>('profile', c.profileId);
+      if (resumed) return remove(RESUMED, info);
+      if (ACTIVE_CANDIDATE.includes(c.status)) return keep('active', 'Needed until the candidate is applied or set aside', info);
+      if (c.status === 'uncertain' || !p) return keep('uncertain', 'Its apply did not finish. Inspect the checkout first', info);
+      if (!exportedAfter(c.roomId, c.createdAt)) return keep('unexported', unexported, info);
+      const digest = (await snapshot(path, p.generatedPaths)).digest;
+      return digest === c.resultDigest ? remove('Candidate ' + c.status + '; its record keeps the result digest', { ...info, contentDigest: digest })
+        : keep('changed', 'Edited after it was prepared', info);
+    }
+    const applied = name.startsWith('apply-') ? s.get<Candidate>('candidate', name.replace(/^apply-(foundation-)?/, '')) : undefined;
+    if (applied) {
+      const info: Partial<CleanupEntry> = { kind: 'candidate', id: applied.id, ...room(applied.roomId), status: applied.status };
+      if (resumed) return remove(RESUMED, info);
+      if (['applying', 'uncertain'].includes(applied.status)) return keep('uncertain', 'Its apply did not finish. Inspect the checkout first', info);
+      if (!['applied', 'failed', 'stale'].includes(applied.status)) return keep('active', 'Needed until the candidate is applied or set aside', info);
+      if (!exportedAfter(applied.roomId, applied.createdAt)) return keep('unexported', unexported, info);
+      return remove('Temporary checkout from applying the candidate', info);
+    }
+    const repo = name.startsWith('foundation-') ? s.get<Repo>('repo', name.slice(11)) : undefined;
+    if (repo)
+      return existsSync(repo.foundationPath)
+        ? remove('Copy made when the repository was registered; its foundation snapshot is stored', { kind: 'foundation', id: repo.id, repoName: repo.name })
+        : keep('uncertain', 'Its stored foundation snapshot is missing', { kind: 'foundation', id: repo.id, repoName: repo.name });
+    if (name.startsWith('verify-')) {
+      const id = name.slice(7), v = s.get<Verification>('verification', id);
+      const info: Partial<CleanupEntry> = { kind: 'verification', id, ...(v ? { ...room(v.roomId), status: v.status } : {}), resourceId: id };
+      if (resumed) return remove(RESUMED, info);
+      if (!v) return keep('uncertain', 'Its checks have no recorded result. Inspect it first', info);
+      if (!exportedAfter(v.roomId, Number(s.get<ToolArgs>('resource', id)?.createdAt ?? 0))) return keep('unexported', unexported, info);
+      return remove('Its check results are recorded', { ...info, contentDigest: v.contentDigest });
+    }
+    return keep('unknown', 'Not recorded by Converoom; left untouched');
+  };
+  const cleanupPreview = async () => {
+    const names = (await readdir(workspaceRoot, { withFileTypes: true }).catch(() => []))
+      .filter((d) => d.isDirectory()).map((d) => d.name).sort();
+    const entries: CleanupEntry[] = [];
+    for (const name of names) {
+      const e = await classify(name);
+      entries.push({ ...e, bytes: (await sizeOf(e.path)) + (e.resourceId ? await sizeOf(join(dataDir, 'resources', e.resourceId)) : 0) });
+    }
+    const removable = entries.filter((e) => e.removable);
+    const digest = scopeDigest(removable.map((e) => ({ name: e.name, kind: e.kind, id: e.id ?? null, contentDigest: e.contentDigest ?? null })));
+    return { digest, code: digest.slice(0, 12), entries, removable: { count: removable.length, bytes: removable.reduce((n, e) => n + e.bytes, 0) } };
+  };
+  const removeWorkspace = async (e: CleanupEntry) => {
+    s.put('cleanup', e.name, { name: e.name, kind: e.kind, id: e.id ?? null, startedAt: Date.now() });
+    await rm(e.path, { recursive: true, force: true, maxRetries: 3 });
+    if (e.resourceId) await rm(join(dataDir, 'resources', e.resourceId), { recursive: true, force: true, maxRetries: 3 });
+    s.transaction(() => {
+      const kind = ['attempt', 'candidate', 'verification'].includes(e.kind) ? e.kind : undefined;
+      const record = kind && e.id ? s.get<ToolArgs>(kind, e.id) : undefined;
+      if (kind && record) s.put(kind, e.id!, kind === 'attempt' ? { ...record, status: 'removed' } : { ...record, workspaceRemovedAt: Date.now() });
+      const resource = e.resourceId ? s.get<ToolArgs>('resource', e.resourceId) : undefined;
+      if (resource) s.put('resource', e.resourceId!, { ...resource, status: 'removed', removedAt: Date.now() });
+      s.remove('cleanup', e.name);
+    });
+  };
+  const announce = (a: Actor, removed: CleanupEntry[]) => {
+    for (const roomId of new Set(removed.map((e) => e.roomId)))
+      if (roomId && s.get('room', roomId)) {
+        const own = removed.filter((e) => e.roomId === roomId);
+        ev(a, roomId, 'workspaces.removed', { removed: own.map((e) => ({ kind: e.kind, id: e.id ?? null, name: e.name })),
+          bytes: own.reduce((n, e) => n + e.bytes, 0) });
+      }
+  };
+  core.register('workspace_cleanup_preview', async (a) => {
+    core.requireOwner(a);
+    return cleanupPreview();
+  });
   core.register('workspace_cleanup', async (a, x) => {
     core.requireOwner(a);
-    const at = get<Attempt>('attempt', str(x, 'attemptId'));
-    if (
-      !['submitted', 'retained'].includes(at.status) ||
-      x.confirm !== true ||
-      !s.get('exported', at.roomId)
-    )
-      throw new E('cleanup_refused', 'Dirty, unexported or uncertain work is retained');
-    const t = task(at.roomId, at.taskId),
-      m = t.manifestId ? get<Manifest>('manifest', t.manifestId) : undefined,
-      p = get<Profile>('profile', at.profileId);
-    if (
-      !m ||
-      m.attemptId !== at.id ||
-      (await snapshot(at.path, p.generatedPaths)).digest !== m.resultDigest
-    )
-      throw new E('cleanup_refused', 'Dirty or changed work is retained');
-    if (!inside(join(dataDir, 'workspaces'), at.path))
-      throw new E('cleanup_refused', 'Invalid workspace root');
-    await rm(at.path, { recursive: true, force: true });
-    s.put('attempt', at.id, { ...at, status: 'removed' });
-    return { removed: at.id };
+    if (x.confirm !== true) throw new E('cleanup_refused', 'Confirm the cleanup to remove workspaces');
+    if (x.attemptId !== undefined) {
+      const at = get<Attempt>('attempt', str(x, 'attemptId'));
+      const e = await classify(at.id);
+      if (!e.removable) throw new E('cleanup_refused', 'This workspace is retained: ' + e.detail);
+      await removeWorkspace(e);
+      announce(a, [e]);
+      return { removed: at.id };
+    }
+    const code = str(x, 'preview', 64), preview = await cleanupPreview();
+    if (code.length < 12 || !preview.digest.startsWith(code))
+      throw new E('cleanup_changed', 'The workspaces changed since this preview. Preview again before removing anything', 409);
+    const candidates = preview.entries.filter((e) => e.removable);
+    if (!candidates.length) throw new E('cleanup_refused', 'Nothing can be removed', 409);
+    const removed: CleanupEntry[] = [], failed: { name: string; path: string; message: string }[] = [];
+    for (const e of candidates)
+      try {
+        await removeWorkspace(e);
+        removed.push(e);
+      } catch (error) {
+        failed.push({ name: e.name, path: e.path, message: error instanceof Error ? error.message : 'Removal failed' });
+      }
+    announce(a, removed);
+    return { removed, failed, bytes: removed.reduce((n, e) => n + e.bytes, 0) };
   });
   core.register('attempt_release', (a, x) => journal(a, 'attempt_release', x, async () => {
     const roomId = str(x, 'roomId');

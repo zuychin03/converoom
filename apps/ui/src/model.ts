@@ -20,6 +20,15 @@ export function fmtDuration(ms: number) {
   const s = String(total % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
 }
+export function fmtBytes(bytes: number) {
+  const units = ['KiB', 'MiB', 'GiB'];
+  let value = bytes, unit = -1;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return unit < 0 ? `${bytes} bytes` : `${value.toFixed(1)} ${units[unit]}`;
+}
 export const fmtClock = (at: number) =>
   new Date(at).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
 

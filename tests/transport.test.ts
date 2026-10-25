@@ -75,6 +75,17 @@ describe('local identity boundary', () => {
       expect(response.json().error).toMatchObject({ code: 'budget_exhausted', committed: false, retrySafe: true });
     }
   });
+  it('delivers the cleanup preview code through response redaction', async () => {
+    const { server, runtime, headers } = await fixture();
+    const preview = { digest: 'a'.repeat(64), code: 'a'.repeat(12), entries: [{ name: 'n', path: 'p', kind: 'attempt', removable: true, detail: 'd', bytes: 1 }], removable: { count: 1, bytes: 1 } };
+    runtime.core.dispatch = async () => preview;
+    const pair = await server.app.inject({ method: 'POST', url: '/api/pair', headers, payload: { code: 'local-pair-code' } });
+    const cookie = String(pair.headers['set-cookie']).split(';')[0];
+    const session = await server.app.inject({ method: 'GET', url: '/api/session', headers: { ...headers, cookie } });
+    const response = await server.app.inject({ method: 'POST', url: '/api/commands', headers: { ...headers, cookie, 'x-csrf-token': session.json().csrf },
+      payload: { name: 'workspace_cleanup_preview', args: {} } });
+    expect(response.json()).toMatchObject({ result: preview, committed: false, retrySafe: true });
+  });
   it('routes interrupted command inspection and clearing to the paired human only', async () => {
     const { server, runtime, headers } = await fixture();
     const pair = await server.app.inject({ method: 'POST', url: '/api/pair', headers, payload: { code: 'local-pair-code' } });
