@@ -328,6 +328,15 @@ export function createStore(path: string): Store {
     throw error;
   }
 }
+// Read-only, so a copy taken before an upgrade never runs the newer createStore's schema changes first.
+export async function backupDatabase(source: string, destination: string): Promise<void> {
+  const db = new Database(source, { readonly: true, fileMustExist: true });
+  try { await db.backup(destination); } finally { db.close(); }
+}
+export function databaseSchema(path: string): number {
+  const db = new Database(path, { readonly: true, fileMustExist: true });
+  try { return db.pragma('user_version', { simple: true }) as number; } finally { db.close(); }
+}
 export function allRoomEvents(store: Store, roomId: string): Event[] {
   const result: Event[] = [];
   let cursor = 0;

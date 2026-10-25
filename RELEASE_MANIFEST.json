@@ -3,19 +3,19 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "fad634f1da51b6c54033ee1a05f35055cc5e006128837a5b03af0bbd4169a724"
+      "sha256": "a651cbd4b6dbda414cb01e02f622e1f62b01213505b90594f3313579762c0f9e"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "074094a9957d3c2dd9a93714848058b0c6d0f43d82c744a728d26bca2c6210dc"
+      "sha256": "aa663a256c2d1e9165c5783b157142ca9ee600a52f4958c896c0c5c38e4d914b"
     },
     {
       "path": "dist/server.js",
-      "sha256": "a2cdde7b0afa312b7e2012dbbb0130f8863b40a90edce79390837c69c5f3e78b"
+      "sha256": "ca2e827f93b6aeb109ee74b2392edad3c1a1b5a4059eeb9758c914fb6e96bfa7"
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "96a11d1cb64c623e87a199bfca10af9c6e12b37535f0eb3d4e98640528f9acff"
+      "sha256": "d5c979f9bd73c042f8e04fb762247b81afd6a3cec213119108e72c54a9f3f559"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -83,7 +83,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "3442a5027b876b1799f8d68194b0696ae41ad63ca16db884e823cb07eae13587"
+      "sha256": "d458285992ccb626a8e9ab466873d7c41810708cdaf16d85050123278b46d509"
     },
     {
       "path": "docs/WINDOWS_SHARED_PILOT.md",
@@ -95,7 +95,7 @@
     },
     {
       "path": "docs/AGENT_SUPPORT.md",
-      "sha256": "66fbd379672e87dc58d3dcd528e8c5a3cc8925332147bcc259f90241b2fd3d7f"
+      "sha256": "7bd0bc62e8a38ad582fd3a00c31c72333d8f4bb085d3f1769dc3a941d97255a2"
     },
     {
       "path": "docs/REQUIREMENT_MATRIX.md",
@@ -103,7 +103,7 @@
     },
     {
       "path": "docs/WINDOWS_INSTALL.md",
-      "sha256": "eabfe0c9ebb42e35e22ad9d453e2b595947190d2c9986f5d01350849ec7cf7be"
+      "sha256": "258bcb2e6d0f7540fbbc86055a3b92e99e0fdf2fbc58e20e4321112cb6c65c67"
     },
     {
       "path": "scripts/install-windows.ps1",
@@ -111,7 +111,7 @@
     },
     {
       "path": "scripts/windows-install.psm1",
-      "sha256": "628067b861b43f168fd1651900a344cf43aafb2e0b999289bdf4718e809f0576"
+      "sha256": "2e136654be34a48cd8893801e744349b45314381eaf8685311972bd931c48334"
     }
   ],
   "version": "0.2.0",

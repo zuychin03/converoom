@@ -33,6 +33,12 @@ Useful options:
 | `-NoPath` | Leave persistent user PATH unchanged. Invoke the printed launcher path. |
 | `-Products @()` | Install Converoom without selecting an agent. Choose/register products later. |
 
+## Upgrade and uninstall
+
+Stop the runtime, then run a newer bundle's `install.ps1` the same way. When another version is already installed it runs `converoom upgrade`. That backs up room data under `backups`, points the launcher and agent registrations at the new version and keeps the previous one for `converoom recover --rollback`. An older bundle is refused. See the [README](../README.md#upgrade-recover-and-uninstall) for recover.
+
+To remove Converoom, run `converoom uninstall` to see what would change, then `converoom uninstall --confirm`. It removes Converoom's registrations, unedited room skills, runtime files, launchers and PATH entry. Git, Tailscale, the bundled Node and the agent CLIs under `tools`, and room data remain. Add `--delete-data` followed by the data folder's path to delete room data as well.
+
 ## Finish account sign-in
 
 Software installation and account readiness are reported separately. Sign in through the Tailscale tray icon and the selected native agent client. For Codex use `codex login` and Sign in with ChatGPT. Restart clients to load their new room tools. Converoom does not collect vendor credentials, select paid API billing or start inference during installation/registration. Doctor probes versions and executable availability; it does not certify account entitlement or quota.

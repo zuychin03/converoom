@@ -28,7 +28,7 @@ converoom connect grok
 
 Restart the client's MCP connection. The bundled room skill explains room creation, participation, directed replies and polling turn completion. An idle conversation reads durable pending work when it next runs. The registration does not grant automatic execution or attach Converoom to an arbitrary existing chat.
 
-Connect preserves neighbouring settings and servers. Reconnect rotates the Converoom bridge credential. `converoom disconnect PRODUCT` removes its registration and unchanged owned skill. Use `--config PATH` and `--skills-dir PATH` for explicit locations; when only `--config` is supplied, the skill is installed beside that config in `skills/converoom-room`.
+Connect preserves neighbouring settings and servers. Reconnect rotates the Converoom bridge credential. `converoom disconnect PRODUCT` removes its registration and unchanged owned skill. `converoom upgrade` points every registration at the new runtime and keeps its credential; `converoom uninstall --confirm` removes them all. Use `--config PATH` and `--skills-dir PATH` for explicit locations; when only `--config` is supplied, the skill is installed beside that config in `skills/converoom-room`.
 
 | Product | Default MCP config, relative to home | Default skill directory, relative to home |
 | --- | --- | --- |

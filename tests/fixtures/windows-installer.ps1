@@ -7,6 +7,11 @@ $data = Join-Path $Root 'data'
 New-Item -ItemType Directory -Path $data -Force | Out-Null
 Set-Content -LiteralPath (Join-Path $data 'retained.txt') -Value 'keep existing work' -NoNewline
 if ($Mode -eq 'locked') { Set-Content -LiteralPath (Join-Path $data 'runtime.lock') -Value '{}' }
+if ($Mode -eq 'upgrade' -or $Mode -eq 'legacy') {
+  New-Item -ItemType Directory -Path (Join-Path $data 'runtime/0.1.9') -Force | Out-Null
+  Set-Content -LiteralPath (Join-Path $data 'runtime/0.1.9/installation.json') -Value '{"version":"0.1.9"}' -NoNewline
+  if ($Mode -eq 'upgrade') { Set-Content -LiteralPath (Join-Path $data 'runtime/active.json') -Value '{"version":"0.1.9"}' -NoNewline }
+}
 try {
   if (![System.IO.File]::Exists($ModulePath)) { throw 'Installer implementation missing' }
   $module = Import-Module $ModulePath -Force -PassThru
@@ -44,7 +49,7 @@ try {
         if ($Arguments -contains 'Tailscale.Tailscale') { $script:installed['tailscale'] = $true }
       }
       if ($Arguments -contains '@openai/codex') { $script:installed['codex'] = $true }
-      if ($Arguments -contains 'setup') {
+      if ($Arguments -contains 'setup' -or $Arguments -contains 'upgrade') {
         $target = Join-Path $Data 'runtime/0.2.0/dist'
         New-Item -ItemType Directory -Path $target -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $target 'cli.js') -Value 'stable fixture'

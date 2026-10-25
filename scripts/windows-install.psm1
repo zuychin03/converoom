@@ -134,7 +134,15 @@ function Install-ConveroomBundle {
       if (!(Find-ConveroomCommand $definition.command)) { throw ('Vendor executable unavailable after installing ' + $product) }
     }
   }
-  $output = Invoke-ConveroomProgram $node @((Join-Path $Bundle 'runtime/dist/cli.js'), 'setup', '--data-dir', $DataDirectory)
+  # Another installed version is moved forward by upgrade, which backs up room data first; setup refuses it.
+  $step = 'setup'
+  $runtimes = Join-Path $DataDirectory 'runtime'
+  $activeFile = Join-Path $runtimes 'active.json'
+  if ([System.IO.File]::Exists($activeFile)) {
+    if (([System.IO.File]::ReadAllText($activeFile) | ConvertFrom-Json).version -ne $manifest.version) { $step = 'upgrade' }
+  } elseif ([System.IO.Directory]::Exists($runtimes) -and (Get-ChildItem -LiteralPath $runtimes -Directory |
+      Where-Object { $_.Name -ne $manifest.version -and [System.IO.File]::Exists((Join-Path $_.FullName 'installation.json')) })) { $step = 'upgrade' }
+  $output = Invoke-ConveroomProgram $node @((Join-Path $Bundle 'runtime/dist/cli.js'), $step, '--data-dir', $DataDirectory)
   if ($output) { Write-Host $output }
   $cli = Join-Path $DataDirectory ('runtime/' + $manifest.version + '/dist/cli.js')
   if (![System.IO.File]::Exists($cli)) { throw 'Stable Converoom runtime is missing after setup' }

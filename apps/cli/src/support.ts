@@ -260,24 +260,30 @@ export async function removeSkill(skill: { path: string; digest: string }): Prom
   if (scopeDigest(await readFile(file, 'utf8')) !== skill.digest) return file;
   await rm(file);
 }
-const samePath = (a: string, b: string) =>
+export const samePath = (a: string, b: string) =>
   process.platform === 'win32' ? resolve(a).toLowerCase() === resolve(b).toLowerCase() : resolve(a) === resolve(b);
 // Reads only Converoom's own entry, in the formats editConfig writes; other servers and settings are never returned.
-async function registeredArgs(product: string, path: string): Promise<string[] | undefined> {
+export async function registeredEntry(product: string, path: string): Promise<{ command?: string; args: string[] } | undefined> {
   const text = await readFile(path, 'utf8');
   if (product === 'codex' || product === 'grok') {
     const lines = text.split(/\r?\n/), start = lines.findIndex((line) => line.trim() === '[mcp_servers.converoom]');
     if (start < 0) return undefined;
     const table = lines.slice(start + 1), end = table.findIndex((line) => /^\s*\[/.test(line));
-    const args = (end < 0 ? table : table.slice(0, end)).find((line) => /^\s*args\s*=/.test(line));
-    const parsed: unknown = args ? JSON.parse(args.slice(args.indexOf('=') + 1)) : [];
-    return Array.isArray(parsed) ? parsed.map(String) : [];
+    const value = (key: string): unknown => {
+      const line = (end < 0 ? table : table.slice(0, end)).find((l) => l.split('=')[0]!.trim() === key);
+      return line ? JSON.parse(line.slice(line.indexOf('=') + 1)) : undefined;
+    };
+    const command = value('command'), args = value('args');
+    return { command: typeof command === 'string' ? command : undefined, args: Array.isArray(args) ? args.map(String) : [] };
   }
   const current = JSON.parse(text) as Record<string, Record<string, { args?: unknown; command?: unknown }> | undefined>;
   const entry = current[product === 'opencode' ? 'mcp' : 'mcpServers']?.converoom;
   if (!entry) return undefined;
-  const args = product === 'opencode' ? entry.command : entry.args;
-  return Array.isArray(args) ? args.map(String) : [];
+  if (product === 'opencode') {
+    const command = Array.isArray(entry.command) ? entry.command.map(String) : [];
+    return { command: command[0], args: command.slice(1) };
+  }
+  return { command: typeof entry.command === 'string' ? entry.command : undefined, args: Array.isArray(entry.args) ? entry.args.map(String) : [] };
 }
 export async function connectionReport(product: string, dataDir: string, defaultConfig: string,
   active?: (principalId: string) => Promise<boolean | undefined>) {
@@ -296,7 +302,7 @@ export async function connectionReport(product: string, dataDir: string, default
   if (!existsSync(config)) registration = 'no config file';
   else {
     try {
-      const args = await registeredArgs(product, config), at = args?.indexOf('--data-dir') ?? -1;
+      const args = (await registeredEntry(product, config))?.args, at = args?.indexOf('--data-dir') ?? -1;
       registration = !args ? 'not registered'
         : at >= 0 && args[at + 1] && samePath(args[at + 1], dataDir) ? 'registered' : 'registered for another data directory';
     } catch { registration = 'unreadable config'; }

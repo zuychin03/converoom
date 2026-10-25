@@ -57,7 +57,15 @@ converoom setup
 converoom start
 ```
 
-Or use `npx --ignore-scripts --package ./converoom-cli-0.2.0.tgz converoom setup`. Setup copies the compiled runtime and production dependencies into the stable application-data directory. MCP registrations point there, not at an npm cache. Stop the runtime before upgrading, downgrading or repairing an incomplete installation. Existing version directories and room data are retained. No pnpm or compiler is needed to run a supported packed release; the Windows supervisor prebuild is included. npm scope ownership must be confirmed before registry publication.
+Or use `npx --ignore-scripts --package ./converoom-cli-0.2.0.tgz converoom setup`. Setup copies the compiled runtime and production dependencies into the stable application-data directory. MCP registrations point there, not at an npm cache. No pnpm or compiler is needed to run a supported packed release; the Windows supervisor prebuild is included. npm scope ownership must be confirmed before registry publication.
+
+### Upgrade, recover and uninstall
+
+Stop the runtime before any of these. Converoom records which installed version is active, and a different package never changes it on its own: `start`, `setup`, `connect` and `onboard` stop and say which version is installed. Run the newer package's `converoom upgrade`. It backs up the room store and artefacts under `backups`, installs the new runtime, points every connected product at it without issuing new credentials and refreshes room skills you have not edited. The previous version stays installed. Downgrades are refused.
+
+`converoom recover` finishes an interrupted upgrade, clears the files a crashed runtime left, repairs the active runtime's files and points stale registrations back at it. `converoom recover --rollback` returns to the version used before the last upgrade. If that upgrade changed the room store's format, rollback also needs `--confirm`: it restores the pre-upgrade backup and keeps the newer store aside.
+
+`converoom uninstall` lists what it would remove and changes nothing. `converoom uninstall --confirm` revokes Converoom's bridge credentials and removes its MCP entries, unedited room skills, runtime files, launchers and PATH entry. Room data, backups, the bundle's Node and agent CLIs, and your other settings stay. To delete room data too, add `--delete-data` followed by the data folder's path; this is refused while retained coding work remains. Remove an npm installation afterwards with `npm uninstall --global @converoom/cli`.
 
 Use `--ignore-scripts` for this preview's installation commands. Its runtime dependencies include the required Windows prebuilt binaries. Some npm versions incorrectly compile SQLite on lockfile-driven re-installs despite its prebuilt binary and `gypfile: false` setting, as described in the [npm fix](https://github.com/npm/cli/pull/9859). Browser tests separately run `npx playwright install chromium` after installation.
 

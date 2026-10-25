@@ -15,6 +15,7 @@ import {
   type Turn,
   type ToolArgs,
   type RemoteConnection,
+  type Store,
 } from '../../../packages/shared/src/contracts.js';
 import { TOOL_DEFINITIONS, validateToolArgs } from '../../../packages/mcp/src/tools.js';
 import { redactTransport } from '../../../packages/store/src/index.js';
@@ -34,13 +35,26 @@ const outcome = (name: string, args: ToolArgs) => ({ committed: !READ_COMMANDS.h
   (typeof args.clientKey === 'string' && TOOL_DEFINITIONS.some((t) => t.name === name) &&
     !['task_claim', 'task_submit', 'verification_request', 'integration_prepare'].includes(name)) });
 export function humanIdentity(runtime: Runtime): Actor {
-  let actor = runtime.core.store.get<Actor>('identity', 'human');
+  return ownerIdentity(runtime.core.store);
+}
+export function ownerIdentity(store: Store): Actor {
+  let actor = store.get<Actor>('identity', 'human');
   if (!actor) {
     const id = crypto.randomUUID();
     actor = { kind: 'human', principalId: id, ownerId: id };
-    runtime.core.store.put('identity', 'human', actor);
+    store.put('identity', 'human', actor);
   }
   return actor;
+}
+export function revokeBridgeCredential(store: Store, principalId: string): void {
+  let revoked = false;
+  for (const credential of store.list<Actor>('bridge'))
+    if (credential.principalId === principalId) {
+      // Hash keys are not exposed by Store.list; credentials are revoked through an indexed principal record.
+      store.put('revoked', credential.principalId, true);
+      revoked = true;
+    }
+  if (revoked) installationAuthority(store, ownerIdentity(store), 'bridge.credential_revoked', { principalId });
 }
 export function issueBridgeCredential(
   runtime: Runtime,
@@ -422,14 +436,7 @@ export async function createServer(
   });
   app.post<{ Body: { principalId: string } }>('/local/revoke', async (request) => {
     localAuth(request);
-    let revoked = false;
-    for (const credential of runtime.core.store.list<Actor & { id?: string }>('bridge'))
-      if (credential.principalId === request.body.principalId) {
-        // Hash keys are not exposed by Store.list; credentials are revoked through an indexed principal record.
-        runtime.core.store.put('revoked', credential.principalId, true);
-        revoked = true;
-      }
-    if (revoked) installationAuthority(runtime.core.store, human, 'bridge.credential_revoked', { principalId: request.body.principalId });
+    revokeBridgeCredential(runtime.core.store, request.body.principalId);
     return { revoked: true };
   });
   app.post<{ Body: { principalId?: unknown } }>('/local/credentials/status', async (request) => {

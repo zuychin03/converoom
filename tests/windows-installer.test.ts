@@ -51,6 +51,12 @@ it('installs missing Git, Tailscale and the selected agent before reporting loca
   expect(result.launcher).toContain('dist');
 });
 
+it.each(['upgrade', 'legacy'])('runs upgrade instead of setup over an earlier %s installation', async (mode) => {
+  const result = await install(mode);
+  expect(result.error).toBeNull();
+  expect(result.calls.map((c: { args: string[] }) => c.args[1]).filter((step: string) => step === 'setup' || step === 'upgrade')).toEqual(['upgrade']);
+});
+
 it('reuses installed prerequisites without reinstalling them', async () => {
   const result = await install('existing');
   expect(result.error).toBeNull();

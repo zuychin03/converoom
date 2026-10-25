@@ -12,6 +12,7 @@ import { createRuntime } from '../../daemon/src/runtime.js';
 import { createServer } from '../../daemon/src/server.js';
 import { createSharedServer } from '../../daemon/src/shared-server.js';
 import { sharedStartOptions } from './shared.js';
+import { assertCurrent, ensureInstalled, installationStatus, recover, uninstall, upgrade } from './lifecycle.js';
 import { serveMcp } from '../../../packages/mcp/src/index.js';
 import {
   dataDirectory,
@@ -19,7 +20,6 @@ import {
   privateJson,
   json,
   secret,
-  installStable,
   editConfig,
   connectionReport,
   installSkill,
@@ -96,7 +96,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'Converoom ' +
         VERSION +
         '\nProducts: ' + products.join(', ') +
-        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor\nonboard --products codex,cursor [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
+        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor | upgrade | recover [--rollback [--confirm]] | uninstall [--confirm [--delete-data DATA_DIR]]\nonboard --products codex,cursor [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
     );
     return;
   }
@@ -129,6 +129,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           platform: process.platform,
           arch: process.arch,
           dataDir,
+          installation: await installationStatus(dataDir),
           credentialStorage: 'degraded user files, not an OS keystore',
           products: await Promise.all(products.map(async (p) => ({
             ...(await probeProduct(p, dataDir)),
@@ -143,6 +144,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === 'start') {
+    await assertCurrent(dataDir);
     const sharedOptions = sharedStartOptions(argv);
     let running: Metadata | undefined;
     if (existsSync(metaPath))
@@ -269,14 +271,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   if (command === 'setup') {
     console.log(
       'Installed stable runtime: ' +
-        (await installStable(dataDir)) +
+        (await ensureInstalled(dataDir)) +
         '\nRun doctor; sign in through your native agent client; start the runtime; connect a product; pair the browser; create and close a bounded smoke room. Agent setup: docs/AGENT_SUPPORT.md',
     );
     return;
   }
   if (command === 'onboard') {
     const selected = parseOnboardProducts(flag('--products') ?? 'codex');
-    await onboard(await installStable(dataDir), dataDir, selected, !argv.includes('--no-open'));
+    await onboard(await ensureInstalled(dataDir), dataDir, selected, !argv.includes('--no-open'));
     return;
   }
   if (command === 'connect' || command === 'disconnect') {
@@ -299,7 +301,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       if (kept) console.log('Kept your edited room skill: ' + kept);
       return;
     }
-    const stable = await installStable(dataDir);
+    const stable = await ensureInstalled(dataDir);
     const skills = resolve(
       flag('--skills-dir') ??
         (flag('--config')
@@ -318,6 +320,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       args: [stable, 'mcp', '--client', product, '--data-dir', dataDir],
     });
     console.log('Connected ' + product + '. Restart its MCP connection.');
+    return;
+  }
+  if (command === 'upgrade' || command === 'recover' || command === 'uninstall') {
+    const lines = command === 'upgrade' ? await upgrade(dataDir)
+      : command === 'recover' ? await recover(dataDir, { rollback: argv.includes('--rollback'), confirm: argv.includes('--confirm') })
+        : await uninstall(dataDir, { confirm: argv.includes('--confirm'), deleteData: argv.includes('--delete-data') ? flag('--delete-data') ?? '' : undefined });
+    console.log(lines.join('\n'));
     return;
   }
   if (command === 'remote-connect') {
