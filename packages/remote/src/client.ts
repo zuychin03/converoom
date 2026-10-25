@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isProduct, isManagedProduct } from '../../shared/src/products.js';
 import { createServer as callbackServer, type Server as CallbackServer } from 'node:http';
-import { readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { auth as oauth } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -15,7 +14,7 @@ import { pinnedFetch, RoomOAuthClient, type RoomOAuthState } from '../../mcp/src
 import { SHARED_READS, SHARED_WRITES } from '../../core/src/membership.js';
 import { authority, installationAuthority } from '../../core/src/audit.js';
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
-import { privateJson } from '../../../apps/cli/src/support.js';
+import { OAUTH_SECRETS, REMOTE_SECRETS, readCredential, removeCredential, writeCredential } from '../../../apps/cli/src/credentials.js';
 
 export interface RemoteIdentity { actor: Actor; roomId: string; generation: number }
 interface SharedRoom { policyVersion: number; seq: number; title: string; objective: string }
@@ -96,7 +95,8 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
     if (!c || !/^[0-9a-f-]{36}$/.test(c.id)) throw new E('remote_connection', 'Connection not found', 404);
     return c;
   };
-  const path = (id: string) => join(dataDir, 'remote', id + '.json');
+  const path = (id: string) => join(dataDir, 'remote', id + '.json'), oauthPath = (id: string) => join(dataDir, 'remote', id + '.oauth.json');
+  const saveRemote = (id: string, value: Record<string, unknown>) => writeCredential(path(id), value, REMOTE_SECRETS);
   const proxyRoom = async (a: Actor, connectionId: string, product: string, maxTurns: number, maxTurnMs: number) => {
     const room = await core.dispatch(a, 'room_create', { title: 'My remote agent', objective: 'Locally approved remote discussion only' }) as Room;
     store.put('room', room.id, { ...store.get<Room>('room', room.id)!, remoteConnectionId: connectionId });
@@ -109,19 +109,19 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
     if (stopped || ['revoked', 'uncertain', 'authorizing'].includes(connection(c.id).status)) throw new E('remote_offline', 'Connection requires local review', 409);
     const pending = opening.get(c.id); if (pending) return pending;
     const operation = (async () => {
-      let credentials = JSON.parse(await readFile(path(c.id), 'utf8')) as RemoteCredentials;
+      let credentials = await readCredential<RemoteCredentials>(path(c.id));
       if (credentials.refreshPending) throw new E('remote_refresh_uncertain', 'Credential renewal requires reauthorisation', 409);
       if (credentials.accessExpiresAt !== undefined && credentials.accessExpiresAt <= Date.now() + 60000) {
         const previous = clients.get(c.id); clients.delete(c.id); await previous?.close();
         const refreshToken = credentials.refreshToken;
-        await privateJson(path(c.id), { ...credentials, refreshToken: undefined, refreshPending: true, connection: c });
+        await saveRemote(c.id, { ...credentials, refreshToken: undefined, refreshPending: true, connection: c });
         try {
           if (!refreshToken) throw new E('remote_refresh', 'A current refresh credential is required', 401);
           const response = await pinnedFetch(c.origin, fetchImpl)(c.origin + '/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: c.clientId,
               resource: c.origin + '/mcp', scope: 'room:' + c.remoteRoomId }) });
           if (response.status === 429) {
-            if (connection(c.id).status !== 'revoked') await privateJson(path(c.id), { ...credentials, connection: c });
+            if (connection(c.id).status !== 'revoked') await saveRemote(c.id, { ...credentials, connection: c });
             throw new E('remote_refresh', 'Credential renewal rate limited; retrying', 429);
           }
           if (!response.ok) throw new E('remote_refresh', 'Credential renewal rejected', 401);
@@ -131,7 +131,7 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
             throw new E('remote_refresh', 'Bounded room credential required');
           credentials = { accessToken: token.access_token, refreshToken: token.refresh_token, accessExpiresAt: Date.now() + token.expires_in! * 1000 };
           if (connection(c.id).status === 'revoked' || stopped) throw new E('remote_offline', 'Connection ended during renewal');
-          await privateJson(path(c.id), { ...credentials, connection: connection(c.id) });
+          await saveRemote(c.id, { ...credentials, connection: connection(c.id) });
         } catch (error) {
           if (connection(c.id).status !== 'revoked' && !rejectedBeforeHandling(error))
             store.put('remote_connection', c.id, { ...connection(c.id), status: 'uncertain', updatedAt: Date.now() });
@@ -265,11 +265,11 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
         throw new E('remote_identity', 'An owner-bound room agent credential is required', 403);
       c.remoteOwnerId = identity.actor.ownerId; c.generation = identity.generation; c.remoteSeatId = identity.actor.seatId;
       if (c.mode === 'managed') Object.assign(c, await proxyRoom(a, c.id, c.product, c.maxTurns, c.maxTurnMs));
-      await privateJson(path(id), { ...credentials, connection: c }); store.put('remote_connection', c.id, c); clients.set(c.id, remote);
+      await saveRemote(id, { ...credentials, connection: c }); store.put('remote_connection', c.id, c); clients.set(c.id, remote);
       audit(a, c, 'remote.connected', { connectionId: c.id, remoteRoomId: c.remoteRoomId, origin: c.origin, product: c.product, mode: c.mode,
         maxTurns: c.maxTurns, maxTurnMs: c.maxTurnMs, generation: c.generation });
       return c;
-    } catch (error) { await remote.close().catch(() => {}); await unlink(path(id)).catch(() => {}); throw error; }
+    } catch (error) { await remote.close().catch(() => {}); await removeCredential(path(id)).catch(() => {}); throw error; }
   });
   core.register('remote_connection_prepare', async (a, x) => {
     human(a);
@@ -286,7 +286,7 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
           const url = new URL(request.url, 'http://127.0.0.1:50181');
           if (url.pathname !== '/oauth/callback') throw new E('oauth_callback', 'Callback path required', 404);
           for (const pending of store.list<RemoteConnection>('remote_connection').filter((c) => c.status === 'authorizing')) {
-            const state = JSON.parse(await readFile(join(dataDir, 'remote', pending.id + '.oauth.json'), 'utf8')) as RoomOAuthState;
+            const state = await readCredential<RoomOAuthState>(oauthPath(pending.id));
             if (state.nonce !== url.searchParams.get('state')) continue;
             await core.dispatch(human(a), 'remote_connection_finish', { connectionId: pending.id, callback: url.href });
             response.end('Room connected. Return to Converoom.'); return;
@@ -300,20 +300,20 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
     const c: RemoteConnection = { id, origin, remoteRoomId: roomId, localOwnerId: a.ownerId, remoteOwnerId: '', generation: 0, status: 'authorizing',
       product: product as RemoteConnection['product'], mode: 'polling', clientId, credentialRef: id + '.json', maxTurns: 3, maxTurnMs: 60000, cursor: 0, updatedAt: Date.now() };
     await oauth(provider, { serverUrl: origin + '/mcp', scope: 'room:' + roomId, fetchFn: pinnedFetch(origin, fetchImpl) });
-    await privateJson(join(dataDir, 'remote', id + '.oauth.json'), provider.snapshot()); store.put('remote_connection', id, c);
-    return { connectionId: id, authorizationUrl: provider.authorizationUrl, storage: 'degraded private Windows files, OS keystore unavailable' };
+    const stored = await writeCredential(oauthPath(id), { ...provider.snapshot() }, OAUTH_SECRETS); store.put('remote_connection', id, c);
+    return { connectionId: id, authorizationUrl: provider.authorizationUrl, storage: stored === 'credential-manager' ? 'Windows Credential Manager' : 'private files' };
   });
   core.register('remote_connection_finish', async (a, x) => {
     human(a); const c = connection(str(x, 'connectionId', 256));
     if (c.localOwnerId !== a.ownerId || c.status !== 'authorizing') throw new E('remote_setup', 'Own pending connection required', 403);
-    const statePath = join(dataDir, 'remote', c.id + '.oauth.json'), state = JSON.parse(await readFile(statePath, 'utf8')) as RoomOAuthState;
+    const statePath = oauthPath(c.id), state = await readCredential<RoomOAuthState>(statePath);
     const provider = new RoomOAuthClient(c.origin, c.remoteRoomId, c.clientId, 'http://127.0.0.1:50181/oauth/callback', state);
     const code = provider.acceptCallback(new URL(str(x, 'callback', 2048)));
-    await privateJson(statePath, provider.snapshot());
+    await writeCredential(statePath, { ...provider.snapshot() }, OAUTH_SECRETS);
     try {
       const fetcher = pinnedFetch(c.origin, fetchImpl);
       await oauth(provider, { serverUrl: c.origin + '/mcp', authorizationCode: code, scope: 'room:' + c.remoteRoomId, fetchFn: fetcher });
-      await privateJson(statePath, provider.snapshot()); const token = provider.tokens()!.access_token;
+      await writeCredential(statePath, { ...provider.snapshot() }, OAUTH_SECRETS); const token = provider.tokens()!.access_token;
       const identityResponse = await fetcher(c.origin + '/shared/v1/identity', { headers: { authorization: 'Bearer ' + token } });
       if (!identityResponse.ok) throw new E('remote_identity', 'Shared identity rejected', 401);
       const identity = await identityResponse.json() as RemoteIdentity;
@@ -370,7 +370,7 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
         await core.dispatch(a, 'turn_cancel', { roomId: t.roomId, turnId: t.id });
     }
     const remote = clients.get(c.id); clients.delete(c.id); await remote?.close().catch(() => {});
-    await unlink(path(c.id)).catch(() => {}); await unlink(join(dataDir, 'remote', c.id + '.oauth.json')).catch(() => {});
+    await removeCredential(path(c.id)).catch(() => {}); await removeCredential(oauthPath(c.id)).catch(() => {});
     audit(a, c, 'remote.disconnected', { connectionId: c.id, remoteRoomId: c.remoteRoomId, remoteRevocationConfirmed: false });
     return { connectionId: c.id, status: 'revoked', remoteRevocationConfirmed: false };
   });

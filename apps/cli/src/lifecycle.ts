@@ -8,6 +8,7 @@ import { isProduct } from '../../../packages/shared/src/products.js';
 import { backupDatabase, createStore, databaseSchema, scopeDigest } from '../../../packages/store/src/index.js';
 import { revokeBridgeCredential } from '../../daemon/src/server.js';
 import { VERSION, editConfig, installSkill, installStable, json, privateJson, registeredEntry, removeSkill, samePath } from './support.js';
+import { credentialLocation, migrateCredentials, removeCredential } from './credentials.js';
 
 interface Active {
   version: string;
@@ -159,7 +160,9 @@ async function finishUpgrade(dataDir: string): Promise<string[]> {
   const step = (await activeInstallation(dataDir))!.upgrade!, cli = await installStable(dataDir);
   // Opening the store with this version checks its schema; a release that changes the schema migrates it here, after the backup.
   if (existsSync(database(dataDir))) createStore(database(dataDir)).close();
-  const notes = [...await repoint(dataDir, cli, true), ...await relaunch(dataDir, VERSION)];
+  const moved = await migrateCredentials(dataDir);
+  const notes = [...await repoint(dataDir, cli, true), ...await relaunch(dataDir, VERSION),
+    ...(moved ? [`Moved ${moved} saved credential${moved === 1 ? '' : 's'} into Windows Credential Manager.`] : [])];
   await select(dataDir, { version: VERSION, selectedAt: Date.now(), previous: step.from, backup: step.backup, previousSchema: step.schema, schema: schema(dataDir) });
   return [`Upgraded Converoom from ${step.from} to ${VERSION}. Backup: ${step.backup}`, ...notes, `${step.from} is kept; converoom recover --rollback returns to it.`];
 }
@@ -235,6 +238,10 @@ export async function uninstall(dataDir: string, options: { confirm: boolean; de
   for (const dir of [runtimeDir(dataDir), bin]) if (existsSync(dir)) plan.push(`- Delete ${dir}`);
   if (path !== undefined) plan.push(`- Remove ${bin} from your user PATH`);
   const kept = existsSync(join(dataDir, 'tools')) ? [`The bundled Node and the agent CLIs it installed stay in ${join(dataDir, 'tools')}.`] : [];
+  const remote = options.deleteData === undefined ? [] : (await readdir(join(dataDir, 'remote')).catch(() => [] as string[]))
+    .filter((name) => name.endsWith('.json')).map((name) => join(dataDir, 'remote', name));
+  const locations = await Promise.all([...owned.map(({ file }) => file), ...remote].map(credentialLocation));
+  if (locations.some((where) => where && where !== 'private file')) plan.push('- Delete these saved credentials from Windows Credential Manager');
   if (options.deleteData !== undefined) plan.push(`- Delete all room data in ${dataDir}: rooms, history, artefacts and backups`);
   else kept.push(`Room data stays in ${dataDir}.`);
   if (!options.confirm) return ['Uninstall preview. Nothing was changed. Planned changes:', ...plan, ...kept, 'Run converoom uninstall --confirm to apply them.'];
@@ -247,10 +254,11 @@ export async function uninstall(dataDir: string, options: { confirm: boolean; de
     if (await ownEntry(product, saved.config, dataDir)) await editConfig(saved.config!, product, {}, true);
     const edited = saved.skill && await removeSkill(saved.skill);
     if (edited) kept.push(`Your edited room skill stays: ${edited}`);
-    await rm(file);
+    await removeCredential(file);
   }
   for (const dir of [join(dataDir, 'clients'), runtimeDir(dataDir), bin]) await rm(dir, { recursive: true, force: true });
   if (path !== undefined) await setUserPath(path);
+  for (const file of remote) await removeCredential(file);
   if (options.deleteData !== undefined)
     for (const name of await readdir(dataDir)) if (name !== 'tools') await rm(join(dataDir, name), { recursive: true, force: true });
   return ['Uninstalled Converoom. Changes made:', ...plan, ...kept, 'If you installed the npm package, remove it with: npm uninstall --global @converoom/cli'];

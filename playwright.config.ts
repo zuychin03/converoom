@@ -23,5 +23,7 @@ export default defineConfig({
     url: 'http://127.0.0.1:43317/health',
     reuseExistingServer: false,
     timeout: 30000,
+    // Fixture connections must not write to the developer's Windows Credential Manager.
+    env: { ...process.env, CONVEROOM_CREDENTIAL_STORE: 'file' } as Record<string, string>,
   },
 });

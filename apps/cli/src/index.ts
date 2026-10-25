@@ -14,6 +14,7 @@ import { createSharedServer } from '../../daemon/src/shared-server.js';
 import { sharedStartOptions } from './shared.js';
 import { assertCurrent, ensureInstalled, installationStatus, recover, uninstall, upgrade } from './lifecycle.js';
 import { cleanupPreviewLines, cleanupResultLines } from './cleanup.js';
+import { CLIENT_SECRETS, credentialLocation, credentialStorage, migrateCredentials, removeCredential, writeCredential } from './credentials.js';
 import { serveMcp } from '../../../packages/mcp/src/index.js';
 import {
   dataDirectory,
@@ -131,10 +132,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           arch: process.arch,
           dataDir,
           installation: await installationStatus(dataDir),
-          credentialStorage: 'degraded user files, not an OS keystore',
+          credentialStorage: await credentialStorage(),
           products: await Promise.all(products.map(async (p) => ({
             ...(await probeProduct(p, dataDir)),
             ...(await connectionReport(p, dataDir, config(p), active)),
+            credentialStored: await credentialLocation(join(dataDir, 'clients', p + '.json')) ?? 'none saved',
           }))),
           smoke: 'Approve a bounded managed turn in the room UI; doctor never starts inference',
         },
@@ -185,6 +187,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           lockPath,
       );
     });
+    const storage = await credentialStorage(), moved = await migrateCredentials(dataDir);
     const runtime = await createRuntime(dataDir).catch(async (e) => {
         await lock.close();
         await unlink(lockPath).catch(() => {});
@@ -231,7 +234,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           server.url +
           '\nBrowser pairing code: ' +
           pairingCode +
-          '\nCredential storage: user files, OS keystore unavailable.\nCtrl+C stops the runtime.',
+          '\nCredential storage: ' + storage.store + (storage.reason ? ' (' + storage.reason + ')' : '') + '. ' + storage.limits +
+          (moved ? '\nMoved ' + moved + ' saved credential' + (moved === 1 ? '' : 's') + ' into Windows Credential Manager.' : '') +
+          '\nCtrl+C stops the runtime.',
       );
       if (sharedOptions) console.log('Shared listener at ' + sharedServer!.url + '\nExpected private origin: ' + sharedOptions.origin +
         '\nConfigure Tailscale Serve explicitly for this shared listener only. No Tailscale, firewall or public exposure was changed. Shared room UI: ' + sharedOptions.origin + '/shared');
@@ -295,7 +300,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         });
         const saved = await json<{ skill?: { path: string; digest: string } }>(clientFile);
         if (saved.skill) kept = await removeSkill(saved.skill);
-        await unlink(clientFile);
+        await removeCredential(clientFile);
       }
       await editConfig(path, product, {}, true);
       console.log('Removed only Converoom registration for ' + product);
@@ -314,13 +319,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       const previous = await json<{ principalId: string }>(clientFile);
       await local('/local/revoke', { principalId: previous.principalId });
     }
-    await privateJson(clientFile, { ...(await local('/local/credentials', { product,
-      ...(flag('--remote-connection') ? { remoteConnectionId: flag('--remote-connection') } : {}) })), skill, config: path });
+    const stored = await writeCredential(clientFile, { ...(await local('/local/credentials', { product,
+      ...(flag('--remote-connection') ? { remoteConnectionId: flag('--remote-connection') } : {}) })), skill, config: path }, CLIENT_SECRETS);
     await editConfig(path, product, {
       command: process.execPath,
       args: [stable, 'mcp', '--client', product, '--data-dir', dataDir],
     });
-    console.log('Connected ' + product + '. Restart its MCP connection.');
+    console.log('Connected ' + product + '. Restart its MCP connection.\n' + (stored === 'credential-manager'
+      ? 'Its credential is in Windows Credential Manager.' : 'Windows Credential Manager is unavailable here, so its credential is in a private file.'));
     return;
   }
   if (command === 'upgrade' || command === 'recover' || command === 'uninstall') {

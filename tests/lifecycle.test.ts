@@ -3,12 +3,13 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { main } from '../apps/cli/src/index.js';
 import { editConfig, privateJson, VERSION } from '../apps/cli/src/support.js';
 import { installationStatus, withoutPathEntry } from '../apps/cli/src/lifecycle.js';
+import { useCredentialStore } from '../apps/cli/src/credentials.js';
 import { createStore, scopeDigest } from '../packages/store/src/index.js';
 
 const OLD = '0.1.9', EARLIER_SKILL = 'Earlier room skill\n';
@@ -225,6 +226,31 @@ it('uninstall previews by default, then removes only what Converoom owns and rev
     expect(await readdir(f.dataDir)).toEqual(['tools']);
   } finally { log.mockRestore(); await rm(root, { recursive: true, force: true }); }
 }, 120000);
+
+it('moves saved credentials into Credential Manager on upgrade and deletes them on uninstall', async () => {
+  const vault = new Map<string, string>();
+  const previous = useCredentialStore({ read: async (t) => vault.get(t), write: async (t, v) => { vault.set(t, v); }, remove: async (t) => { vault.delete(t); } });
+  const root = await mkdtemp(join(tmpdir(), 'converoom-vault-'));
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const f = await installation(root, { version: OLD, selectedAt: 1 });
+    const remote = join(f.dataDir, 'remote', randomUUID() + '.json');
+    await privateJson(remote, { accessToken: 'participant-access', refreshToken: 'participant-refresh', connection: { status: 'connected' } });
+    await main(['upgrade', '--data-dir', f.dataDir]);
+    expect(output(log)).toContain('Moved 3 saved credentials into Windows Credential Manager.');
+    for (const file of [join(f.dataDir, 'clients', 'codex.json'), join(f.dataDir, 'clients', 'cursor.json'), remote])
+      expect(await readFile(file, 'utf8')).not.toMatch(/-token|participant-access|participant-refresh/);
+    expect(vault.size).toBe(3);
+    log.mockClear();
+    await main(['uninstall', '--data-dir', f.dataDir]);
+    expect(output(log)).toContain('- Delete these saved credentials from Windows Credential Manager');
+    expect(vault.size).toBe(3);
+    await main(['uninstall', '--confirm', '--data-dir', f.dataDir]);
+    expect([...vault.keys()]).toEqual([expect.stringMatching(/\/remote\//)]);
+    await main(['uninstall', '--confirm', '--delete-data', f.dataDir, '--data-dir', f.dataDir]);
+    expect(vault.size).toBe(0);
+  } finally { useCredentialStore(previous); log.mockRestore(); await rm(root, { recursive: true, force: true }); }
+}, 180000);
 
 it('removes only the exact launcher folder from a PATH value', () => {
   expect(withoutPathEntry('C:\\Tools;C:\\Data\\bin\\;D:\\x', 'c:\\data\\bin')).toBe('C:\\Tools;D:\\x');

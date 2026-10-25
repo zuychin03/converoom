@@ -8,5 +8,7 @@ export default defineConfig({
     expect: { poll: { timeout: 10000 } },
     maxWorkers: 2,
     isolate: true,
+    // Fixture data folders must not write to the developer's Windows Credential Manager; tests/credentials.test.ts covers it.
+    env: { CONVEROOM_CREDENTIAL_STORE: 'file' },
   },
 });

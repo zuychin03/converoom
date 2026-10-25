@@ -7,14 +7,14 @@ import { join } from 'node:path';
 import { MANAGED_TOOLS, type ManagedScope } from './managed.js';
 import { SHARED_READS, SHARED_WRITES } from '../../core/src/membership.js';
 import { mountReadServices } from './read-services.js';
+import { readCredential } from '../../../apps/cli/src/credentials.js';
 export async function serveMcp(
   dataDir: string,
   client: string,
   credentialFile?: string,
 ): Promise<void> {
-  const credential = JSON.parse(
-    await readFile(credentialFile ?? join(dataDir, 'clients', client + '.json'), 'utf8'),
-  ) as { token: string; principalId: string; scope?: ManagedScope; remoteConnectionId?: string };
+  const credential = await readCredential<{ token: string; principalId: string; scope?: ManagedScope; remoteConnectionId?: string }>(
+    credentialFile ?? join(dataDir, 'clients', client + '.json'));
   const server = new Server(
     { name: 'converoom', version: '0.2.0' },
     { capabilities: { tools: {}, resources: {}, prompts: {} } },

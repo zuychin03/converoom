@@ -48,6 +48,16 @@ export async function executable(name: string): Promise<{ command: string; args:
     409,
   );
 }
+export function supervisorPath(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const helper = [
+    resolve(here, '../../../native/bin/win32-x64/converoom-supervisor.exe'),
+    resolve(here, '../native/bin/win32-x64/converoom-supervisor.exe'),
+  ].find(existsSync);
+  if (!helper)
+    throw new ConveroomError('supervisor_missing', 'Windows supervisor prebuild missing; repair the runtime installation');
+  return helper;
+}
 export function launch(
   command: string,
   args: string[],
@@ -57,16 +67,7 @@ export function launch(
   let target = command,
     argv = args;
   if (process.platform === 'win32') {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const helper = [
-      resolve(here, '../../../native/bin/win32-x64/converoom-supervisor.exe'),
-      resolve(here, '../native/bin/win32-x64/converoom-supervisor.exe'),
-    ].find(existsSync);
-    if (!helper)
-      throw new ConveroomError(
-        'supervisor_missing',
-        'Windows supervisor prebuild missing; repair the runtime installation',
-      );
+    const helper = supervisorPath();
     const native = isAbsolute(command)
       ? command
       : (process.env.PATH ?? '')

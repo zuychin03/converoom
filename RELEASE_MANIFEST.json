@@ -3,11 +3,11 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "892d90a6196f0b55d8d17e1b389cc1686bdb09470f7b1e011afa9cb5a92e6c39"
+      "sha256": "7a90871d9fa03eddc0395c520ba7539607a0535c9b040ae7ea0bf7ac61eadbfc"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "cc01f8958b98f7ad345f97babc3f2ec3f7ee52a7f2d44b67cac06868f350c3e8"
+      "sha256": "d33d2b73e6367d9abb651dd0099da2a65588ac8fe8864ebe2acd7cae02cfac9c"
     },
     {
       "path": "dist/server.js",
@@ -79,11 +79,11 @@
     },
     {
       "path": "native/bin/win32-x64/converoom-supervisor.exe",
-      "sha256": "1a476f39abc2b2573e2b7e655ff75b8edc2839bc59288935f3cbb61a3696ccb8"
+      "sha256": "cc339c542eb4014c6107f3da1909c03d2e7e9179d46fbb1f84fe0a656bd81ca8"
     },
     {
       "path": "README.md",
-      "sha256": "ba4705f0e42e2360c53cc64034a30c2591877df30828af2cccfbac661b131588"
+      "sha256": "fe0de48bd9967de48bcd0f7a8331b8b893246735d985228ec68d3e77fe727674"
     },
     {
       "path": "docs/WINDOWS_SHARED_PILOT.md",
@@ -99,7 +99,7 @@
     },
     {
       "path": "docs/REQUIREMENT_MATRIX.md",
-      "sha256": "a9b6551fd45d12cadd8c750b495f26de224b5b8394fda31e434b6862f6859eb6"
+      "sha256": "77f7e64736a214016e7cacff47d71df8a5c37346a49f248a40cf8700d533c8fd"
     },
     {
       "path": "docs/WINDOWS_INSTALL.md",
@@ -127,9 +127,9 @@
   "native": [
     {
       "path": "native/bin/win32-x64/converoom-supervisor.exe",
-      "sha256": "1a476f39abc2b2573e2b7e655ff75b8edc2839bc59288935f3cbb61a3696ccb8",
+      "sha256": "cc339c542eb4014c6107f3da1909c03d2e7e9179d46fbb1f84fe0a656bd81ca8",
       "source": "native/supervisor/src/main.rs",
-      "sourceSha256": "3f9977288567936f87132fff779c5db924635c8592a37bf016fd8acc08101dfb",
+      "sourceSha256": "78466603b213445a754924756fc691023c38fe78cfdb69d2bdecb6269c720189",
       "build": "cargo build --release --locked; Windows x64",
       "license": "Apache-2.0",
       "rustDependencies": [

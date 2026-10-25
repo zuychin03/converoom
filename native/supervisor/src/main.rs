@@ -22,6 +22,7 @@ fn main() {
         out.push_str(&"\\".repeat(slashes * 2)); out.push('"'); out
     }
     let mut args: Vec<String> = env::args().skip(1).collect();
+    if args.first().is_some_and(|s| s == "--credential") { std::process::exit(credential(&args[1..])); }
     let parent_pid = if args.first().is_some_and(|s|s == "--parent") && args.len() >= 3 {
         let id = args[1].parse::<u32>().unwrap_or(0); args.drain(..2); id
     } else { 0 };
@@ -63,6 +64,53 @@ fn main() {
         WaitForSingleObject(process.hProcess, INFINITE);
         let mut code = 70; GetExitCodeProcess(process.hProcess, &mut code);
         CloseHandle(process.hProcess); CloseHandle(job); std::process::exit(code as i32);
+    }
+}
+// Exit codes: 0 done, 2 no such credential, 3 store error (code on stderr), 64 usage, 65 over the store's size limit.
+// The secret travels on stdin and stdout only, never in argv.
+#[cfg(windows)]
+fn credential(args: &[String]) -> i32 {
+    use std::io::{Read, Write};
+    use windows_sys::Win32::{
+        Foundation::{GetLastError, ERROR_NOT_FOUND, FALSE},
+        Security::Credentials::{CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_MAX_CREDENTIAL_BLOB_SIZE,
+            CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC},
+    };
+    let (Some(action), Some(target), None) = (args.first(), args.get(1), args.get(2)) else {
+        eprintln!("Expected read, write or delete and one target"); return 64;
+    };
+    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let name = wide(target);
+    let failed = |what: &str| {
+        let code = unsafe { GetLastError() };
+        if code == ERROR_NOT_FOUND { 2 } else { eprintln!("Credential {what} failed with Windows error {code}"); 3 }
+    };
+    unsafe {
+        match action.as_str() {
+            "write" => {
+                let mut blob = Vec::new();
+                if std::io::stdin().read_to_end(&mut blob).is_err() { return 64; }
+                if blob.len() > CRED_MAX_CREDENTIAL_BLOB_SIZE as usize { eprintln!("Credential exceeds the store's size limit"); return 65; }
+                let user = wide("Converoom");
+                let mut entry: CREDENTIALW = std::mem::zeroed();
+                entry.Type = CRED_TYPE_GENERIC;
+                entry.TargetName = name.as_ptr() as *mut u16;
+                entry.UserName = user.as_ptr() as *mut u16;
+                entry.CredentialBlobSize = blob.len() as u32;
+                entry.CredentialBlob = blob.as_mut_ptr();
+                entry.Persist = CRED_PERSIST_LOCAL_MACHINE;
+                if CredWriteW(&entry, 0) == FALSE { failed("write") } else { 0 }
+            }
+            "read" => {
+                let mut found: *mut CREDENTIALW = std::ptr::null_mut();
+                if CredReadW(name.as_ptr(), CRED_TYPE_GENERIC, 0, &mut found) == FALSE { return failed("read"); }
+                let blob = std::slice::from_raw_parts((*found).CredentialBlob, (*found).CredentialBlobSize as usize).to_vec();
+                CredFree(found as *const _);
+                if std::io::stdout().write_all(&blob).is_err() { 74 } else { 0 }
+            }
+            "delete" => if CredDeleteW(name.as_ptr(), CRED_TYPE_GENERIC, 0) == FALSE { failed("delete") } else { 0 },
+            _ => { eprintln!("Expected read, write or delete"); 64 }
+        }
     }
 }
 #[cfg(not(windows))]
