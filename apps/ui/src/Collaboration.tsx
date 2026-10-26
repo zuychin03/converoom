@@ -122,7 +122,7 @@ export function ArtefactsView({ state, room, run, openAction, exportPage }: { st
     {room.workflow === 'discussion' && <form className="panel consent-form" onSubmit={(e) => { e.preventDefault(); void prepare(); }}>
       <label>Artefact name<input required value={name} onChange={(e) => setName(e.target.value)} /></label>
       <label>Reviewed public content<textarea required rows={8} value={content} onChange={(e) => setContent(e.target.value)} /></label>
-      <button className="button" disabled={room.status !== 'open'}>Review publication</button>
+      <button className="button" disabled={room.lifecycle !== 'active'}>Review publication</button>
     </form>}
     {error && <ErrorNotice>{error}</ErrorNotice>}
     {state.sharedArtefacts.filter((a) => a.roomId === id).map((a) => <section className="panel" key={string(a, 'id')}><h2>{string(a, 'name')}</h2><p className="record-id">Owner {string(a, 'ownerId')} · digest {string(a, 'digest')} · {String(a.bytes)} bytes</p>

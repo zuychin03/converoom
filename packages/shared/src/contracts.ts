@@ -20,15 +20,31 @@ export interface Event {
   data: ToolArgs;
 }
 export type RoomBudget = 'message' | 'turn' | 'time';
+export type RoomLifecycle = 'draft' | 'active' | 'pausing' | 'paused' | 'completed' | 'cancelled' | 'archived';
+export type RoomPhase = 'deliberation' | 'decision_proposed' | 'owner_review' | 'execution' | 'verification' | 'handoff';
+export const ENDED_ROOMS: readonly RoomLifecycle[] = ['completed', 'cancelled', 'archived'];
+export const PHASES: readonly RoomPhase[] = ['deliberation', 'decision_proposed', 'owner_review', 'execution', 'verification', 'handoff'];
+// Spec: deliberation → decision proposed → owner review → execution → verification → handoff. Only the owner approves
+// a decision or returns it to deliberation; room_propose_decision is the only way into decision_proposed.
+export const PHASE_STEPS: Record<RoomPhase, Partial<Record<RoomPhase, 'host' | 'owner'>>> = {
+  deliberation: {},
+  decision_proposed: { owner_review: 'host', deliberation: 'owner' },
+  owner_review: { execution: 'owner', handoff: 'owner', deliberation: 'owner' },
+  execution: { verification: 'host' },
+  verification: { execution: 'host', handoff: 'host' },
+  handoff: {},
+};
 export interface Room {
   id: string;
   title: string;
   objective: string;
   ownerId: string;
   hostSeatId: string | null;
-  status: 'open' | 'paused' | 'closed';
+  lifecycle: RoomLifecycle;
+  phase: RoomPhase;
   workflow: 'discussion' | 'coding';
   createdAt: number;
+  startedAt?: number;
   policy: ToolArgs;
   policyVersion: number;
   seq: number;

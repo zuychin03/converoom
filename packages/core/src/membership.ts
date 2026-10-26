@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
-  ConveroomError as E, requiredString as str,
+  ConveroomError as E, requiredString as str, ENDED_ROOMS,
   type Actor, type Core, type Store, type Room, type Seat, type Turn,
   type HumanMembership, type Invitation, type OwnerConsent, type ToolArgs, type Event,
   type SharedArtefact,
@@ -59,7 +59,8 @@ const eventFields: Record<string, string[]> = {
   message: ['text', 'senderId', 'mentions', 'replyToId'], agenda: ['agenda', 'unresolved'],
   decision: ['decision', 'positions', 'dissent', 'evidence', 'unresolved'],
   'seat.joined': ['id', 'ownerId', 'name', 'product', 'mode', 'role', 'status'], 'seat.left': ['seatId'],
-  'room.paused': ['status'], 'room.open': ['status'], 'room.closed': ['status'], 'room.budget_exhausted': ['budgets', 'usage', 'limits'],
+  'room.paused': ['status'], 'room.open': ['status'], 'room.closed': ['status'], 'room.lifecycle': ['lifecycle', 'previous'],
+  'room.phase': ['phase', 'previous'], 'room.budget_exhausted': ['budgets', 'usage', 'limits'],
   'policy.changed': ['version'], 'host.transferred': ['seatId'],
   'membership.confirmed': ['memberId', 'ownerId', 'generation', 'role'],
   'membership.revoked': ['memberId', 'ownerId', 'generation'],
@@ -131,7 +132,7 @@ export function sharedProjection(c: Core, a: Actor, id: string): ToolArgs {
       while (events.length > 100 || bytes > SHARED_BYTES) { events.shift(); bytes -= sizes.shift()!; omittedEvents++; }
     }
   }
-  return bounded(redactTransport({ room: { ...select(r, ['id', 'title', 'objective', 'ownerId', 'hostSeatId', 'status', 'workflow', 'createdAt', 'policyVersion', 'seq']),
+  return bounded(redactTransport({ room: { ...select(r, ['id', 'title', 'objective', 'ownerId', 'hostSeatId', 'lifecycle', 'phase', 'workflow', 'createdAt', 'policyVersion', 'seq']),
       policy: select(r.policy, ['maxActiveTurns', 'maxRounds', 'maxMessages', 'maxDurationMs', 'maxMentionHops', 'maxPending', 'cooldownMs', 'maxTurnMs']) },
     members: c.store.list<HumanMembership>('human_membership', { roomId: id, status: ['active'] }).slice(0, 20)
       .map((m) => select(m, ['id', 'roomId', 'ownerId', 'displayName', 'role', 'status', 'generation'])),
@@ -204,7 +205,7 @@ export async function sharedExport(c: Core, a: Actor, roomId: string, generation
   const self = a.kind === 'human' ? activeMembership(c.store, roomId, a.ownerId, a.principalId) : undefined;
   const markdown = transcriptMarkdown({ room, events, seats: projection.seats as ToolArgs[], interactions: projection.interactions as ToolArgs[],
     members: projection.members as ToolArgs[], artefacts: projection.artefacts as ToolArgs[], people: self ? { [a.principalId]: self.displayName } : {}, provenance: [
-      `Shared room ${code('converoom://rooms/' + roomId)}, ${inline(room.status)}, policy version ${Number(room.policyVersion)}`,
+      `Shared room ${code('converoom://rooms/' + roomId)}, ${inline(room.lifecycle)}, phase ${inline(String(room.phase).replaceAll('_', ' '))}, policy version ${Number(room.policyVersion)}`,
       `Public history after event #${cursor}` + (events.length ? `: #${Number(events[0].seq)} to #${Number(events.at(-1)!.seq)}` : '') +
         (hasMore ? `; request cursor ${Number(page.cursor)} for the next page` : '; no later public events'),
       `Exported ${time(Date.now())} as Converoom transcript format ${TRANSCRIPT_FORMAT}. Only the room's public projection is included; ` +
@@ -218,7 +219,7 @@ export function mountMembership(c: Core) {
   const admin = (a: Actor, x: ToolArgs) => {
     const id = str(x, 'roomId', 256); c.requireOwner(a, id);
     const r = c.requireRoom(a, id);
-    if (r.workflow !== 'discussion' || r.status === 'closed') throw new E('sharing', 'An available discussion room is required', 409);
+    if (r.workflow !== 'discussion' || ENDED_ROOMS.includes(r.lifecycle)) throw new E('sharing', 'An available discussion room is required', 409);
     return r;
   };
   const target = (r: Room, x: ToolArgs) => {
@@ -263,7 +264,7 @@ export function mountMembership(c: Core) {
     const hash = scopeDigest(str(x, 'code', 256));
     const invitation = store.list<Invitation>('invitation', { roomId: id, status: ['available'] })
       .find((i) => i.codeHash === hash && i.expiresAt > Date.now());
-    if (!r || r.workflow !== 'discussion' || r.status === 'closed' || !invitation || invitation.recoverMemberId || r.ownerId === a.ownerId)
+    if (!r || r.workflow !== 'discussion' || ENDED_ROOMS.includes(r.lifecycle) || !invitation || invitation.recoverMemberId || r.ownerId === a.ownerId)
       throw new E('invitation', 'Invitation unavailable', 403);
     const memberId = membershipId(id, a.ownerId), old = store.get<HumanMembership>('human_membership', memberId);
     if (old && (old.status === 'active' || (old.status === 'pending' && Number(old.pendingExpiresAt) > Date.now())))
@@ -328,7 +329,7 @@ export function mountMembership(c: Core) {
     const invitation = store.list<Invitation>('invitation', { roomId, status: ['available'] })
       .find((i) => i.codeHash === hash && i.expiresAt > Date.now() && i.recoverMemberId);
     const m = invitation?.recoverMemberId ? store.get<HumanMembership>('human_membership', invitation.recoverMemberId) : undefined;
-    if (!r || r.status === 'closed' || !invitation || !m || m.roomId !== roomId || m.ownerId === r.ownerId || m.generation !== invitation.expectedGeneration)
+    if (!r || ENDED_ROOMS.includes(r.lifecycle) || !invitation || !m || m.roomId !== roomId || m.ownerId === r.ownerId || m.generation !== invitation.expectedGeneration)
       throw new E('recovery', 'Current owner-issued recovery invitation required', 403);
     const fenced = withdraw(a, r, m);
     const next: HumanMembership = { ...fenced, status: 'pending', invitedBy: invitation.invitedBy, pendingExpiresAt: Date.now() + lifetime };

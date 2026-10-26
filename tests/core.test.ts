@@ -280,9 +280,10 @@ describe('room authority and interactions', () => {
     await call('turn_cancel', { roomId: r.id, turnId: t.id });
     expect(store.get<ToolArgs>('turn', t.id)?.status).toBe('cancelling');
     await call('room_pause', { roomId: r.id });
+    expect(store.get<Room>('room', r.id)?.lifecycle).toBe('pausing');
     await expect(
       call('turn_request', { roomId: r.id, seatId: s.id, prompt: 'Run' }, agent),
-    ).rejects.toThrow(/paused/i);
+    ).rejects.toThrow(/pausing/i);
   });
   it('preserves queued turns and approvals across pause and resume', async () => {
     const r = await room();

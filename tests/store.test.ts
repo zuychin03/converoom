@@ -97,7 +97,7 @@ describe('durable store', () => {
     expect(run('new', 'duplicate')).toBe('second');
     store.close();
     const db = new Database(path);
-    expect(db.pragma('user_version', { simple: true })).toBe(1);
+    expect(db.pragma('user_version', { simple: true })).toBe(2);
     expect(db.prepare("SELECT name FROM pragma_table_info('idempotency')").pluck().all())
       .toEqual(['actor_id', 'command', 'client_key', 'payload_hash', 'result']);
     db.close();
@@ -158,6 +158,32 @@ describe('durable store', () => {
     stores.push(copy);
     expect(copy.get('room', 'r')).toEqual({ id: 'r', seq: 1 });
     expect(copy.events('r')).toHaveLength(1);
+  });
+  it('migrates version 1 rooms to an independent lifecycle and phase', () => {
+    const { store, path } = open();
+    for (const [id, status] of [['open', 'open'], ['paused', 'paused'], ['closed', 'closed'], ['decided', 'open']])
+      store.put('room', id, { id, seq: 0, status });
+    store.append('decided', 'decision', 'host', { decision: 'Use SQLite' });
+    store.put('room', 'current', { id: 'current', seq: 0, lifecycle: 'cancelled', phase: 'owner_review' });
+    store.put('turn', 't', { id: 't', roomId: 'open', status: 'queued' });
+    store.close();
+    const db = new Database(path);
+    db.pragma('user_version = 1');
+    db.close();
+    const migrated = createStore(path);
+    stores.push(migrated);
+    expect(['open', 'paused', 'closed', 'decided'].map((id) => migrated.get('room', id))).toEqual([
+      { id: 'open', seq: 0, lifecycle: 'active', phase: 'deliberation' },
+      { id: 'paused', seq: 0, lifecycle: 'paused', phase: 'deliberation' },
+      { id: 'closed', seq: 0, lifecycle: 'completed', phase: 'deliberation' },
+      { id: 'decided', seq: 1, lifecycle: 'active', phase: 'decision_proposed' },
+    ]);
+    expect(migrated.get('room', 'current')).toEqual({ id: 'current', seq: 0, lifecycle: 'cancelled', phase: 'owner_review' });
+    expect(migrated.get('turn', 't')).toEqual({ id: 't', roomId: 'open', status: 'queued' });
+    migrated.close();
+    const check = new Database(path);
+    expect(check.pragma('user_version', { simple: true })).toBe(2);
+    check.close();
   });
   it('refuses future schemas and unidentified populated databases', () => {
     const { store, path } = open();

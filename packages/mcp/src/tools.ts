@@ -44,10 +44,12 @@ const mutationNames = new Set([
   'room_set_agenda',
   'room_propose_decision',
   'host_transfer_request',
+  'room_start',
   'room_pause',
   'room_resume',
   'turn_cancel',
   'room_close',
+  'room_set_phase',
   'task_plan',
   'task_claim',
   'task_heartbeat',
@@ -66,6 +68,7 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
       workflow: { type: 'string', enum: ['discussion', 'coding'] },
       product: { type: 'string', enum: [...PRODUCT_IDS] },
       name: small,
+      draft: { type: 'boolean' },
     },
   },
   room_get: { required: ['roomId'] },
@@ -132,10 +135,15 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
     },
   },
   host_transfer_request: { required: ['roomId', 'seatId'] },
+  room_start: { required: ['roomId'] },
   room_pause: { required: ['roomId'] },
   room_resume: { required: ['roomId'] },
   turn_cancel: { required: ['roomId', 'turnId'] },
-  room_close: { required: ['roomId'] },
+  room_close: { required: ['roomId'], fields: { outcome: { type: 'string', enum: ['completed', 'cancelled'] }, reason: string } },
+  room_set_phase: {
+    required: ['roomId', 'phase'],
+    fields: { phase: { type: 'string', enum: ['deliberation', 'owner_review', 'execution', 'verification', 'handoff'] }, reason: string },
+  },
   task_plan: {
     required: ['roomId', 'repoId', 'tasks'],
     fields: {
@@ -211,6 +219,7 @@ export function validateToolArgs(name: string, args: Record<string, unknown>): v
         Buffer.byteLength(value) > Number(s.maxLength ?? 65536))
     )
       throw new ConveroomError('invalid_argument', 'Invalid ' + path);
+    if (s.type === 'boolean' && typeof value !== 'boolean') throw new ConveroomError('invalid_argument', 'Invalid ' + path);
     if (
       s.type === 'integer' &&
       (typeof value !== 'number' ||

@@ -10,10 +10,15 @@ import {
   type ToolArgs,
   type Room,
   type RoomBudget,
+  type RoomLifecycle,
+  type RoomPhase,
   type Seat,
   type Turn,
   type CommandHandler,
   type OwnerConsent,
+  ENDED_ROOMS,
+  PHASES,
+  PHASE_STEPS,
 } from '../../shared/src/contracts.js';
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
 import { activeMembership, currentSeat, currentTurnAuthority, mountMembership, requireHumanParticipant, requireSeatOwner, SHARED_READS } from './membership.js';
@@ -36,9 +41,34 @@ export const POLLING_CANCEL_ACK_MS = 60000;
 export const RESULT_RETENTION_MS = 7 * 86400000;
 // About 20 ms for 1 KiB results, so expiring a large backlog never stalls the daemon for long.
 export const RESULT_EXPIRY_BATCH = 1000;
+// A draft's clock starts when it is started.
+export const roomStart = (r: Room) => r.startedAt ?? r.createdAt;
 // A remote connection's local room is bounded by its turn budget and per-turn time, not discussion duration.
 export function roomTimeExhausted(r: Room, now = Date.now()): boolean {
-  return !r.remoteConnectionId && now - r.createdAt > Number(r.policy.maxDurationMs);
+  return r.lifecycle !== 'draft' && !r.remoteConnectionId && now - roomStart(r) > Number(r.policy.maxDurationMs);
+}
+const STARTED_TURNS = ['dispatching', 'running', 'cancelling'];
+// FR-15: a pause stays pausing until the room's started turns end, then the runtime records it paused.
+export function settlePause(store: Store, roomId: string): void {
+  const r = store.get<Room>('room', roomId);
+  if (r?.lifecycle !== 'pausing' || store.count('turn', { roomId, status: STARTED_TURNS })) return;
+  store.transaction(() => {
+    store.put('room', roomId, { ...r, lifecycle: 'paused' });
+    authority(store, { principalId: 'runtime' }, r, 'room.lifecycle', { lifecycle: 'paused', previous: 'pausing' });
+  });
+}
+function cancelQueued(store: Store, roomId: string, error: string, reason: string): Turn[] {
+  const stopped = store.list<Turn>('turn', { roomId, status: ['queued'] });
+  for (const t of stopped) {
+    store.put('turn', t.id, { ...t, status: 'cancelled', error });
+    const p = t.permissionRequestId ? store.get<Permission>('permission', t.permissionRequestId) : undefined;
+    if (p?.status === 'pending') {
+      store.put('permission', p.id, { ...p, status: 'cancelled' });
+      store.append(roomId, 'permission.cancelled', 'runtime', { requestId: p.id });
+    }
+    store.append(roomId, 'turn.cancelled', 'runtime', { turnId: t.id, reason });
+  }
+  return stopped;
 }
 // A queued turn could never post its answer under these; turns accepted within the turn budget still run.
 const DISPATCH_BUDGETS: readonly RoomBudget[] = ['message', 'time'];
@@ -65,25 +95,16 @@ function handoff(store: Store, r: Room, stopped: Turn[]): ToolArgs {
 // FR-16: records each used-up budget once with a handoff. Returns whether new dispatch is blocked.
 export function exhaustBudgets(store: Store, roomId: string, now = Date.now()): boolean {
   const r = store.get<Room>('room', roomId);
-  if (!r || r.status === 'closed') return false;
+  if (!r || r.lifecycle === 'draft' || ENDED_ROOMS.includes(r.lifecycle)) return false;
   const used = usedBudgets(store, r, now), blocking = used.find((b) => DISPATCH_BUDGETS.includes(b));
   const fresh = used.filter((b) => !r.exhaustedBudgets?.includes(b));
   if (!fresh.length && !(blocking && store.count('turn', { roomId, status: ['queued'] }))) return !!blocking;
   store.transaction(() => {
-    const stopped = blocking ? store.list<Turn>('turn', { roomId, status: ['queued'] }) : [];
-    for (const t of stopped) {
-      store.put('turn', t.id, { ...t, status: 'cancelled', error: 'Room ' + blocking + ' budget used up before the turn started' });
-      const p = t.permissionRequestId ? store.get<Permission>('permission', t.permissionRequestId) : undefined;
-      if (p?.status === 'pending') {
-        store.put('permission', p.id, { ...p, status: 'cancelled' });
-        store.append(roomId, 'permission.cancelled', 'runtime', { requestId: p.id });
-      }
-      store.append(roomId, 'turn.cancelled', 'runtime', { turnId: t.id, reason: 'budget_exhausted' });
-    }
+    const stopped = blocking ? cancelQueued(store, roomId, 'Room ' + blocking + ' budget used up before the turn started', 'budget_exhausted') : [];
     if (!fresh.length) return;
     store.put('room', roomId, { ...store.get<Room>('room', roomId)!, exhaustedBudgets: [...(r.exhaustedBudgets ?? []), ...fresh] });
     authority(store, { principalId: 'runtime' }, r, 'room.budget_exhausted', { budgets: fresh,
-      usage: { messages: store.eventCount(roomId, 'message'), turns: store.count('turn', { roomId }), elapsedMs: now - r.createdAt },
+      usage: { messages: store.eventCount(roomId, 'message'), turns: store.count('turn', { roomId }), elapsedMs: now - roomStart(r) },
       limits: { maxMessages: r.policy.maxMessages, maxDurationMs: r.policy.maxDurationMs }, handoff: handoff(store, r, stopped) });
   });
   return !!blocking;
@@ -195,7 +216,7 @@ export function createCore(store: Store): Core {
   };
   const write = (a: Actor, id: string) => {
     const r = access(a, id);
-    if (r.status !== 'open') throw new E('inactive', 'Room is ' + r.status, 409);
+    if (r.lifecycle !== 'active') throw new E('inactive', 'Room is ' + (r.lifecycle === 'draft' ? 'a draft; start it first' : r.lifecycle), 409);
     if (a.kind === 'agent' && member(a, id).role === 'observer')
       throw new E('observer', 'Observer cannot publish', 403);
     if (a.kind === 'human') requireHumanParticipant(c, a, id);
@@ -203,6 +224,23 @@ export function createCore(store: Store): Core {
   };
   const ev = (a: Actor, id: string, n: string, x: ToolArgs) =>
     store.append(id, n, a.principalId, x);
+  const setLifecycle = (a: Actor, r: Room, lifecycle: RoomLifecycle, x: ToolArgs = {}) => {
+    const next: Room = { ...r, lifecycle, ...(r.lifecycle === 'draft' && lifecycle === 'active' ? { startedAt: Date.now() } : {}) };
+    store.put('room', r.id, next);
+    authority(store, a, next, 'room.lifecycle', { lifecycle, previous: r.lifecycle, ...x });
+    return room(r.id);
+  };
+  const setPhase = (a: Actor, r: Room, phase: RoomPhase, x: ToolArgs = {}) => {
+    const next: Room = { ...r, phase };
+    store.put('room', r.id, next);
+    authority(store, a, next, 'room.phase', { phase, previous: r.phase, ...x });
+    return room(r.id);
+  };
+  const requireLifecycle = (r: Room, allowed: RoomLifecycle[], action: string) => {
+    if (!allowed.includes(r.lifecycle))
+      throw new E('lifecycle', 'Room is ' + (r.lifecycle === 'draft' ? 'a draft' : r.lifecycle) + ', so it cannot ' + action, 409);
+  };
+  const reasonOf = (x: ToolArgs) => (x.reason === undefined ? {} : { reason: redactPublic(str(x, 'reason', 2000)) });
   const permission = (
     a: Actor,
     id: string,
@@ -328,7 +366,10 @@ export function createCore(store: Store): Core {
       try {
         const result = typeof x.clientKey === 'string' && !external.includes(n) && !READ_COMMANDS.has(n)
           ? store.idempotent(a.principalId, n, x.clientKey, x, () => h(a, x)) : await h(a, x);
-        if (roomId && !READ_COMMANDS.has(n)) exhaustBudgets(store, roomId);
+        if (roomId && !READ_COMMANDS.has(n)) {
+          exhaustBudgets(store, roomId);
+          settlePause(store, roomId);
+        }
         return result;
       } catch (e) {
         // The refusal rolled back its own transaction, so the budget is recorded separately.
@@ -348,7 +389,8 @@ export function createCore(store: Store): Core {
       objective: str(x, 'objective'),
       ownerId: a.ownerId,
       hostSeatId: null,
-      status: 'open',
+      lifecycle: x.draft === true ? 'draft' : 'active',
+      phase: 'deliberation',
       workflow: x.workflow === 'coding' ? 'coding' : 'discussion',
       createdAt: Date.now(),
       policy: { ...limits },
@@ -357,7 +399,7 @@ export function createCore(store: Store): Core {
     };
     store.put('room', r.id, r);
     store.put('policy', r.id + ':1', { roomId: r.id, version: 1, policy: r.policy });
-    ev(a, r.id, 'room.created', { title: r.title, objective: r.objective });
+    ev(a, r.id, 'room.created', { title: r.title, objective: r.objective, lifecycle: r.lifecycle });
     if (a.kind === 'agent')
       add(
         a,
@@ -382,7 +424,7 @@ export function createCore(store: Store): Core {
     const s = seat(a, r.id);
     if (s) return s;
     if (
-      r.status !== 'open' ||
+      !['draft', 'active'].includes(r.lifecycle) ||
       (a.ownerId !== r.ownerId && !activeMembership(store, r.id, a.ownerId)) ||
       !store.list<Actor>('bridge').some((b) => b.principalId === a.principalId && b.ownerId === a.ownerId)
     )
@@ -589,13 +631,17 @@ export function createCore(store: Store): Core {
           throw new E('budget_exhausted', 'Round budget is used up', 409);
         store.put('room', r.id, { ...r, rounds: rounds + 1 });
       }
-      return ev(a, r.id, n === 'room_set_agenda' ? 'agenda' : 'decision', {
+      const e = ev(a, r.id, n === 'room_set_agenda' ? 'agenda' : 'decision', {
         ...redactPublic(x),
         unresolved: store
           .list<I>('interaction')
           .filter((i) => i.roomId === r.id && i.status !== 'resolved')
           .map((i) => i.id),
       });
+      // A revised decision goes back for review; one recorded after approval leaves the phase alone.
+      if (n === 'room_propose_decision' && ['deliberation', 'owner_review'].includes(r.phase))
+        setPhase(a, room(r.id), 'decision_proposed');
+      return e;
     });
   c.register('host_transfer_request', (a, x) => {
     const r = host(a, str(x, 'roomId')),
@@ -622,24 +668,52 @@ export function createCore(store: Store): Core {
     authority(store, a, room(r.id), 'host.transferred', { requestId: p.id, seatId: s.id, previousSeatId: r.hostSeatId ?? null, scopeDigest: p.scopeDigest });
     return room(r.id);
   });
-  for (const [n, status] of [
-    ['room_pause', 'paused'],
-    ['room_resume', 'open'],
-    ['room_close', 'closed'],
-  ] as const)
-    c.register(n, (a, x) => {
-      const r = host(a, str(x, 'roomId'));
-      if (r.status === 'closed') throw new E('closed', 'Room is closed');
-      store.put('room', r.id, { ...r, status });
-      if (status !== 'open')
-        for (const t of store.list<Turn>('turn'))
-          if (t.roomId === r.id && (t.status === 'running' || t.status === 'dispatching' ||
-            (status === 'closed' && t.status === 'queued')))
-            store.put('turn', t.id, t.status === 'queued' ? { ...t, status: 'cancelled' }
-              : { ...t, status: 'cancelling', cancelRequestedAt: Date.now() });
-      ev(a, r.id, 'room.' + status, { status });
-      return room(r.id);
-    });
+  const cancelStarted = (r: Room) => {
+    const started = store.list<Turn>('turn', { roomId: r.id, status: STARTED_TURNS });
+    for (const t of started)
+      if (t.status !== 'cancelling') store.put('turn', t.id, { ...t, status: 'cancelling', cancelRequestedAt: Date.now() });
+    return started.length;
+  };
+  c.register('room_start', (a, x) => store.transaction(() => {
+    const r = host(a, str(x, 'roomId'));
+    requireLifecycle(r, ['draft'], 'be started');
+    return setLifecycle(a, r, 'active');
+  }));
+  c.register('room_pause', (a, x) => store.transaction(() => {
+    const r = host(a, str(x, 'roomId'));
+    requireLifecycle(r, ['active'], 'pause');
+    return setLifecycle(a, r, cancelStarted(r) ? 'pausing' : 'paused');
+  }));
+  c.register('room_resume', (a, x) => store.transaction(() => {
+    const r = host(a, str(x, 'roomId'));
+    requireLifecycle(r, ['pausing', 'paused'], 'resume');
+    return setLifecycle(a, r, 'active');
+  }));
+  // Spec: cancellation is a terminal room outcome with a handoff; completion is the ordinary end.
+  c.register('room_close', (a, x) => store.transaction(() => {
+    const r = host(a, str(x, 'roomId')), outcome = x.outcome ?? 'completed';
+    if (outcome !== 'completed' && outcome !== 'cancelled') throw new E('invalid_argument', 'Outcome must be completed or cancelled');
+    requireLifecycle(r, ['draft', 'active', 'pausing', 'paused'], 'close');
+    const stopped = cancelQueued(store, r.id, 'Room ' + outcome + ' before the turn started', 'room_' + outcome);
+    cancelStarted(r);
+    return setLifecycle(a, room(r.id), outcome, { ...reasonOf(x), ...(outcome === 'cancelled' ? { handoff: handoff(store, r, stopped) } : {}) });
+  }));
+  c.register('room_archive', (a, x) => store.transaction(() => {
+    const r = room(str(x, 'roomId'));
+    owner(a, r.id);
+    if (r.lifecycle !== 'completed') throw new E('lifecycle', 'Only a completed room can be archived; this room is ' + r.lifecycle, 409);
+    return setLifecycle(a, r, 'archived');
+  }));
+  c.register('room_set_phase', (a, x) => store.transaction(() => {
+    const r = host(a, str(x, 'roomId')), phase = str(x, 'phase', 64) as RoomPhase;
+    if (!PHASES.includes(phase)) throw new E('invalid_argument', 'Unknown phase ' + phase);
+    if (phase === 'decision_proposed') throw new E('phase', 'A decision is proposed with room_propose_decision', 409);
+    requireLifecycle(r, ['active', 'pausing', 'paused'], 'change phase');
+    const who = PHASE_STEPS[r.phase][phase];
+    if (!who) throw new E('phase', 'The phase cannot move from ' + r.phase + ' to ' + phase, 409);
+    if (who === 'owner') owner(a, r.id);
+    return setPhase(a, r, phase, reasonOf(x));
+  }));
   c.register('turn_request', (a, x) => {
     const r = a.kind === 'human' ? requireHumanParticipant(c, a, str(x, 'roomId')) : host(a, str(x, 'roomId'));
     write(a, r.id);
@@ -826,7 +900,7 @@ export function createCore(store: Store): Core {
       const target = turn ? store.get<Seat>('seat', turn.seatId) : undefined;
       if (!turn || turn.roomId !== p.roomId || turn.status !== 'running' ||
         !target?.consent || target.status === 'left' || target.product !== p.scope.product ||
-        room(p.roomId).status !== 'open')
+        room(p.roomId).lifecycle !== 'active')
         throw new E('permission', 'Native approval is no longer active', 409);
     }
     if (
@@ -889,6 +963,7 @@ export function createCore(store: Store): Core {
       });
       store.append(t.roomId, 'turn.uncertain', 'runtime', { turnId: t.id });
     }
+  for (const r of store.list<Room>('room')) settlePause(store, r.id);
   store.forgetResults([...READ_COMMANDS]);
   store.expireResults(Date.now() - RESULT_RETENTION_MS, RESULT_EXPIRY_BATCH);
   mountMembership(c);

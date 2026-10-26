@@ -29,7 +29,7 @@ export function readSharedArtefact(c: Core, actor: Actor, roomId: string, id: st
 export function mountSharedArtefacts(c: Core) {
   c.register('shared_artefact_publish', (actor, x) => {
     const roomId = str(x, 'roomId', 256), room = requireHumanParticipant(c, actor, roomId);
-    if (room.workflow !== 'discussion' || room.status !== 'open') throw new E('artefact_scope', 'Open discussion room required', 403);
+    if (room.workflow !== 'discussion' || room.lifecycle !== 'active') throw new E('artefact_scope', 'Active discussion room required', 403);
     if (Object.keys(x).some((key) => !['roomId', 'name', 'mimeType', 'content', 'digest', 'clientKey'].includes(key)))
       throw new E('artefact_argument', 'New immutable artefact fields required');
     const name = str(x, 'name', 256), content = str(x, 'content', 1048576), mimeType = str(x, 'mimeType', 256), digest = str(x, 'digest', 64);

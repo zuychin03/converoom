@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, issueBridgeCredential } from '../apps/daemon/src/server.js';
+import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { ConveroomError, type Actor, type Runtime, type Store } from '../packages/shared/src/contracts.js';
 import { humanCommand } from '../apps/cli/src/human.js';
 import { createHash } from 'node:crypto';
@@ -85,6 +86,34 @@ describe('local identity boundary', () => {
     const response = await server.app.inject({ method: 'POST', url: '/api/commands', headers: { ...headers, cookie, 'x-csrf-token': session.json().csrf },
       payload: { name: 'workspace_cleanup_preview', args: {} } });
     expect(response.json()).toMatchObject({ result: preview, committed: false, retrySafe: true });
+  });
+  it('runs room lifecycle commands for the browser and keeps archiving to the human', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'converoom-http-'));
+    cleanup.push(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }));
+    const runtime = await createRuntime(join(dir, 'data'), { noScheduler: true });
+    cleanup.push(() => runtime.stop());
+    const server = await createServer(runtime, { port: 0, pairingCode: 'local-pair-code', controlToken: 'installation-fixture-token' });
+    cleanup.push(() => server.close());
+    const headers = { host: new URL(server.url).host, origin: server.url };
+    const pair = await server.app.inject({ method: 'POST', url: '/api/pair', headers, payload: { code: 'local-pair-code' } });
+    const cookie = String(pair.headers['set-cookie']).split(';')[0];
+    const session = await server.app.inject({ method: 'GET', url: '/api/session', headers: { ...headers, cookie } });
+    const human = (name: string, args: Record<string, unknown>) => server.app.inject({ method: 'POST', url: '/api/commands',
+      headers: { ...headers, cookie, 'x-csrf-token': session.json().csrf }, payload: { name, args: { ...args, clientKey: name } } });
+    const room = (await human('room_create', { title: 'States', objective: 'Pick a storage engine', draft: true })).json().result;
+    expect(room).toMatchObject({ lifecycle: 'draft', phase: 'deliberation' });
+    await human('room_start', { roomId: room.id });
+    expect((await human('room_close', { roomId: room.id, outcome: 'completed', reason: 'SQLite agreed' })).json().result).toMatchObject({ lifecycle: 'completed' });
+    const credential = issueBridgeCredential(runtime, 'codex');
+    expect((await server.app.inject({ method: 'POST', url: '/agent/commands', headers: { host: headers.host, authorization: 'Bearer ' + credential.token },
+      payload: { name: 'room_archive', args: { roomId: room.id } } })).statusCode).toBe(400);
+    expect((await human('room_archive', { roomId: room.id })).json().result).toMatchObject({ lifecycle: 'archived', phase: 'deliberation' });
+    const state = (await server.app.inject({ method: 'GET', url: '/api/state?room=' + room.id, headers: { ...headers, cookie } })).json();
+    expect(state.events.filter((e: { type: string }) => e.type === 'room.lifecycle').map((e: { data: unknown }) => e.data)).toEqual([
+      expect.objectContaining({ lifecycle: 'active', previous: 'draft' }),
+      expect.objectContaining({ lifecycle: 'completed', previous: 'active', reason: 'SQLite agreed' }),
+      expect.objectContaining({ lifecycle: 'archived', previous: 'completed' }),
+    ]);
   });
   it('routes interrupted command inspection and clearing to the paired human only', async () => {
     const { server, runtime, headers } = await fixture();

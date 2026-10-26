@@ -18,6 +18,7 @@ import {
   RESULT_EXPIRY_BATCH,
   RESULT_RETENTION_MS,
   roomTimeExhausted,
+  settlePause,
   turnExecutionScope,
   type Permission,
   type Grant,
@@ -180,7 +181,7 @@ export async function createRuntime(
       const cli = [join(here, 'cli.js'), resolve(here, '../../../dist/cli.js')].find(existsSync);
       if (!cli) throw new ConveroomError('runtime_missing', 'Build or repair the compiled room bridge');
       bridge = await managedBridge(core, dataDir, cli, s, t, attempt?.generation);
-      if (stopped || !grant(t) || store.get<Room>('room', t.roomId)?.status !== 'open' ||
+      if (stopped || !grant(t) || store.get<Room>('room', t.roomId)?.lifecycle !== 'active' ||
         !store.get<Seat>('seat', s.id)?.consent || store.get<Turn>('turn', t.id)?.status !== 'dispatching' ||
         (t.requestedBy && store.get('revoked', t.requestedBy)))
         throw new ConveroomError('local_admission', 'Local execution approval changed before native startup', 409);
@@ -200,7 +201,7 @@ export async function createRuntime(
         !t.requestedBy ||
         store.get('revoked', t.requestedBy) ||
         !grant(t) ||
-        store.get<Room>('room', t.roomId)?.status !== 'open' ||
+        store.get<Room>('room', t.roomId)?.lifecycle !== 'active' ||
         !store.get<Seat>('seat', s.id)?.consent ||
         store.get<Turn>('turn', t.id)?.status !== 'dispatching' ||
         (attempt && (!admittedAttempt || admittedAttempt.status !== 'ready' ||
@@ -274,7 +275,7 @@ export async function createRuntime(
       if (current.status === 'cancelling') {
         store.put('turn', t.id, { ...current, status: 'cancelled' });
         emit(t, 'turn.cancelled', { turnId: t.id });
-      } else if (current.status === 'running' && currentTurnAuthority(store, current) && store.get<Room>('room', t.roomId)?.status === 'open') {
+      } else if (current.status === 'running' && currentTurnAuthority(store, current) && store.get<Room>('room', t.roomId)?.lifecycle === 'active') {
         unpublished = answer;
         const response = await core.dispatch(
           { kind: 'agent', principalId: s.principalId, ownerId: s.ownerId },
@@ -374,8 +375,10 @@ export async function createRuntime(
     ticking = true;
     try {
       store.transaction(() => expirePollingTurns(store));
-      for (const r of store.list<Room>('room', { status: ['open', 'paused'] }))
+      for (const r of store.list<Room>('room')) {
         if (roomTimeExhausted(r) && !r.exhaustedBudgets?.includes('time')) exhaustBudgets(store, r.id);
+        settlePause(store, r.id);
+      }
       if (Date.now() - resultsExpiredAt >= 3600000) {
         resultsExpiredAt = Date.now();
         const before = resultsExpiredAt - RESULT_RETENTION_MS;
@@ -434,7 +437,7 @@ export async function createRuntime(
         if (
           !room ||
           !seat ||
-          room.status !== 'open' ||
+          room.lifecycle !== 'active' ||
           seat.status === 'left' ||
           seat.mode !== 'managed' ||
           !seat.consent ||

@@ -781,6 +781,7 @@ textarea {
     'title actions'
     'objective objective'
     'meta meta'
+    'phase phase'
     'gauges gauges'
     'error error';
   gap: var(--space-2) var(--space-4);
@@ -819,6 +820,11 @@ textarea {
   gap: var(--space-1) var(--space-4);
   color: var(--muted);
   font-size: var(--text-xs);
+}
+.stages.room-phase {
+  grid-area: phase;
+  max-width: 48rem;
+  margin: 0;
 }
 .room-gauges {
   display: flex;
@@ -1852,6 +1858,7 @@ textarea {
       'title'
       'objective'
       'meta'
+      'phase'
       'gauges'
       'actions'
       'error';
@@ -1936,6 +1943,9 @@ textarea {
   }
   .stages li:not(.current) span {
     font-size: 0;
+  }
+  .stages.room-phase li.current span {
+    overflow: visible;
   }
 }
 @media (max-width: 479px) {

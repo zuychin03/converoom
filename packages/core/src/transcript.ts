@@ -82,14 +82,12 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     turn: (u, l) => `Turn budget used up: ${Number(u.turns)} of ${Number(l.maxMessages)} turns.`,
     time: (u, l) => `Time budget used up: ${duration(u.elapsedMs)} of ${duration(l.maxDurationMs)}.`,
   };
-  const exhausted = (d: ToolArgs) => {
-    const h = record(d.handoff), stopped = items(h.stoppedTurnIds).length, open = items(h.unresolved).map(record);
+  const handoff = (h: ToolArgs) => {
+    const stopped = items(h.stoppedTurnIds).length, open = items(h.unresolved).map(record);
     const latest = [h.agendaSeq ? `Latest agenda #${Number(h.agendaSeq)}.` : '',
       h.decisionSeq ? `Latest proposed decision #${Number(h.decisionSeq)}, not accepted.` : ''].filter(Boolean).join(' ');
     const listed = (label: string, ids: unknown[]) => (ids.length ? [`${label}: ${ids.map(turn).join(', ')}.`] : []);
     return [
-      items(d.budgets).map((b) => BUDGETS[String(b)]?.(record(d.usage), record(d.limits)) ?? end(capital(inline(b)) + ' budget used up')).join(' '),
-      'New turns are refused. Nothing was approved or accepted.',
       ...(stopped ? [`${plural(stopped, 'queued turn')} ${stopped === 1 ? 'was' : 'were'} cancelled before ${stopped === 1 ? 'it' : 'they'} started.`] : []),
       ...(latest ? [latest] : []),
       ...(open.length ? ['Open obligations:\n\n' + open.map((i) => `- ${inline(i.intent)} for ${seatName(i.recipientId)} in ${ref(i.messageId)}, ${inline(i.status)}`).join('\n')] : []),
@@ -99,12 +97,26 @@ export function transcriptMarkdown(t: TranscriptSource): string {
         .map((a) => `${code(String(a.id).slice(0, 8))} for task ${inline(a.taskId)}, ${inline(a.status)}`).join('; ') + '.'] : []),
     ];
   };
+  const exhausted = (d: ToolArgs) => [
+    items(d.budgets).map((b) => BUDGETS[String(b)]?.(record(d.usage), record(d.limits)) ?? end(capital(inline(b)) + ' budget used up')).join(' '),
+    'New turns are refused. Nothing was approved or accepted.', ...handoff(record(d.handoff)),
+  ];
+  const LIFECYCLE: Record<string, (d: ToolArgs) => string> = {
+    active: (d) => d.previous === 'draft' ? 'Room started.' : 'Room resumed.',
+    pausing: () => 'Pause requested; new dispatch is blocked until started turns end.',
+    paused: () => 'Room paused; new dispatch is blocked.',
+    completed: (d) => reason('Room completed', d.reason),
+    archived: () => 'Room archived.',
+  };
+  const phase = (v: unknown) => inline(String(v).replaceAll('_', ' '));
   const outcome = (d: ToolArgs, expiry: boolean) => [
     request(d.requestId), d.action ? ' (' + inline(String(d.action).replaceAll('_', ' ')) + ')' : '',
     d.scopeDigest ? ', scope digest ' + code(d.scopeDigest) : '', expiry && d.expiresAt ? ', valid until ' + time(d.expiresAt) : '',
   ].join('');
   const SYSTEM: Record<string, (d: ToolArgs) => string> = {
-    'room.created': () => 'Room opened.',
+    'room.created': (d) => d.lifecycle === 'draft' ? 'Room drafted.' : 'Room opened.',
+    'room.lifecycle': (d) => LIFECYCLE[String(d.lifecycle)]?.(d) ?? end('Room ' + inline(d.lifecycle)),
+    'room.phase': (d) => reason(`Phase moved from ${phase(d.previous)} to ${phase(d.phase)}`, d.reason),
     'seat.joined': (d) => `${seatLabel(d)} joined as a ${d.mode === 'managed' ? 'managed' : 'polling'} ${inline(d.role)}.`,
     'seat.left': (d) => `${seatName(d.seatId)} left the room.`,
     'seat.consent': (d) => d.consent === true ? `Turn requests allowed for ${seatName(d.seatId)}.` : `Turn requests turned off for ${seatName(d.seatId)}.`,
@@ -175,6 +187,9 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     if (e.type === 'turn.queued' && typeof d.prompt === 'string')
       return { title: actor + ' · turn requested for ' + seatName(d.seatId), body: [fenced(d.prompt)] };
     if (e.type === 'room.budget_exhausted') return { title: actor + ' · budget used up', body: exhausted(d) };
+    if (e.type === 'room.lifecycle' && d.lifecycle === 'cancelled') return { title: actor + ' · room cancelled', body: [
+      ...(d.reason ? [end('Reason: ' + inline(d.reason))] : []), 'New turns are refused and the room cannot reopen. Nothing was approved or accepted.',
+      ...handoff(record(d.handoff))] };
     if (e.type === 'permission.requested') return { title: actor + ' · approval requested', body: [
       end(capital(inline(String(d.action ?? '').replaceAll('_', ' '))) + ': ' + inline(d.summary)),
       `Scope digest ${code(d.scopeDigest)}, expires ${time(d.expiresAt)}.`, fenced(JSON.stringify(d.scope ?? {}, null, 2), 'json')] };
@@ -205,7 +220,7 @@ export function exportTranscript(exported: RoomExport, at = Date.now()): string 
   const values = (kind: string) => exported.records.filter((r) => r.kind === kind).map((r) => r.value);
   const room = values('room')[0] ?? {}, events = exported.events;
   return transcriptMarkdown({ room, events, seats: values('seat'), interactions: values('interaction'), provenance: [
-    `Room ${code('converoom://rooms/' + String(room.id))}, ${inline(room.status)}, policy version ${Number(room.policyVersion)}`,
+    `Room ${code('converoom://rooms/' + String(room.id))}, ${inline(room.lifecycle ?? room.status)}${room.phase ? ', phase ' + inline(String(room.phase).replaceAll('_', ' ')) : ''}, policy version ${Number(room.policyVersion)}`,
     events.length ? `Events #${Number(events[0].seq)} to #${Number(events.at(-1)!.seq)}, the room's full history` : 'No events recorded',
     `Exported ${time(at)} as Converoom transcript format ${TRANSCRIPT_FORMAT}, from export schema ${Number(exported.schemaVersion)} with digest ${code(exported.digest)}`,
     'Message, agenda and decision text appears in fenced blocks as recorded after credential redaction. ' +

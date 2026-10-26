@@ -1,6 +1,7 @@
 import { isRecord, string, type RecordData } from './api.js';
-import { num } from './model.js';
+import { num, phaseLabel } from './model.js';
 import { PRODUCT_IDS, PRODUCT_PROFILES } from '../../../packages/shared/src/products.js';
+import { PHASE_STEPS, type RoomPhase } from '../../../packages/shared/src/contracts.js';
 import type { Action } from './components.js';
 
 export const PRODUCTS = PRODUCT_IDS.map((value) => ({ value, label: PRODUCT_PROFILES[value].label }));
@@ -27,6 +28,7 @@ export const createRoomAction = (onCreated: (id: string) => void): Action => ({
         { value: 'coding', label: 'Coding and verification' },
       ],
     },
+    { key: 'draft', label: 'Create as a draft: add seats and limits, then start it', type: 'checkbox' },
   ],
   onSuccess: (result) => onCreated(roomIdOf(result)),
 });
@@ -46,9 +48,56 @@ export const closeRoomAction = (roomId: string): Action => ({
   args: { roomId },
   label: 'Close room',
   confirm:
-    'Close this room and stop new dispatch. Active work stays visible until cancellation is confirmed. A closed room cannot reopen.',
+    'Close this room and stop new dispatch. Queued turns are cancelled; started work stays visible until cancellation is confirmed. A closed room cannot reopen.',
+  fields: [
+    {
+      key: 'outcome',
+      label: 'Outcome',
+      type: 'select',
+      required: true,
+      value: 'completed',
+      options: [
+        { value: 'completed', label: 'Completed: the objective is met' },
+        { value: 'cancelled', label: 'Cancelled: stop here and record a handoff' },
+      ],
+    },
+    { key: 'reason', label: 'Reason', hint: 'Optional. Recorded in the room history.', type: 'textarea' },
+  ],
   danger: true,
 });
+
+export const archiveRoomAction = (roomId: string): Action => ({
+  title: 'Archive room',
+  command: 'room_archive',
+  args: { roomId },
+  label: 'Archive room',
+  confirm: 'Archive this completed room. Its history stays readable and exportable, and it moves to the end of the room list.',
+});
+
+const PHASE_MOVES: Record<string, string> = {
+  'decision_proposed>owner_review': 'Start owner review',
+  'decision_proposed>deliberation': 'Return to deliberation',
+  'owner_review>execution': 'Approve for execution',
+  'owner_review>handoff': 'Approve and hand off',
+  'owner_review>deliberation': 'Return to deliberation',
+  'execution>verification': 'Start verification',
+  'verification>execution': 'Return to execution for rework',
+  'verification>handoff': 'Hand off',
+};
+export const phaseAction = (roomId: string, phase: RoomPhase): Action => {
+  const options = Object.keys(PHASE_STEPS[phase]).map((next) => ({ value: next, label: PHASE_MOVES[phase + '>' + next] ?? phaseLabel(next) }));
+  return {
+    title: 'Change phase',
+    command: 'room_set_phase',
+    args: { roomId },
+    label: 'Change phase',
+    description: `The room is in ${phaseLabel(phase).toLowerCase()}. Approving a decision authorises no execution: every managed turn still needs its own grant.`,
+    fields: [
+      { key: 'phase', label: 'Next phase', type: 'select', required: true, value: options[0]?.value, options },
+      { key: 'reason', label: 'Reason', hint: 'Optional. Recorded in the room history.', type: 'textarea' },
+    ],
+  };
+};
 
 export const requestTurnAction = (roomId: string, seatId: unknown, interactionId?: string, remote = false): Action => ({
   title: interactionId ? 'Request linked reply' : remote ? 'Request participant turn' : 'Request managed turn',

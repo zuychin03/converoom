@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Moon, RefreshCw, Search, Sun, Wifi, WifiOff } from 'lucide-react';
 import { ApiError, createClient, isRecord, string, type RecordData, type Snapshot } from './api.js';
-import { closeRoomAction, createRoomAction, joinRoomAction, requestTurnAction } from './actions.js';
+import { archiveRoomAction, closeRoomAction, createRoomAction, joinRoomAction, phaseAction, requestTurnAction } from './actions.js';
+import { PHASE_STEPS, type RoomPhase } from '../../../packages/shared/src/contracts.js';
 import { ApprovalQueue } from './Approvals.js';
 import { CommandIndex, type IndexItem } from './CommandIndex.js';
 import { ActionDialog, ErrorNotice, Status, useNow, type Action } from './components.js';
-import { ACTIVE_TURN, data, liveRoomId, num, pad, pendingPermissions, roomEvents, shortId, turnTarget, withEarlier } from './model.js';
+import { ACTIVE_TURN, data, liveRoomId, num, pad, pendingPermissions, roomEnded, roomEvents, shortId, turnTarget, withEarlier } from './model.js';
 import { NoRoom, RoomIndex, RoomView } from './RoomView.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import { coalesce } from './refresh.js';
@@ -160,7 +161,7 @@ export function App() {
       throw cause;
     }
   };
-  const lifecycle = (command: 'room_pause' | 'room_resume', roomId: string, label: string) => () => {
+  const lifecycle = (command: 'room_start' | 'room_pause' | 'room_resume', roomId: string, label: string) => () => {
     setFailure('');
     run(command, { roomId }).catch((cause: unknown) =>
       setFailure(`${label} failed: ${cause instanceof Error ? cause.message : 'the room did not change.'}`),
@@ -206,7 +207,7 @@ export function App() {
       id: `room-${string(r, 'id')}`,
       group: 'Rooms',
       label: string(r, 'title', 'Untitled room'),
-      hint: `${shortId(string(r, 'id'))} · ${string(r, 'status')}`,
+      hint: `${shortId(string(r, 'id'))} · ${string(r, 'lifecycle')}`,
       keywords: `${string(r, 'objective')} ${string(r, 'id')}`,
       run: () => {
         selectRoom(string(r, 'id'));
@@ -223,12 +224,19 @@ export function App() {
       list.push({ id: `theme-${choice}`, group: 'Actions', label: `Theme: ${label}`, run: () => theme.setChoice(choice) });
     if (room) {
       const id = string(room, 'id');
-      if (room.status === 'open')
-        list.push({ id: 'pause', group: 'Actions', label: 'Pause room', hint: string(room, 'title'), run: lifecycle('room_pause', id, 'Pause room') });
-      if (room.status === 'paused')
-        list.push({ id: 'resume', group: 'Actions', label: 'Resume room', hint: string(room, 'title'), run: lifecycle('room_resume', id, 'Resume room') });
-      if (room.status !== 'closed')
-        list.push({ id: 'close', group: 'Actions', label: 'Close room…', hint: string(room, 'title'), run: () => setAction(closeRoomAction(id)) });
+      const current = string(room, 'lifecycle'), phase = string(room, 'phase', 'deliberation') as RoomPhase, hint = string(room, 'title');
+      if (current === 'draft')
+        list.push({ id: 'start', group: 'Actions', label: 'Start room', hint, run: lifecycle('room_start', id, 'Start room') });
+      if (current === 'active')
+        list.push({ id: 'pause', group: 'Actions', label: 'Pause room', hint, run: lifecycle('room_pause', id, 'Pause room') });
+      if (current === 'pausing' || current === 'paused')
+        list.push({ id: 'resume', group: 'Actions', label: 'Resume room', hint, run: lifecycle('room_resume', id, 'Resume room') });
+      if (!roomEnded(room) && current !== 'draft' && Object.keys(PHASE_STEPS[phase] ?? {}).length)
+        list.push({ id: 'phase', group: 'Actions', label: 'Change phase…', hint, run: () => setAction(phaseAction(id, phase)) });
+      if (!roomEnded(room))
+        list.push({ id: 'close', group: 'Actions', label: 'Close room…', hint, run: () => setAction(closeRoomAction(id)) });
+      if (current === 'completed')
+        list.push({ id: 'archive', group: 'Actions', label: 'Archive room…', hint, run: () => setAction(archiveRoomAction(id)) });
       for (const seat of snapshot.seats.filter((s) => s.roomId === id && s.mode === 'managed' && s.consent === true && turnTarget(s)))
         list.push({
           id: `turn-${string(seat, 'id')}`,

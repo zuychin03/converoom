@@ -85,7 +85,8 @@ it('restores a valid redacted HTTP export as read-only history and refuses to re
     await writeFile(input, JSON.stringify(e));
     await restore(input, target);
     let restored = createStore(join(target, 'converoom.sqlite'));
-    expect(restored.get('room', String(room.id))).toMatchObject({ status: 'closed' });
+    expect(restored.get('room', String(room.id))).toMatchObject({ lifecycle: 'archived', phase: 'deliberation' });
+    expect(restored.get('room', String(room.id))).not.toHaveProperty('status');
     expect(restored.get('seat', String(seat.id))).toMatchObject({ status: 'left', consent: false });
     expect(restored.get('identity', 'human')).toMatchObject(owner);
     expect(restored.events(String(room.id))).toHaveLength(e.events.length);
@@ -94,6 +95,15 @@ it('restores a valid redacted HTTP export as read-only history and refuses to re
     await expect(restore(input, target)).rejects.toThrow();
     restored = createStore(join(target, 'converoom.sqlite'));
     expect(restored.get('room', String(room.id))).toMatchObject({ title: 'Redacted roundtrip' });
+    restored.close();
+    const records = e.records.map((r) => r.kind !== 'room' ? r : { ...r, value: { ...r.value, status: 'closed', lifecycle: undefined, phase: undefined } });
+    const legacy = { ...e, records: JSON.parse(JSON.stringify(records)) }, older = join(dir, 'older');
+    legacy.digest = scopeDigest({ records: legacy.records, events: legacy.events });
+    await writeFile(input, JSON.stringify(legacy));
+    await restore(input, older);
+    restored = createStore(join(older, 'converoom.sqlite'));
+    expect(restored.get('room', String(room.id))).toMatchObject({ lifecycle: 'archived', phase: 'deliberation' });
+    expect(restored.get('room', String(room.id))).not.toHaveProperty('status');
     restored.close();
   } finally { await server.close(); await runtime.stop(); await rm(dir, { recursive: true, force: true }); }
 }, 30000);

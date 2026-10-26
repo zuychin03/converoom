@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, CornerDownRight, Pause, Play, Plus, Search, Square } from 'lucide-react';
+import { Archive, ArrowLeft, CornerDownRight, Milestone, Pause, Play, Plus, Search, Square } from 'lucide-react';
+import { PHASES, PHASE_STEPS, type RoomPhase } from '../../../packages/shared/src/contracts.js';
 import { isRecord, list, objects, string, type RecordData, type Snapshot } from './api.js';
-import { addAgentAction, closeRoomAction, inspectTurnAction, requestTurnAction } from './actions.js';
+import { addAgentAction, archiveRoomAction, closeRoomAction, inspectTurnAction, phaseAction, requestTurnAction } from './actions.js';
 import { GrantSlip } from './Approvals.js';
 import { Composer } from './Composer.js';
 import { PulsePlot, Sparkline } from './PulsePlot.js';
@@ -33,6 +34,8 @@ import {
   num,
   pad,
   pendingPermissions,
+  phaseLabel,
+  roomEnded,
   roomEvents,
   roomSeats,
   seatState,
@@ -67,6 +70,8 @@ const RECEIPT: Record<string, [Kind, string]> = {
 const receipt = (interaction: RecordData): [Kind, string] =>
   RECEIPT[string(interaction, 'status')] ?? ['idle', string(interaction, 'status')];
 const CONVERSATION = new Set(['message', 'agenda', 'decision', 'turn.queued', 'permission.requested', 'room.budget_exhausted']);
+const conversational = (event: RecordData) =>
+  CONVERSATION.has(string(event, 'type')) || (event.type === 'room.lifecycle' && data(event).lifecycle === 'cancelled');
 const BUDGET_LINES: Record<string, (usage: RecordData, limits: RecordData) => string> = {
   message: (u, l) => `Message budget used up: ${num(u, 'messages') ?? '?'} of ${num(l, 'maxMessages') ?? '?'} messages.`,
   turn: (u, l) => `Turn budget used up: ${num(u, 'turns') ?? '?'} of ${num(l, 'maxMessages') ?? '?'} turns.`,
@@ -82,6 +87,8 @@ const SYSTEM_LABELS: Record<string, string> = {
   'room.paused': 'paused',
   'room.open': 'resumed',
   'room.closed': 'closed',
+  'room.lifecycle': 'room state',
+  'room.phase': 'phase',
   'interaction.resolved': 'resolved',
   'tasks.planned': 'tasks planned',
   'task.claimed': 'claim',
@@ -111,15 +118,29 @@ function summarise(events: RecordData[]) {
 }
 type Block = { key: string; system: boolean; events: RecordData[] };
 
+const SETTLED: Record<string, { kind: Kind; label: string }> = {
+  draft: { kind: 'idle', label: 'Draft' },
+  paused: { kind: 'paused', label: 'Paused' },
+  completed: { kind: 'closed', label: 'Completed' },
+  cancelled: { kind: 'closed', label: 'Cancelled' },
+  archived: { kind: 'closed', label: 'Archived' },
+};
 export function roomStatus(room: RecordData, state: Snapshot): { kind: Kind; label: string } {
-  if (room.status === 'closed') return { kind: 'closed', label: 'Closed' };
-  if (room.status === 'paused') return { kind: 'paused', label: 'Paused' };
+  const settled = SETTLED[string(room, 'lifecycle')];
+  if (settled) return settled;
   const running = state.turns.filter(
     (t) => t.roomId === room.id && ACTIVE_TURN.includes(string(t, 'status')),
   ).length;
+  if (room.lifecycle === 'pausing') return { kind: 'paused', label: running ? `Pausing · ${running} still running` : 'Pausing' };
   if (list(room, 'exhaustedBudgets').length) return { kind: 'warn', label: running ? `Budget used up · ${running} running` : 'Budget used up' };
-  return running ? { kind: 'live', label: `${running} running` } : { kind: 'idle', label: 'Open' };
+  return running ? { kind: 'live', label: `${running} running` } : { kind: 'idle', label: 'Active' };
 }
+const indexRank = (room: RecordData) => (room.lifecycle === 'archived' ? 2 : roomEnded(room) ? 1 : 0);
+const INACTIVE: Record<string, string> = {
+  draft: 'This room is a draft. Start it to post and request turns.',
+  pausing: 'This room is pausing. Resume it to post again.',
+  paused: 'This room is paused. Resume it to post again.',
+};
 
 export function RoomIndex({
   state,
@@ -144,7 +165,7 @@ export function RoomIndex({
     )
     .sort(
       (a, b) =>
-        Number(a.status === 'closed') - Number(b.status === 'closed') ||
+        indexRank(a) - indexRank(b) ||
         (num(b, 'createdAt') ?? 0) - (num(a, 'createdAt') ?? 0),
     );
   return (
@@ -222,11 +243,16 @@ export function RoomView({
 }) {
   const now = useNow(5000);
   const id = string(room, 'id');
-  const open = room.status === 'open';
-  const closed = room.status === 'closed';
+  const lifecycleState = string(room, 'lifecycle');
+  const open = lifecycleState === 'active';
+  const ended = roomEnded(room);
   const used = list(room, 'exhaustedBudgets');
   const silenced = used.includes('message') || used.includes('time');
   const policy = isRecord(room.policy) ? room.policy : {};
+  const phase = string(room, 'phase', 'deliberation') as RoomPhase;
+  const phaseAt = PHASES.indexOf(phase);
+  const moves = Object.keys(PHASE_STEPS[phase] ?? {});
+  const startedAt = num(room, 'startedAt') ?? num(room, 'createdAt') ?? now;
   const seats = roomSeats(state, id);
   const events = useMemo(() => roomEvents(state, id), [state, id]);
   const pending = pendingPermissions(state, now, id);
@@ -251,7 +277,7 @@ export function RoomView({
   );
   const blocks: Block[] = [];
   for (const event of visible) {
-    const system = !CONVERSATION.has(string(event, 'type'));
+    const system = !conversational(event);
     const last = blocks.at(-1);
     if (system && last?.system) last.events.push(event);
     else blocks.push({ key: string(event, 'id'), system, events: [event] });
@@ -274,7 +300,7 @@ export function RoomView({
     return () => window.removeEventListener('keydown', escape);
   }, [focusSeq, setFocusSeq]);
 
-  async function lifecycle(command: 'room_pause' | 'room_resume') {
+  async function lifecycle(command: 'room_start' | 'room_pause' | 'room_resume') {
     setBusy(command);
     setError('');
     try {
@@ -332,39 +358,61 @@ export function RoomView({
             <span>Host · {host ? string(host, 'name') : shared ? 'Room owner' : 'You'}</span>
             <span>Policy v{num(room, 'policyVersion') ?? 1}</span>
           </div>
+          <ol className="stages room-phase" aria-label={`Phase ${phaseAt + 1} of ${PHASES.length}: ${phaseLabel(phase)}`}>
+            {PHASES.map((p, i) => (
+              <li key={p} className={i < phaseAt ? 'done' : i === phaseAt ? 'current' : ''} aria-current={i === phaseAt ? 'step' : undefined}>
+                <span>{phaseLabel(p)}</span>
+              </li>
+            ))}
+          </ol>
           <div className="room-gauges">
             <Gauge label="Messages" value={messages} max={num(policy, 'maxMessages') ?? 60} />
             {typeof room.remoteConnectionId !== 'string' && (
               <Gauge
                 label="Minutes"
-                value={Math.min((now - (num(room, 'createdAt') ?? now)) / 60000, (num(policy, 'maxDurationMs') ?? 5400000) / 60000)}
+                value={lifecycleState === 'draft' ? 0 : Math.min((now - startedAt) / 60000, (num(policy, 'maxDurationMs') ?? 5400000) / 60000)}
                 max={Math.round((num(policy, 'maxDurationMs') ?? 5400000) / 60000)}
               />
             )}
             <Gauge label="Turns" value={turns.length} max={num(policy, 'maxMessages') ?? 60} />
           </div>
           {!shared && <div className="room-actions">
-            {!closed &&
-              (open ? (
-                <button type="button" className="button" disabled={!!busy} onClick={() => void lifecycle('room_pause')}>
-                  <Pause size={14} aria-hidden="true" />
-                  Pause
-                </button>
-              ) : (
-                <button type="button" className="button" disabled={!!busy} onClick={() => void lifecycle('room_resume')}>
-                  <Play size={14} aria-hidden="true" />
-                  Resume
-                </button>
-              ))}
-            <button
-              type="button"
-              className="button"
-              disabled={closed}
-              onClick={() => openAction(closeRoomAction(id))}
-            >
-              <Square size={13} aria-hidden="true" />
-              Close
-            </button>
+            {lifecycleState === 'draft' && (
+              <button type="button" className="button" disabled={!!busy} onClick={() => void lifecycle('room_start')}>
+                <Play size={14} aria-hidden="true" />
+                Start
+              </button>
+            )}
+            {open && (
+              <button type="button" className="button" disabled={!!busy} onClick={() => void lifecycle('room_pause')}>
+                <Pause size={14} aria-hidden="true" />
+                Pause
+              </button>
+            )}
+            {(lifecycleState === 'pausing' || lifecycleState === 'paused') && (
+              <button type="button" className="button" disabled={!!busy} onClick={() => void lifecycle('room_resume')}>
+                <Play size={14} aria-hidden="true" />
+                Resume
+              </button>
+            )}
+            {!ended && lifecycleState !== 'draft' && moves.length > 0 && (
+              <button type="button" className="button" onClick={() => openAction(phaseAction(id, phase))}>
+                <Milestone size={14} aria-hidden="true" />
+                Phase
+              </button>
+            )}
+            {!ended && (
+              <button type="button" className="button" onClick={() => openAction(closeRoomAction(id))}>
+                <Square size={13} aria-hidden="true" />
+                Close
+              </button>
+            )}
+            {lifecycleState === 'completed' && (
+              <button type="button" className="button" onClick={() => openAction(archiveRoomAction(id))}>
+                <Archive size={14} aria-hidden="true" />
+                Archive
+              </button>
+            )}
           </div>}
           {error && <ErrorNotice dismiss={() => setError('')}>{error}</ErrorNotice>}
         </header>
@@ -450,7 +498,8 @@ export function RoomView({
           )}
         </div>
         <Composer roomId={id} seats={seats} run={run} disabled={!open || silenced}
-          reason={open && silenced ? 'This room’s budget is used up. See the handoff above.' : undefined} />
+          reason={open ? (silenced ? 'This room’s budget is used up. See the handoff above.' : undefined)
+            : INACTIVE[lifecycleState] ?? `This room is ${lifecycleState} and cannot reopen.`} />
       </section>
       <aside className="activity" aria-label="Agents and turns">
         <section className="panel">
@@ -473,7 +522,7 @@ export function RoomView({
               type="button"
               className="icon-button"
               aria-label="Add agent"
-              disabled={!open}
+              disabled={!open && lifecycleState !== 'draft'}
               onClick={() => openAction(addAgentAction(id))}
             >
               <Plus size={17} aria-hidden="true" />
@@ -617,7 +666,7 @@ function RoomControls({
   openAction: (action: Action) => void;
 }) {
   const id = string(room, 'id');
-  const open = room.status === 'open';
+  const open = room.lifecycle === 'active';
   const obligations = state.interactions.filter((i) => i.roomId === id && i.status !== 'resolved');
   return (
     <details className="panel controls">
@@ -811,6 +860,62 @@ function Entry({
   );
 }
 
+function HandoffDetails({ handoff: h, ctx }: { handoff: RecordData; ctx: EntryContext }) {
+  const { state, names } = ctx;
+  const unresolved = objects(h, 'unresolved'), attempts = objects(h, 'attempts');
+  const count = (key: string) => list(h, key).length;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const work = [
+    count('stoppedTurnIds') && `${plural(count('stoppedTurnIds'), 'queued turn')} cancelled before starting`,
+    count('retainedTurnIds') && `${plural(count('retainedTurnIds'), 'answer')} kept for the owner, not posted`,
+    count('uncertainTurnIds') && `${plural(count('uncertainTurnIds'), 'uncertain turn')} to inspect before any rerun`,
+    ...attempts.map((a) => `Coding attempt ${shortId(string(a, 'id'))} for task ${string(a, 'taskId')} · ${string(a, 'status')}`),
+  ].filter((line): line is string => !!line);
+  const jumpTo = (seq: unknown, label: string) => typeof seq === 'number' && (
+    <button type="button" className="text-button" onClick={() => ctx.jump(seq)}>{label} {pad(seq)}</button>
+  );
+  const running = state.turns.filter((t) => t.roomId === ctx.room.id && ACTIVE_TURN.includes(string(t, 'status'))).length;
+  return (
+    <>
+      {(unresolved.length > 0 || work.length > 0) && (
+        <div className="entry-lists">
+          {unresolved.length > 0 && (
+            <div>
+              <span className="list-label">Open obligations</span>
+              <ul>
+                {unresolved.map((i) => {
+                  const at = num(state.events.find((e) => e.id === i.messageId) ?? {}, 'seq');
+                  return (
+                    <li key={string(i, 'id')}>
+                      {string(i, 'intent')} → {names.seat(i.recipientId)}
+                      {at !== undefined && <> · {jumpTo(at, 'Message')}</>}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+          {work.length > 0 && (
+            <div>
+              <span className="list-label">Work</span>
+              <ul>
+                {work.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="entry-foot">
+        {jumpTo(h.agendaSeq, 'Agenda')}
+        {jumpTo(h.decisionSeq, 'Proposed decision')}
+        {running > 0 && <Status kind="live">{running} still running</Status>}
+      </div>
+    </>
+  );
+}
+
 interface EntryView {
   variant: 'message' | 'agenda' | 'decision' | 'turn' | 'request' | 'handoff' | 'system';
   author: string;
@@ -857,7 +962,7 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
                   recipient?.mode === 'managed' &&
                   recipient.consent === true &&
                   turnTarget(recipient) &&
-                  ctx.room.status === 'open' &&
+                  ctx.room.lifecycle === 'active' &&
                   !list(ctx.room, 'exhaustedBudgets').length &&
                   !i.turnId &&
                   !['responded', 'resolved'].includes(string(i, 'status'));
@@ -931,21 +1036,7 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
     };
   }
   if (type === 'room.budget_exhausted') {
-    const h = isRecord(d.handoff) ? d.handoff : {};
     const usage = isRecord(d.usage) ? d.usage : {}, limits = isRecord(d.limits) ? d.limits : {};
-    const unresolved = objects(h, 'unresolved'), attempts = objects(h, 'attempts');
-    const count = (key: string) => list(h, key).length;
-    const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-    const work = [
-      count('stoppedTurnIds') && `${plural(count('stoppedTurnIds'), 'queued turn')} cancelled before starting`,
-      count('retainedTurnIds') && `${plural(count('retainedTurnIds'), 'answer')} kept for the owner, not posted`,
-      count('uncertainTurnIds') && `${plural(count('uncertainTurnIds'), 'uncertain turn')} to inspect before any rerun`,
-      ...attempts.map((a) => `Coding attempt ${shortId(string(a, 'id'))} for task ${string(a, 'taskId')} · ${string(a, 'status')}`),
-    ].filter((line): line is string => !!line);
-    const jumpTo = (seq: unknown, label: string) => typeof seq === 'number' && (
-      <button type="button" className="text-button" onClick={() => ctx.jump(seq)}>{label} {pad(seq)}</button>
-    );
-    const running = state.turns.filter((t) => t.roomId === ctx.room.id && ACTIVE_TURN.includes(string(t, 'status'))).length;
     return {
       variant: 'handoff',
       author: actor,
@@ -956,46 +1047,26 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
             {list(d, 'budgets').map((b) => BUDGET_LINES[b]?.(usage, limits) ?? `The ${b} budget is used up.`).join(' ')} New turns are refused.
             Nothing was approved or accepted.
           </p>
-          {(unresolved.length > 0 || work.length > 0) && (
-            <div className="entry-lists">
-              {unresolved.length > 0 && (
-                <div>
-                  <span className="list-label">Open obligations</span>
-                  <ul>
-                    {unresolved.map((i) => {
-                      const at = num(state.events.find((e) => e.id === i.messageId) ?? {}, 'seq');
-                      return (
-                        <li key={string(i, 'id')}>
-                          {string(i, 'intent')} → {names.seat(i.recipientId)}
-                          {at !== undefined && <> · {jumpTo(at, 'Message')}</>}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
-              {work.length > 0 && (
-                <div>
-                  <span className="list-label">Work</span>
-                  <ul>
-                    {work.map((line) => (
-                      <li key={line}>{line}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-          <div className="entry-foot">
-            {jumpTo(h.agendaSeq, 'Agenda')}
-            {jumpTo(h.decisionSeq, 'Proposed decision')}
-            {running > 0 && <Status kind="live">{running} still running</Status>}
-          </div>
+          <HandoffDetails handoff={isRecord(d.handoff) ? d.handoff : {}} ctx={ctx} />
           {!ctx.shared && (
             <p className="entry-text system">
               To continue, raise a limit you lowered under Room controls, or close this room and start a new one from this handoff.
             </p>
           )}
+        </>
+      ),
+    };
+  }
+  if (type === 'room.lifecycle' && d.lifecycle === 'cancelled') {
+    return {
+      variant: 'handoff',
+      author: actor,
+      meta: 'Room cancelled · handoff',
+      body: (
+        <>
+          {typeof d.reason === 'string' && <p className="entry-text">{d.reason}</p>}
+          <p className="entry-text">New turns are refused and the room cannot reopen. Nothing was approved or accepted.</p>
+          <HandoffDetails handoff={isRecord(d.handoff) ? d.handoff : {}} ctx={ctx} />
         </>
       ),
     };
@@ -1170,11 +1241,23 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
   };
 }
 
+const LIFECYCLE_LINES: Record<string, (d: RecordData) => string> = {
+  active: (d) => (d.previous === 'draft' ? 'Room started' : 'Room resumed'),
+  pausing: () => 'Pause requested · started turns are ending',
+  paused: () => 'Room paused · new dispatch blocked',
+  completed: (d) => `Room completed${typeof d.reason === 'string' ? ` · ${d.reason}` : ''}`,
+  archived: () => 'Room archived',
+};
+
 function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
   const seat = (id: unknown) => ctx.names.seat(id);
   switch (type) {
     case 'room.created':
-      return `Room opened · ${string(d, 'objective')}`;
+      return `${d.lifecycle === 'draft' ? 'Room drafted' : 'Room opened'} · ${string(d, 'objective')}`;
+    case 'room.lifecycle':
+      return LIFECYCLE_LINES[string(d, 'lifecycle')]?.(d) ?? `Room ${string(d, 'lifecycle')}`;
+    case 'room.phase':
+      return `Phase · ${phaseLabel(d.previous)} → ${phaseLabel(d.phase)}${typeof d.reason === 'string' ? ` · ${d.reason}` : ''}`;
     case 'seat.joined':
       return `${string(d, 'name')} joined · ${string(d, 'product')} · ${d.mode === 'managed' ? 'managed' : 'polling'} ${string(d, 'role')}`;
     case 'seat.left':

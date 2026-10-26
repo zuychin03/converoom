@@ -165,7 +165,7 @@ export function Composer({
             ref={area}
             value={text}
             rows={2}
-            placeholder={disabled ? reason ?? 'This room is not open.' : 'Message the room. Type @ to direct a question.'}
+            placeholder={disabled ? reason ?? 'This room is not active.' : 'Message the room. Type @ to direct a question.'}
             disabled={disabled || sending}
             aria-autocomplete="list"
             aria-controls={open ? listId : undefined}

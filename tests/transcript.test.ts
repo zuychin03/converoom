@@ -71,6 +71,30 @@ it('renders the local export as a readable transcript that recorded text cannot 
   } finally { await runtime.stop(); await rm(dir, { recursive: true, force: true }); }
 }, 30000);
 
+it('records lifecycle and phase changes and a cancellation handoff in the transcript', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'converoom-transcript-'));
+  const runtime = await createRuntime(dir, { noScheduler: true });
+  try {
+    const call = <T = ToolArgs>(name: string, args: ToolArgs) => runtime.core.dispatch(humanIdentity(runtime), name, args) as Promise<T>;
+    const room = await call<Room>('room_create', { title: 'Storage', objective: 'Pick a storage engine', draft: true });
+    const worker = await call<Seat>('seat_add', { roomId: room.id, product: 'codex', mode: 'managed', name: 'Worker' });
+    await call('seat_consent', { roomId: room.id, seatId: worker.id, consent: true });
+    await call('room_start', { roomId: room.id });
+    await call('room_propose_decision', { roomId: room.id, decision: 'Use SQLite', dissent: [], evidence: [] });
+    await call('room_set_phase', { roomId: room.id, phase: 'owner_review', reason: 'Ready for review' });
+    await call('room_pause', { roomId: room.id });
+    await call('room_resume', { roomId: room.id });
+    await call('turn_request', { roomId: room.id, seatId: worker.id, prompt: 'Benchmark both engines' });
+    await call('room_close', { roomId: room.id, outcome: 'cancelled', reason: 'Requirements changed' });
+    const markdown = exportTranscript(await call<RoomExport>('room_export', { roomId: room.id }));
+    expect(markdown).toContain(', cancelled, phase owner review, policy version 1');
+    for (const line of ['Room drafted.', 'Room started.', 'Phase moved from deliberation to decision proposed.',
+      'Phase moved from decision proposed to owner review: Ready for review.', 'Room paused; new dispatch is blocked.', 'Room resumed.'])
+      expect(markdown).toContain(line);
+    expect(markdown).toMatch(/· room cancelled\n\nReason: Requirements changed\.\n\nNew turns are refused and the room cannot reopen\. Nothing was approved or accepted\.\n\n1 queued turn was cancelled before it started\.\n\nLatest proposed decision #\d+, not accepted\./);
+  } finally { await runtime.stop(); await rm(dir, { recursive: true, force: true }); }
+}, 30000);
+
 it('renders a shared history page from the public projection only', async () => {
   const core = createCore(createStore(':memory:'));
   const owner: Actor = { kind: 'human', principalId: 'owner', ownerId: 'owner' };
@@ -90,7 +114,7 @@ it('renders a shared history page from the public projection only', async () => 
     expect(open).toBe(false);
     expect(page.markdown).not.toContain('```json');
     expect(page.markdown).not.toMatch(/C:\\\\private|private-fixture|approval requested|"senderId"/);
-    expect(page.markdown).toContain('Shared room `converoom://rooms/' + room.id + '`, open, policy version 1');
+    expect(page.markdown).toContain('Shared room `converoom://rooms/' + room.id + '`, active, phase deliberation, policy version 1');
     expect(page.markdown).toMatch(/Public history after event #0: #\d+ to #\d+; no later public events/);
     expect(page.markdown).toContain(' · Owner · Membership confirmed for Guest \\*one\\* as participant, generation ' + member.generation + '.');
     expect(outside.some((line) => /^### #\d+ · .* UTC · Owner$/.test(line))).toBe(true);

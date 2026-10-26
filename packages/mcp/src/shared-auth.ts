@@ -6,7 +6,7 @@ import { createOAuthMetadata } from '@modelcontextprotocol/sdk/server/auth/route
 import { OAuthClientInformationFullSchema, type OAuthClientInformationFull, type OAuthTokens,
   type OAuthTokenRevocationRequest } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { InvalidClientError, InvalidGrantError, InvalidRequestError, InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
-import { ConveroomError as E, type Actor, type Core, type Room, type Seat } from '../../shared/src/contracts.js';
+import { ConveroomError as E, ENDED_ROOMS, type Actor, type Core, type Room, type Seat } from '../../shared/src/contracts.js';
 import { activeMembership, currentSeat } from '../../core/src/membership.js';
 import { authority } from '../../core/src/audit.js';
 
@@ -74,8 +74,8 @@ export class SharedOAuth implements OAuthServerProvider {
   }
   private check(binding: Binding) {
     const m = activeMembership(this.core.store, binding.roomId, binding.actor.ownerId, binding.memberPrincipalId ?? binding.actor.principalId);
-    const r = this.core.store.get<{ workflow: string; status: string }>('room', binding.roomId);
-    if (!m || m.generation !== binding.generation || r?.workflow !== 'discussion' || r.status === 'closed' ||
+    const r = this.core.store.get<Room>('room', binding.roomId);
+    if (!m || m.generation !== binding.generation || r?.workflow !== 'discussion' || ENDED_ROOMS.includes(r.lifecycle) ||
       binding.audience !== this.resource || binding.expiresAt <= Date.now() || this.core.store.get('shared_oauth_revoked', binding.familyId))
       throw new InvalidTokenError('Credential expired, removed or outside this room');
     if (binding.actor.kind === 'agent') {

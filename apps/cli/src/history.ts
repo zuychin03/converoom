@@ -61,7 +61,12 @@ export async function restoreHistory(input: string, dataDir: string): Promise<vo
           const value = { ...redactTransport(r.value) };
           for (const key of ['path', 'dataPath', 'basePath', 'workspace', 'foundationPath']) delete value[key];
           if (r.kind === 'turn') value.status = 'uncertain';
-          if (r.kind === 'room') value.status = 'closed';
+          // A restored room is read-only history; a cancelled one keeps its outcome. Older exports carry status instead.
+          if (r.kind === 'room') {
+            value.lifecycle = value.lifecycle === 'cancelled' ? 'cancelled' : 'archived';
+            value.phase ??= e.events.some((v) => v.roomId === r.id && v.type === 'decision') ? 'decision_proposed' : 'deliberation';
+            delete value.status;
+          }
           if (r.kind === 'seat') { value.consent = false; value.status = 'left'; }
           if (r.kind === 'permission') value.status = 'denied';
           store.put(r.kind, r.id, value);

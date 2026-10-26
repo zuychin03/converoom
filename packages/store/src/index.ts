@@ -87,12 +87,12 @@ export function createStore(path: string): Store {
     const tables = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
       .all() as { name: string }[];
-    if (userVersion !== 0 && userVersion !== 1)
+    if (![0, 1, 2].includes(userVersion as number))
       throw new ConveroomError('schema_version', 'Unsupported database schema version');
     if (userVersion === 0 && tables.length)
       throw new ConveroomError('schema_version', 'Unidentified database schema; migration refused');
     if (
-      userVersion === 1 &&
+      userVersion !== 0 &&
       (tables.length !== 3 ||
         !['records', 'events', 'idempotency'].every((n) => tables.some((t) => t.name === n)))
     )
@@ -107,7 +107,7 @@ export function createStore(path: string): Store {
       CREATE TABLE records(kind TEXT NOT NULL,id TEXT NOT NULL,json TEXT NOT NULL CHECK(json_valid(json)),PRIMARY KEY(kind,id));
       CREATE TABLE events(room_id TEXT NOT NULL,seq INTEGER NOT NULL,id TEXT NOT NULL UNIQUE,json TEXT NOT NULL CHECK(json_valid(json)),PRIMARY KEY(room_id,seq));
       CREATE TABLE idempotency(actor_id TEXT NOT NULL,command TEXT NOT NULL,client_key TEXT NOT NULL,payload_hash TEXT NOT NULL,result TEXT NOT NULL CHECK(json_valid(result)),PRIMARY KEY(actor_id,command,client_key));
-      PRAGMA user_version = 1;
+      PRAGMA user_version = 2;
     `),
       )();
     const get = db.prepare('SELECT json FROM records WHERE kind=? AND id=?');
@@ -324,6 +324,17 @@ export function createStore(path: string): Store {
         if (db.open) db.close();
       },
     };
+    // Version 2 splits a room's status into an independent lifecycle and phase.
+    if (userVersion === 1)
+      store.transaction(() => {
+        for (const room of store.list<ToolArgs>('room')) {
+          if ('lifecycle' in room) continue;
+          const { status, ...rest } = room, id = String(room.id);
+          store.put('room', id, { ...rest, lifecycle: status === 'open' ? 'active' : status === 'paused' ? 'paused' : 'completed',
+            phase: store.lastEvent(id, 'decision') ? 'decision_proposed' : 'deliberation' });
+        }
+        db.pragma('user_version = 2');
+      });
     return store;
   } catch (error) {
     db.close();

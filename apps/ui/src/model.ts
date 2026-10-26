@@ -1,5 +1,6 @@
 import { isRecord, list, string, type RecordData, type Snapshot } from './api.js';
 import { isManagedProduct } from '../../../packages/shared/src/products.js';
+import { ENDED_ROOMS, type RoomLifecycle } from '../../../packages/shared/src/contracts.js';
 
 export type Kind = 'live' | 'needs' | 'ok' | 'warn' | 'fail' | 'idle' | 'paused' | 'closed';
 export type Intent = 'question' | 'review' | 'challenge';
@@ -10,6 +11,11 @@ export const num = (record: RecordData, key: string) =>
 export const data = (record: RecordData): RecordData =>
   isRecord(record.data) ? record.data : {};
 export const pad = (value: number) => String(value).padStart(3, '0');
+export const roomEnded = (room: RecordData) => ENDED_ROOMS.includes(string(room, 'lifecycle') as RoomLifecycle);
+export const phaseLabel = (phase: unknown) => {
+  const words = String(phase ?? 'deliberation').replaceAll('_', ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
 export const shortId = (id: string, length = 4) =>
   id.replace(/-/g, '').slice(0, length).toUpperCase();
 
@@ -62,7 +68,7 @@ export function withEarlier(state: Snapshot, earlier?: { roomId: string; events:
 
 export function liveRoomId(state: Snapshot) {
   return state.rooms
-    .filter((room) => room.status !== 'closed')
+    .filter((room) => !roomEnded(room))
     .map((room) => ({ id: string(room, 'id'), at: Math.max(num(room, 'lastEventAt') ?? 0, num(room, 'createdAt') ?? 0) }))
     .sort((a, b) => b.at - a.at)[0]?.id;
 }

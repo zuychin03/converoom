@@ -106,7 +106,7 @@ test('complete human room lifecycle at desktop and mobile', async ({ page, reque
   await axe(page);
   await page.getByLabel('Public message').fill('Public opening position');
   await page.getByRole('button', { name: 'Post message' }).click();
-  await expect(page.getByText('Public opening position', { exact: true })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Room catalogue' }).getByText('Public opening position', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Add agent', exact: true }).click();
   for (const label of ['Codex', 'Cursor', 'Claude Code', 'OpenCode', 'Antigravity', 'Kiro', 'Qoder', 'Grok Build'])
     await expect(page.getByLabel('Product').getByRole('option', { name: label, exact: true })).toHaveCount(1);
@@ -133,7 +133,7 @@ test('complete human room lifecycle at desktop and mobile', async ({ page, reque
   await expect(page.getByText('No approvals waiting')).toBeVisible();
   const roomId = await page.evaluate(async () => {
     const state = await (await fetch('/api/state')).json();
-    return state.rooms.find((room: { title: string; status: string }) => room.title === 'Acceptance room' && room.status === 'open').id as string;
+    return state.rooms.find((room: { title: string; lifecycle: string }) => room.title === 'Acceptance room' && room.lifecycle === 'active').id as string;
   });
   expect((await request.post('http://127.0.0.1:43318/workspace?roomId=' + encodeURIComponent(roomId))).ok()).toBe(true);
   expect((await request.post('http://127.0.0.1:43318/uncertain?roomId=' + encodeURIComponent(roomId))).ok()).toBe(true);
@@ -209,6 +209,9 @@ test('complete human room lifecycle at desktop and mobile', async ({ page, reque
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'Close room', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Post message' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Archive', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Archive room', exact: true }).click();
+  await expect(page.locator('.room-title-row').getByText('Archived', { exact: true })).toBeVisible();
   const busy = await request.post('http://127.0.0.1:43318/busy');
   expect(busy.ok()).toBe(true);
   await page.reload();

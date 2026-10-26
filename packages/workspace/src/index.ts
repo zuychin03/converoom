@@ -164,8 +164,8 @@ export function mountWorkspace(
     const room = core.requireRoom(a, id);
     if (a.kind === 'agent' && core.requireSeat(a, id).role === 'observer')
       throw new E('observer', 'Observer cannot mutate or execute workspace operations', 403);
-    if (room.status !== 'open')
-      throw new E('inactive', 'Room must be open for workspace operations', 409);
+    if (room.lifecycle !== 'active')
+      throw new E('inactive', 'Room must be active for workspace operations', 409);
     return room;
   };
   const brokers = new Map<string, FixtureBroker>();

@@ -75,7 +75,7 @@ export function WorkspaceView({
               <button
                 type="button"
                 className="button small"
-                disabled={!state.repos.length || !state.profiles.length || room.status !== 'open'}
+                disabled={!state.repos.length || !state.profiles.length || room.lifecycle !== 'active'}
                 onClick={() =>
                   openAction({
                     title: 'Plan task graph',
@@ -124,7 +124,7 @@ export function WorkspaceView({
                     state={state}
                     now={now}
                     workers={workers}
-                    roomOpen={room.status === 'open'}
+                    roomOpen={room.lifecycle === 'active'}
                     run={run}
                     openAction={openAction}
                   />
@@ -140,7 +140,7 @@ export function WorkspaceView({
               <button
                 type="button"
                 className="button small"
-                disabled={!acceptedOrder(state, roomId).length || room.status !== 'open'}
+                disabled={!acceptedOrder(state, roomId).length || room.lifecycle !== 'active'}
                 onClick={() =>
                   openAction({
                     title: 'Prepare combined candidate',

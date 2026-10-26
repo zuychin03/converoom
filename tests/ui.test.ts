@@ -111,11 +111,17 @@ describe('browser command boundary', () => {
   it('formats workspace sizes in binary units', () => {
     expect([0, 1023, 2048, 1572864, 5 * 1073741824].map(fmtBytes)).toEqual(['0 bytes', '1023 bytes', '2.0 KiB', '1.5 MiB', '5.0 GiB']);
   });
-  it('marks a room whose budget is used up, after closed and paused', () => {
+  it('marks a room whose budget is used up, after its lifecycle', () => {
     const state = parseSnapshot({ turns: [{ id: 't', roomId: 'r', status: 'running' }] });
-    expect(roomStatus({ id: 'r', status: 'open', exhaustedBudgets: ['message'] }, state)).toEqual({ kind: 'warn', label: 'Budget used up · 1 running' });
-    expect(roomStatus({ id: 'other', status: 'open', exhaustedBudgets: ['turn'] }, state)).toEqual({ kind: 'warn', label: 'Budget used up' });
-    expect(roomStatus({ id: 'r', status: 'paused', exhaustedBudgets: ['time'] }, state)).toEqual({ kind: 'paused', label: 'Paused' });
+    expect(roomStatus({ id: 'r', lifecycle: 'active', exhaustedBudgets: ['message'] }, state)).toEqual({ kind: 'warn', label: 'Budget used up · 1 running' });
+    expect(roomStatus({ id: 'other', lifecycle: 'active', exhaustedBudgets: ['turn'] }, state)).toEqual({ kind: 'warn', label: 'Budget used up' });
+    expect(roomStatus({ id: 'r', lifecycle: 'paused', exhaustedBudgets: ['time'] }, state)).toEqual({ kind: 'paused', label: 'Paused' });
+  });
+  it('names every room lifecycle, and pausing until started turns end', () => {
+    const state = parseSnapshot({ turns: [{ id: 't', roomId: 'r', status: 'cancelling' }] });
+    expect(['draft', 'active', 'pausing', 'paused', 'completed', 'cancelled', 'archived'].map((lifecycle) => roomStatus({ id: 'other', lifecycle }, state).label))
+      .toEqual(['Draft', 'Active', 'Pausing', 'Paused', 'Completed', 'Cancelled', 'Archived']);
+    expect(roomStatus({ id: 'r', lifecycle: 'pausing' }, state)).toEqual({ kind: 'paused', label: 'Pausing · 1 still running' });
   });
   it('keeps the reason on uncertain turns', () => {
     const state = parseSnapshot({});
@@ -197,13 +203,14 @@ describe('browser command boundary', () => {
   });
   it('opens the unclosed room with the latest activity from the server\'s last event times', () => {
     const state = parseSnapshot({ rooms: [
-      { id: 'closed', status: 'closed', createdAt: 9, lastEventAt: 99 },
-      { id: 'quiet', status: 'open', createdAt: 5, lastEventAt: 20 },
-      { id: 'busy', status: 'paused', createdAt: 1, lastEventAt: 30 },
-      { id: 'new', status: 'open', createdAt: 25 },
+      { id: 'closed', lifecycle: 'completed', createdAt: 9, lastEventAt: 99 },
+      { id: 'filed', lifecycle: 'archived', createdAt: 9, lastEventAt: 98 },
+      { id: 'quiet', lifecycle: 'active', createdAt: 5, lastEventAt: 20 },
+      { id: 'busy', lifecycle: 'paused', createdAt: 1, lastEventAt: 30 },
+      { id: 'new', lifecycle: 'active', createdAt: 25 },
     ] });
     expect(liveRoomId(state)).toBe('busy');
-    expect(liveRoomId(parseSnapshot({ rooms: [{ id: 'closed', status: 'closed' }] }))).toBeUndefined();
+    expect(liveRoomId(parseSnapshot({ rooms: [{ id: 'closed', lifecycle: 'cancelled' }] }))).toBeUndefined();
   });
   it('puts loaded earlier pages before the room\'s current window once and ignores another room\'s pages', () => {
     const state = parseSnapshot({ events: [{ id: 'e3', roomId: 'room', seq: 3 }, { id: 'e4', roomId: 'room', seq: 4 }] });

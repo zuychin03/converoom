@@ -6,7 +6,7 @@ import { createServer as createTlsServer, Agent, request as tlsRequest } from 'n
 import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { createServer, humanIdentity } from '../apps/daemon/src/server.js';
 import { createSharedServer } from '../apps/daemon/src/shared-server.js';
-import type { Room, Seat, Turn } from '../packages/shared/src/contracts.js';
+import { ENDED_ROOMS, type Room, type Seat, type Turn } from '../packages/shared/src/contracts.js';
 const dir = await mkdtemp(join(tmpdir(), 'converoom-browser-'));
 const runtime = await createRuntime(dir, { noScheduler: true });
 let terminalCode = '';
@@ -48,7 +48,7 @@ const fixtureControl = createHttpServer(async (request, response) => {
   if (requestUrl.pathname === '/native-count') { response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ nativeStarts })); return; }
   // The UI opens the latest unclosed room on load, so a room left by a failed flow would change the next flow's first screen.
   if (request.method === 'POST' && requestUrl.pathname === '/reset') {
-    for (const room of runtime.core.store.list<Room>('room').filter((r) => r.status !== 'closed'))
+    for (const room of runtime.core.store.list<Room>('room').filter((r) => !ENDED_ROOMS.includes(r.lifecycle)))
       await runtime.core.dispatch(humanIdentity(runtime), 'room_close', { roomId: room.id });
     response.writeHead(204).end();
     return;

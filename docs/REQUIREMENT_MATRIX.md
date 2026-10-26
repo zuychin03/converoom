@@ -22,7 +22,7 @@ The agent expansion adds Antigravity, Kiro, Qoder and Grok Build to FR-01/05/11/
 | FR-12 | Open V1 acceptance | Polling seats shall retain pending work and receive bounded read/wait tools. |
 | FR-13 | Open V1 acceptance | The host shall see unresolved obligations and propose a decision preserving dissent and evidence. |
 | FR-14 | Open V1 acceptance | Execution and consequential actions shall require a human grant independent of agent text. |
-| FR-15 | Open V1 acceptance | Pause, cancellation, worker stop and room close shall have distinct states. |
+| FR-15 | Open V1 acceptance; room states locally implemented with fixture tests | Pause, cancellation, worker stop and room close shall have distinct states. |
 | FR-16 | Locally implemented with fixture tests; release acceptance open | Budget exhaustion shall stop new dispatch and produce a handoff. |
 | FR-17 | Open V1 acceptance | The store and outbox shall survive runtime restart. |
 | FR-18 | Open V1 acceptance | Uncertain execution shall require inspection before consequential replay. |

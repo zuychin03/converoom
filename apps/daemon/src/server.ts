@@ -16,6 +16,7 @@ import {
   type ToolArgs,
   type RemoteConnection,
   type Store,
+  ENDED_ROOMS,
 } from '../../../packages/shared/src/contracts.js';
 import { TOOL_DEFINITIONS, validateToolArgs } from '../../../packages/mcp/src/tools.js';
 import { redactTransport } from '../../../packages/store/src/index.js';
@@ -125,7 +126,7 @@ export function snapshot(runtime: Runtime, roomId?: string): Record<string, unkn
   const lastEventAt = (r: Room) => store.events(r.id, r.seq - 1, 1)[0]?.at;
   state.rooms = redact(store.list<Room>('room').map((r) => r.id === room?.id
     ? { ...r, lastEventAt: lastEventAt(r), messageCount: store.eventCount(r.id, 'message') }
-    : r.status === 'closed' ? r : { ...r, lastEventAt: lastEventAt(r) }));
+    : ENDED_ROOMS.includes(r.lifecycle) ? r : { ...r, lastEventAt: lastEventAt(r) }));
   state.events = room ? redact(store.events(room.id, Math.max(0, room.seq - ROOM_EVENT_PAGE), ROOM_EVENT_PAGE)) : [];
   state.sharedArtefacts = room ? store.list<SharedArtefact>('shared_artefact', { roomId: room.id }).map(artefactMetadata) : [];
   state.invitations = room ? store.list<Record<string, unknown>>('invitation', { roomId: room.id }).map((row) => {
@@ -295,6 +296,7 @@ export async function createServer(
     'permission_grant',
     'permission_deny',
     'host_transfer_confirm',
+    'room_archive',
     'repo_register',
     'repo_get',
     'repo_list',
