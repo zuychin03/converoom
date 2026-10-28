@@ -376,6 +376,24 @@ textarea {
   min-height: 0;
   accent-color: var(--red);
 }
+.choice-field {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+.choice-field legend {
+  margin-bottom: var(--space-1);
+  padding: 0;
+}
+.choice-field .check-field {
+  margin: 0;
+  min-height: 32px;
+}
+.choice-order {
+  margin-left: auto;
+  color: var(--red-ink);
+  font-size: var(--text-xs);
+}
 .switch {
   display: inline-flex;
   align-items: center;
@@ -1515,6 +1533,29 @@ textarea {
 }
 .stages li.current span {
   border-top-color: var(--red);
+  color: var(--ink);
+  font-weight: 600;
+}
+.plan-order {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-3) 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+.plan-order li {
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--hairline);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.plan-order li.done {
+  border-left-color: var(--ink-2);
+  color: var(--ink-2);
+}
+.plan-order li.current {
+  border-left-color: var(--red);
   color: var(--ink);
   font-weight: 600;
 }

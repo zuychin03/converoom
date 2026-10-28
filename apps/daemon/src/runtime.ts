@@ -12,6 +12,7 @@ import {
   redactTransport,
 } from '../../../packages/store/src/index.js';
 import {
+  advanceTurnPolicies,
   createCore,
   exhaustBudgets,
   expirePollingTurns,
@@ -378,6 +379,7 @@ export async function createRuntime(
       for (const r of store.list<Room>('room')) {
         if (roomTimeExhausted(r) && !r.exhaustedBudgets?.includes('time')) exhaustBudgets(store, r.id);
         settlePause(store, r.id);
+        advanceTurnPolicies(store, r.id);
       }
       if (Date.now() - resultsExpiredAt >= 3600000) {
         resultsExpiredAt = Date.now();
@@ -497,6 +499,7 @@ export async function createRuntime(
       'review',
       'candidate',
       'task',
+      'round_robin',
     ];
     // Hash the transport-redacted form: the HTTP layer redacts the response again, which must leave the digest valid.
     const records = kinds.flatMap((kind) =>

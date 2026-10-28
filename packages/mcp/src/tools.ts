@@ -50,6 +50,8 @@ const mutationNames = new Set([
   'turn_cancel',
   'room_close',
   'room_set_phase',
+  'round_robin_propose',
+  'round_robin_stop',
   'task_plan',
   'task_claim',
   'task_heartbeat',
@@ -144,6 +146,15 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
     required: ['roomId', 'phase'],
     fields: { phase: { type: 'string', enum: ['deliberation', 'owner_review', 'execution', 'verification', 'handoff'] }, reason: string },
   },
+  round_robin_propose: {
+    required: ['roomId', 'seatIds', 'rounds', 'prompt'],
+    fields: {
+      seatIds: { type: 'array', items: small, minItems: 1, maxItems: 5 },
+      rounds: { type: 'integer', minimum: 1, maximum: 6 },
+      prompt: { ...string, maxLength: 60000 },
+    },
+  },
+  round_robin_stop: { required: ['roomId'], fields: { reason: string } },
   task_plan: {
     required: ['roomId', 'repoId', 'tasks'],
     fields: {

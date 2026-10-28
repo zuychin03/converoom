@@ -162,7 +162,7 @@ export type Field = {
   key: string;
   label: string;
   hint?: string;
-  type?: 'text' | 'textarea' | 'select' | 'json' | 'paths' | 'checkbox' | 'number';
+  type?: 'text' | 'textarea' | 'select' | 'json' | 'paths' | 'checkbox' | 'number' | 'choices';
   required?: boolean;
   value?: string;
   options?: Array<{ value: string; label: string }>;
@@ -214,7 +214,7 @@ export function ActionDialog({
       const args: RecordData = { ...action.args };
       for (const field of action.fields ?? []) {
         const value = values[field.key] ?? '';
-        if (field.required && !value.trim()) throw new Error(`Enter ${field.label.toLowerCase()}.`);
+        if (field.required && !value.trim()) throw new Error(`${field.type === 'choices' ? 'Choose' : 'Enter'} ${field.label.toLowerCase()}.`);
         if (field.type === 'json') {
           try {
             args[field.key] = JSON.parse(value);
@@ -227,6 +227,7 @@ export function ActionDialog({
             .map((item) => item.trim())
             .filter(Boolean);
         else if (field.type === 'checkbox') args[field.key] = value === 'true';
+        else if (field.type === 'choices') args[field.key] = value.split('\n').filter(Boolean);
         else if (field.type === 'number') args[field.key] = Number(value);
         else if (value || field.required) args[field.key] = value;
       }
@@ -285,6 +286,40 @@ export function ActionDialog({
                 <span>{field.label}</span>
               </label>
             );
+          if (field.type === 'choices') {
+            const picked = (values[field.key] ?? '').split('\n').filter(Boolean);
+            return (
+              <fieldset className="field choice-field" key={field.key}>
+                <legend className="field-label">
+                  {field.label}
+                  {field.required && <span aria-hidden="true"> *</span>}
+                </legend>
+                {field.options?.map((option) => {
+                  const at = picked.indexOf(option.value);
+                  return (
+                    <label className="check-field" key={option.value}>
+                      <input
+                        type="checkbox"
+                        checked={at >= 0}
+                        disabled={busy}
+                        onChange={(event) =>
+                          set(field.key, (event.target.checked ? [...picked, option.value] : picked.filter((v) => v !== option.value)).join('\n'))
+                        }
+                      />
+                      <span>{option.label}</span>
+                      {at >= 0 && (
+                        <span className="choice-order num">
+                          <span className="sr-only">position </span>
+                          {at + 1}
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
+                {field.hint && <small>{field.hint}</small>}
+              </fieldset>
+            );
+          }
           return (
             <label className="field" key={field.key} htmlFor={id}>
               <span className="field-label">

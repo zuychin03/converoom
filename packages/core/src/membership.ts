@@ -62,6 +62,7 @@ const eventFields: Record<string, string[]> = {
   'room.paused': ['status'], 'room.open': ['status'], 'room.closed': ['status'], 'room.lifecycle': ['lifecycle', 'previous'],
   'room.phase': ['phase', 'previous'], 'room.budget_exhausted': ['budgets', 'usage', 'limits'],
   'policy.changed': ['version'], 'host.transferred': ['seatId'],
+  'round_robin.approved': ['planId', 'seatIds', 'rounds'], 'round_robin.ended': ['planId', 'status', 'turns'],
   'membership.confirmed': ['memberId', 'ownerId', 'generation', 'role'],
   'membership.revoked': ['memberId', 'ownerId', 'generation'],
   'turn.queued': ['id', 'seatId', 'status', 'createdAt'],

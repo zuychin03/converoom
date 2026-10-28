@@ -2,7 +2,17 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Archive, ArrowLeft, CornerDownRight, Milestone, Pause, Play, Plus, Search, Square } from 'lucide-react';
 import { PHASES, PHASE_STEPS, type RoomPhase } from '../../../packages/shared/src/contracts.js';
 import { isRecord, list, objects, string, type RecordData, type Snapshot } from './api.js';
-import { addAgentAction, archiveRoomAction, closeRoomAction, inspectTurnAction, phaseAction, requestTurnAction } from './actions.js';
+import {
+  addAgentAction,
+  archiveRoomAction,
+  closeRoomAction,
+  inspectTurnAction,
+  peerWakeAction,
+  phaseAction,
+  requestTurnAction,
+  roundRobinAction,
+  stopRoundRobinAction,
+} from './actions.js';
 import { GrantSlip } from './Approvals.js';
 import { Composer } from './Composer.js';
 import { PulsePlot, Sparkline } from './PulsePlot.js';
@@ -90,6 +100,9 @@ const SYSTEM_LABELS: Record<string, string> = {
   'room.lifecycle': 'room state',
   'room.phase': 'phase',
   'interaction.resolved': 'resolved',
+  'interaction.wake_refused': 'no turn queued',
+  'round_robin.approved': 'round robin',
+  'round_robin.ended': 'round robin',
   'tasks.planned': 'tasks planned',
   'task.claimed': 'claim',
   'task.submitted': 'submission',
@@ -269,6 +282,7 @@ export function RoomView({
   const host = seats.find((s) => s.id === room.hostSeatId);
   const messages = num(room, 'messageCount') ?? events.filter((e) => e.type === 'message').length;
   const first = num(events[0] ?? {}, 'seq') ?? 1;
+  const plan = state.roundRobins.find((p) => p.roomId === id && ['proposed', 'running'].includes(string(p, 'status')));
 
   const visible = events.filter(
     (event) =>
@@ -357,6 +371,7 @@ export function RoomView({
             <span>{typeof room.remoteConnectionId === 'string' ? 'Remote agent room' : room.workflow === 'coding' ? 'Coding room' : 'Discussion room'}</span>
             <span>Host · {host ? string(host, 'name') : shared ? 'Room owner' : 'You'}</span>
             <span>Policy v{num(room, 'policyVersion') ?? 1}</span>
+            <span>{policy.peerWake === true ? 'Agents can wake each other' : 'Host-led turns'}</span>
           </div>
           <ol className="stages room-phase" aria-label={`Phase ${phaseAt + 1} of ${PHASES.length}: ${phaseLabel(phase)}`}>
             {PHASES.map((p, i) => (
@@ -551,7 +566,8 @@ export function RoomView({
             ))}
           </ul>
         </section>
-        {!shared && <RoomControls room={room} state={state} seats={seats} names={names} openAction={openAction} />}
+        {!shared && plan && <RoundRobinPanel plan={plan} state={state} names={names} openAction={openAction} />}
+        {!shared && <RoomControls room={room} state={state} seats={seats} names={names} planOpen={!!plan} openAction={openAction} />}
       </aside>
     </>
   );
@@ -652,21 +668,70 @@ function SeatRow({
 
 type Names = { seat: (id: unknown) => string; actor: (id: unknown) => string };
 
+function RoundRobinPanel({
+  plan,
+  state,
+  names,
+  openAction,
+}: {
+  plan: RecordData;
+  state: Snapshot;
+  names: Names;
+  openAction: (action: Action) => void;
+}) {
+  const order = list(plan, 'seatIds'), queued = list(plan, 'turnIds');
+  const rounds = num(plan, 'rounds') ?? 1, total = order.length * rounds;
+  const proposed = plan.status === 'proposed';
+  const last = state.turns.find((t) => t.id === queued.at(-1));
+  const at = Math.min(last && OPEN_TURN.includes(string(last, 'status')) ? queued.length - 1 : queued.length, total - 1);
+  const round = Math.floor(at / order.length);
+  return (
+    <section className="panel" aria-labelledby="round-robin-title">
+      <div className="panel-head">
+        <h2 className="section-label" id="round-robin-title">Round robin</h2>
+        <Status kind={proposed ? 'needs' : 'live'}>{proposed ? 'Awaiting approval' : `Turn ${at + 1} of ${total}`}</Status>
+      </div>
+      <ol className="plan-order" aria-label={`Speaking order, round ${round + 1} of ${rounds}`}>
+        {order.map((seatId, i) => {
+          const k = round * order.length + i, current = !proposed && k === at;
+          return (
+            <li key={String(seatId)} className={!proposed && k < at ? 'done' : current ? 'current' : ''} aria-current={current ? 'step' : undefined}>
+              {names.seat(seatId)}
+            </li>
+          );
+        })}
+      </ol>
+      <p className="caption">
+        Round {round + 1} of {rounds}. {proposed ? 'Approve the plan in the pinned request above.' : 'Each turn starts once the one before it completes.'}
+      </p>
+      <button type="button" className="button small" onClick={() => openAction(stopRoundRobinAction(string(plan, 'roomId')))}>
+        <Square size={12} aria-hidden="true" />
+        Stop round robin
+      </button>
+    </section>
+  );
+}
+
 function RoomControls({
   room,
   state,
   seats,
   names,
+  planOpen,
   openAction,
 }: {
   room: RecordData;
   state: Snapshot;
   seats: RecordData[];
   names: Names;
+  planOpen: boolean;
   openAction: (action: Action) => void;
 }) {
   const id = string(room, 'id');
   const open = room.lifecycle === 'active';
+  const ended = roomEnded(room);
+  const policy = isRecord(room.policy) ? room.policy : {};
+  const peerWake = policy.peerWake === true;
   const obligations = state.interactions.filter((i) => i.roomId === id && i.status !== 'resolved');
   return (
     <details className="panel controls">
@@ -753,6 +818,17 @@ function RoomControls({
           }
         >
           Transfer host
+        </button>
+        <button
+          type="button"
+          className="button small"
+          disabled={ended || planOpen || !seats.some((s) => s.role !== 'observer')}
+          onClick={() => openAction(roundRobinAction(id, seats, num(policy, 'maxRounds') ?? 6))}
+        >
+          Round robin
+        </button>
+        <button type="button" className="button small" disabled={ended} onClick={() => openAction(peerWakeAction(id, peerWake))}>
+          {peerWake ? 'Stop agent wakes' : 'Allow agent wakes'}
         </button>
       </div>
       <h3 className="section-label">Open obligations</h3>
@@ -1085,7 +1161,7 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
     return {
       variant: 'turn',
       author: string(seat ?? {}, 'name', 'Seat'),
-      meta: turn.attemptId ? 'Coding turn' : 'Turn',
+      meta: turn.attemptId ? 'Coding turn' : turn.roundRobinId ? 'Round-robin turn' : turn.peerWake === true ? 'Woken by an agent' : 'Turn',
       seatId: seat ? string(seat, 'id') : undefined,
       body: (
         <>
@@ -1276,6 +1352,17 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `Host transferred to ${seat(d.seatId)}`;
     case 'interaction.resolved':
       return 'An open question was resolved';
+    case 'interaction.wake_refused': {
+      const asked = ctx.state.interactions.find((i) => i.id === d.interactionId);
+      return `No turn queued for ${asked ? seat(asked.recipientId) : 'an agent'} · ${string(d, 'reason')}`;
+    }
+    case 'round_robin.approved':
+      return `Round robin approved · ${list(d, 'seatIds').map(seat).join(' → ')} · ${String(d.rounds)} ${d.rounds === 1 ? 'round' : 'rounds'}`;
+    case 'round_robin.ended': {
+      const turns = `${String(d.turns)} ${d.turns === 1 ? 'turn' : 'turns'}`;
+      const how = d.status === 'completed' ? `completed · ${turns}` : d.status === 'declined' ? 'declined' : `stopped after ${turns}`;
+      return `Round robin ${how}${typeof d.reason === 'string' ? ` · ${d.reason}` : ''}`;
+    }
     case 'tasks.planned':
       return `Tasks planned · ${list(d, 'taskIds').join(', ')}`;
     case 'task.claimed':

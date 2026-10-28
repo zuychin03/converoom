@@ -137,9 +137,30 @@ export interface Turn {
   attemptId?: string;
   interactionId?: string;
   permissionRequestId?: string;
+  roundRobinId?: string;
+  roundRobinIndex?: number;
+  peerWake?: boolean;
   error?: string;
   inspection?: { finding: 'acted' | 'not_acted' | 'unclear'; note: string; at: number; by: string };
 }
+export interface RoundRobinPlan {
+  id: string;
+  roomId: string;
+  seatIds: string[];
+  rounds: number;
+  prompt: string;
+  digest: string;
+  status: 'proposed' | 'running' | 'completed' | 'stopped' | 'declined';
+  proposedBy: string;
+  createdAt: number;
+  turnIds: string[];
+  requestId?: string;
+  approvedBy?: string;
+  approvedAt?: number;
+  endedAt?: number;
+  reason?: string;
+}
+export const OPEN_PLANS: RoundRobinPlan['status'][] = ['proposed', 'running'];
 export interface RecordFilter {
   roomId?: string;
   seatId?: string;

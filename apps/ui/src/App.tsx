@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Moon, RefreshCw, Search, Sun, Wifi, WifiOff } from 'lucide-react';
 import { ApiError, createClient, isRecord, string, type RecordData, type Snapshot } from './api.js';
-import { archiveRoomAction, closeRoomAction, createRoomAction, joinRoomAction, phaseAction, requestTurnAction } from './actions.js';
+import {
+  archiveRoomAction,
+  closeRoomAction,
+  createRoomAction,
+  joinRoomAction,
+  peerWakeAction,
+  phaseAction,
+  requestTurnAction,
+  roundRobinAction,
+  stopRoundRobinAction,
+} from './actions.js';
 import { PHASE_STEPS, type RoomPhase } from '../../../packages/shared/src/contracts.js';
 import { ApprovalQueue } from './Approvals.js';
 import { CommandIndex, type IndexItem } from './CommandIndex.js';
@@ -237,6 +247,17 @@ export function App() {
         list.push({ id: 'close', group: 'Actions', label: 'Close room…', hint, run: () => setAction(closeRoomAction(id)) });
       if (current === 'completed')
         list.push({ id: 'archive', group: 'Actions', label: 'Archive room…', hint, run: () => setAction(archiveRoomAction(id)) });
+      if (!roomEnded(room)) {
+        const seats = snapshot.seats.filter((s) => s.roomId === id);
+        const peerWake = isRecord(room.policy) && room.policy.peerWake === true;
+        if (snapshot.roundRobins.some((p) => p.roomId === id && ['proposed', 'running'].includes(string(p, 'status'))))
+          list.push({ id: 'round-robin-stop', group: 'Actions', label: 'Stop round robin…', hint, run: () => setAction(stopRoundRobinAction(id)) });
+        else if (seats.some((s) => s.role !== 'observer'))
+          list.push({ id: 'round-robin', group: 'Actions', label: 'Start round robin…', hint,
+            run: () => setAction(roundRobinAction(id, seats, isRecord(room.policy) ? num(room.policy, 'maxRounds') ?? 6 : 6)) });
+        list.push({ id: 'peer-wake', group: 'Actions', label: peerWake ? 'Stop agent wakes…' : 'Allow agent wakes…', hint,
+          run: () => setAction(peerWakeAction(id, peerWake)) });
+      }
       for (const seat of snapshot.seats.filter((s) => s.roomId === id && s.mode === 'managed' && s.consent === true && turnTarget(s)))
         list.push({
           id: `turn-${string(seat, 'id')}`,

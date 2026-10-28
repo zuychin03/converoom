@@ -130,6 +130,9 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     'interaction.read': (d) => end(mention(d.interactionId, 'Read')),
     'interaction.responded': (d) => end(mention(d.interactionId, 'Answered') + (d.responseId ? ' with ' + ref(d.responseId) : '')),
     'interaction.resolved': (d) => end(mention(d.interactionId, 'Resolved')),
+    'interaction.wake_refused': (d) => reason(mention(d.interactionId, 'No turn queued for'), d.reason),
+    'round_robin.ended': (d) => d.status === 'completed' ? `Round robin completed after ${plural(Number(d.turns), 'turn')}.`
+      : reason(d.status === 'declined' ? 'Round robin declined' : `Round robin stopped after ${plural(Number(d.turns), 'turn')}`, d.reason),
     'turn.queued': (d) => `Turn requested for ${seatName(d.seatId)}.`,
     'turn.dispatching': (d) => `Dispatch committed for ${turn(d.turnId)}.`,
     'turn.started': (d) => `${capital(turn(d.turnId))} started${d.externalPolling ? ', claimed by a polling agent' : ''}.`,
@@ -139,7 +142,7 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     'turn.uncertain': (d) => reason(`${capital(turn(d.turnId))} is uncertain`, d.error),
     'turn.cancel_requested': (d) => `Cancellation requested for ${turn(d.turnId)}.`,
     'turn.inspected': (d) => `${capital(turn(d.turnId))} was inspected: ${FINDINGS[String(d.finding)] ?? 'finding recorded'}.`,
-    'permission.granted': (d) => `Approved ${outcome(d, true)}.`,
+    'permission.granted': (d) => `Approved ${outcome(d, true)}${d.roundRobinId ? ' under the approved round robin' : ''}.`,
     'permission.denied': (d) => `Denied ${outcome(d, false)}.`,
     'permission.cancelled': (d) => `${capital(request(d.requestId))} was cancelled.`,
     'permission.expired': (d) => `${capital(request(d.requestId))} expired unanswered.`,
@@ -187,6 +190,10 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     if (e.type === 'turn.queued' && typeof d.prompt === 'string')
       return { title: actor + ' · turn requested for ' + seatName(d.seatId), body: [fenced(d.prompt)] };
     if (e.type === 'room.budget_exhausted') return { title: actor + ' · budget used up', body: exhausted(d) };
+    if (e.type === 'round_robin.approved') return { title: actor + ' · round robin approved', body: [
+      `Speakers in order: ${items(d.seatIds).map(seatName).join(', ')}. ${plural(Number(d.rounds), 'round')}, ` +
+        `${plural(items(d.seatIds).length * Number(d.rounds), 'turn')}, one at a time. The approval covers each managed turn in the plan.`,
+      ...(typeof d.prompt === 'string' ? [fenced(d.prompt)] : [])] };
     if (e.type === 'room.lifecycle' && d.lifecycle === 'cancelled') return { title: actor + ' · room cancelled', body: [
       ...(d.reason ? [end('Reason: ' + inline(d.reason))] : []), 'New turns are refused and the room cannot reopen. Nothing was approved or accepted.',
       ...handoff(record(d.handoff))] };

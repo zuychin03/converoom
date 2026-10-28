@@ -115,6 +115,34 @@ describe('local identity boundary', () => {
       expect.objectContaining({ lifecycle: 'archived', previous: 'completed' }),
     ]);
   });
+  it('runs turn policies from the browser and returns the open plan with the room state', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'converoom-http-'));
+    cleanup.push(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }));
+    const runtime = await createRuntime(join(dir, 'data'), { noScheduler: true });
+    cleanup.push(() => runtime.stop());
+    const server = await createServer(runtime, { port: 0, pairingCode: 'local-pair-code', controlToken: 'installation-fixture-token' });
+    cleanup.push(() => server.close());
+    const headers = { host: new URL(server.url).host, origin: server.url };
+    const pair = await server.app.inject({ method: 'POST', url: '/api/pair', headers, payload: { code: 'local-pair-code' } });
+    const cookie = String(pair.headers['set-cookie']).split(';')[0];
+    const session = await server.app.inject({ method: 'GET', url: '/api/session', headers: { ...headers, cookie } });
+    const human = async (name: string, args: Record<string, unknown>) => (await server.app.inject({ method: 'POST', url: '/api/commands',
+      headers: { ...headers, cookie, 'x-csrf-token': session.json().csrf }, payload: { name, args: { ...args, clientKey: name } } })).json();
+    const room = (await human('room_create', { title: 'Policies', objective: 'Pick a storage engine' })).result;
+    expect(room.policy).toMatchObject({ peerWake: true });
+    const seat = (await human('seat_add', { roomId: room.id, name: 'Critic', product: 'codex', mode: 'managed' })).result;
+    await human('seat_consent', { roomId: room.id, seatId: seat.id, consent: true });
+    expect((await human('policy_update', { roomId: room.id, policy: { peerWake: false } })).result.policy).toMatchObject({ peerWake: false });
+    const plan = (await human('round_robin_propose', { roomId: room.id, seatIds: [seat.id], rounds: 2, prompt: 'Argue it out' })).result;
+    expect(plan).toMatchObject({ status: 'running', approvedBy: expect.any(String) });
+    const state = (await server.app.inject({ method: 'GET', url: '/api/state?room=' + room.id, headers: { ...headers, cookie } })).json();
+    expect(state.roundRobins).toEqual([expect.objectContaining({ id: plan.id, status: 'running', turnIds: [expect.any(String)] })]);
+    expect(state.turns).toEqual([expect.objectContaining({ roundRobinId: plan.id, roundRobinIndex: 0, status: 'queued' })]);
+    expect((await human('round_robin_stop', { roomId: room.id, reason: 'Enough heard' })).result).toMatchObject({ status: 'stopped' });
+    const exported = (await human('room_export', { roomId: room.id })).result;
+    expect(exported.records.filter((r: { kind: string }) => r.kind === 'round_robin'))
+      .toEqual([expect.objectContaining({ id: plan.id, value: expect.objectContaining({ status: 'stopped', reason: 'Enough heard' }) })]);
+  });
   it('routes interrupted command inspection and clearing to the paired human only', async () => {
     const { server, runtime, headers } = await fixture();
     const pair = await server.app.inject({ method: 'POST', url: '/api/pair', headers, payload: { code: 'local-pair-code' } });

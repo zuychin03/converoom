@@ -95,6 +95,32 @@ it('records lifecycle and phase changes and a cancellation handoff in the transc
   } finally { await runtime.stop(); await rm(dir, { recursive: true, force: true }); }
 }, 30000);
 
+it('records agent wakes and round robins in the transcript', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'converoom-transcript-'));
+  const runtime = await createRuntime(dir, { noScheduler: true });
+  try {
+    const owner = humanIdentity(runtime);
+    const call = <T = ToolArgs>(name: string, args: ToolArgs, actor: Actor = owner) => runtime.core.dispatch(actor, name, args) as Promise<T>;
+    const room = await call<Room>('room_create', { title: 'Storage', objective: 'Pick a storage engine' });
+    const host = await call<Seat>('seat_add', { roomId: room.id, product: 'claude', name: 'Host', role: 'host' });
+    const critic = await call<Seat>('seat_add', { roomId: room.id, product: 'codex', mode: 'managed', name: 'Critic' });
+    const quiet = await call<Seat>('seat_add', { roomId: room.id, product: 'cursor', mode: 'managed', name: 'Quiet' });
+    await call('seat_consent', { roomId: room.id, seatId: critic.id, consent: true });
+    const agent: Actor = { kind: 'agent', principalId: host.principalId, ownerId: host.ownerId };
+    await call('room_post', { roomId: room.id, text: 'Is SQLite enough?', mentions: [{ seatId: critic.id, intent: 'question' }] }, agent);
+    await call('room_post', { roomId: room.id, text: 'Review the plan', mentions: [{ seatId: quiet.id, intent: 'review' }] }, agent);
+    await call('round_robin_propose', { roomId: room.id, seatIds: [critic.id], rounds: 1, prompt: 'Argue it out' });
+    await call('round_robin_stop', { roomId: room.id, reason: 'Enough heard' });
+    const markdown = exportTranscript(await call<RoomExport>('room_export', { roomId: room.id }));
+    expect(markdown).toMatch(/ · Host \(Claude Code seat\) · turn requested for Critic \(Codex seat\)\n\n```text\nHost sent you a question in message #\d+\./);
+    expect(markdown).toMatch(/No turn queued for the review in #\d+: Target owner consent required\./);
+    expect(markdown).toContain(' · Owner · round robin approved\n\nSpeakers in order: Critic (Codex seat). 1 round, 1 turn, one at a time. ' +
+      'The approval covers each managed turn in the plan.\n\n```text\nArgue it out\n```');
+    expect(markdown).toMatch(/· Runtime · Approved request #\d+ \(turn execute\), scope digest `[0-9a-f]{64}`, valid until .+ under the approved round robin\./);
+    expect(markdown).toContain(' · Owner · Round robin stopped after 1 turn: Enough heard.');
+  } finally { await runtime.stop(); await rm(dir, { recursive: true, force: true }); }
+}, 30000);
+
 it('renders a shared history page from the public projection only', async () => {
   const core = createCore(createStore(':memory:'));
   const owner: Actor = { kind: 'human', principalId: 'owner', ownerId: 'owner' };

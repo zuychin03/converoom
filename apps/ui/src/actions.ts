@@ -99,6 +99,48 @@ export const phaseAction = (roomId: string, phase: RoomPhase): Action => {
   };
 };
 
+export const roundRobinAction = (roomId: string, seats: RecordData[], maxRounds: number): Action => ({
+  title: 'Start round robin',
+  command: 'round_robin_propose',
+  args: { roomId },
+  label: 'Approve and start',
+  description: 'Each speaker takes one turn per round, one at a time, and the plan keeps going if the host disconnects. Room budgets still apply.',
+  confirm: 'Starting the plan approves each managed turn in it. It stops at the first turn that does not complete, and you can stop it at any time.',
+  fields: [
+    {
+      key: 'seatIds',
+      label: 'Speakers',
+      hint: 'Tick them in speaking order.',
+      type: 'choices',
+      required: true,
+      options: seats.filter((s) => s.role !== 'observer' && s.status !== 'left').map((s) => ({ value: string(s, 'id'), label: string(s, 'name') })),
+    },
+    { key: 'rounds', label: 'Rounds', type: 'number', required: true, value: '1', min: 1, max: maxRounds },
+    { key: 'prompt', label: 'Prompt for every turn', type: 'textarea', required: true },
+  ],
+});
+
+export const stopRoundRobinAction = (roomId: string): Action => ({
+  title: 'Stop round robin',
+  command: 'round_robin_stop',
+  args: { roomId },
+  label: 'Stop plan',
+  confirm: 'No further turns are queued, and a queued turn from the plan is cancelled. A turn already running carries on until it ends or you cancel it.',
+  fields: [{ key: 'reason', label: 'Reason', hint: 'Optional. Recorded in the room history.', type: 'textarea' }],
+  danger: true,
+});
+
+export const peerWakeAction = (roomId: string, on: boolean): Action => ({
+  title: on ? 'Stop agent wakes' : 'Let agents wake each other',
+  command: 'policy_update',
+  args: { roomId, policy: { peerWake: !on } },
+  label: on ? 'Stop agent wakes' : 'Allow agent wakes',
+  confirm: on
+    ? 'Agents’ questions stay in the recipient’s inbox until the host or you request a turn. This creates a new policy version.'
+    : 'When an agent asks, reviews or challenges a managed agent, the runtime queues a turn for it, one at a time per agent. ' +
+      'Each turn still needs its owner’s grant, and hop limits and budgets apply. This creates a new policy version.',
+});
+
 export const requestTurnAction = (roomId: string, seatId: unknown, interactionId?: string, remote = false): Action => ({
   title: interactionId ? 'Request linked reply' : remote ? 'Request participant turn' : 'Request managed turn',
   command: 'turn_request',
@@ -160,6 +202,14 @@ export const grantAction = (permission: RecordData): Action => {
       args,
       label: 'Transfer host',
       confirm: `Make the requested seat this room's host for scope digest ${digest}. Its agent can then set the agenda, propose decisions, request and cancel turns, and pause, resume or close the room. This authorises no local execution: every turn still needs its own grant. The current host becomes a member.`,
+    };
+  if (permission.action === 'round_robin')
+    return {
+      title: 'Approve round robin',
+      command: 'permission_grant',
+      args,
+      label: 'Approve plan',
+      confirm: `Approve the round-robin plan with scope digest ${digest}. This approves each managed turn in the plan, one at a time in the listed order. Room budgets still apply, the plan stops at the first turn that does not complete, and you can stop it at any time.`,
     };
   return {
     title: 'Grant this exact request',

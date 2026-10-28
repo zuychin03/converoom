@@ -77,6 +77,8 @@ it('restores a valid redacted HTTP export as read-only history and refuses to re
     const room = await runtime.core.dispatch(owner, 'room_create', { title: 'Redacted roundtrip', objective: 'Retain safe history' }) as ToolArgs;
     const seat = await runtime.core.dispatch(owner, 'seat_add', { roomId: room.id, product: 'codex', mode: 'managed', name: 'Historical worker' }) as ToolArgs;
     runtime.core.store.put('seat', String(seat.id), { ...seat, apiKey: 'fixture-only' });
+    await runtime.core.dispatch(owner, 'seat_consent', { roomId: room.id, seatId: seat.id, consent: true });
+    const plan = await runtime.core.dispatch(owner, 'round_robin_propose', { roomId: room.id, seatIds: [seat.id], rounds: 1, prompt: 'Keep going' }) as ToolArgs;
     runtime.core.store.append(String(room.id), 'fixture', 'owner', { apiKey: 'fixture-only', nested: { credential: 'fixture-only' }, visible: 'Keep this' });
     const e = await humanCommand(server.url, 'history-fixture', 'room_export', { roomId: room.id }) as History;
     expect(e.digest).toBe(scopeDigest({ records: e.records, events: e.events }));
@@ -88,6 +90,7 @@ it('restores a valid redacted HTTP export as read-only history and refuses to re
     expect(restored.get('room', String(room.id))).toMatchObject({ lifecycle: 'archived', phase: 'deliberation' });
     expect(restored.get('room', String(room.id))).not.toHaveProperty('status');
     expect(restored.get('seat', String(seat.id))).toMatchObject({ status: 'left', consent: false });
+    expect(restored.get('round_robin', String(plan.id))).toMatchObject({ status: 'stopped', turnIds: [expect.any(String)] });
     expect(restored.get('identity', 'human')).toMatchObject(owner);
     expect(restored.events(String(room.id))).toHaveLength(e.events.length);
     expect(restored.list('bridge')).toHaveLength(0);

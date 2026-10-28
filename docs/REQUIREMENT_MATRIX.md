@@ -17,7 +17,7 @@ The agent expansion adds Antigravity, Kiro, Qoder and Grok Build to FR-01/05/11/
 | FR-07 | Open V1 acceptance | Mutations shall have payload-bound idempotency keys and ordered room events. |
 | FR-08 | Open V1 acceptance | Directed questions shall create durable interactions using stable recipient IDs. |
 | FR-09 | Open V1 acceptance | Publication, delivery, read, response and resolution shall be separately recorded. |
-| FR-10 | Open V1 acceptance | Turn dispatch shall enforce host policy, target-owner consent, budgets and one active prompt per seat. |
+| FR-10 | Open V1 acceptance; round-robin and bounded-peer policies locally implemented with fixture tests | Turn dispatch shall enforce host policy, target-owner consent, budgets and one active prompt per seat. |
 | FR-11 | Open V1 acceptance | At least one mixed-product managed workflow shall be supported through tested adapters. |
 | FR-12 | Open V1 acceptance | Polling seats shall retain pending work and receive bounded read/wait tools. |
 | FR-13 | Open V1 acceptance | The host shall see unresolved obligations and propose a decision preserving dissent and evidence. |

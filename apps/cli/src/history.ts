@@ -9,7 +9,7 @@ interface History {
   events: Event[];
 }
 const kinds = new Set(['room', 'seat', 'interaction', 'turn', 'policy', 'permission',
-  'manifest', 'verification', 'review', 'candidate', 'task']);
+  'manifest', 'verification', 'review', 'candidate', 'task', 'round_robin']);
 const object = (value: unknown): value is ToolArgs => !!value && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 256;
 function validate(value: unknown): History {
@@ -69,6 +69,7 @@ export async function restoreHistory(input: string, dataDir: string): Promise<vo
           }
           if (r.kind === 'seat') { value.consent = false; value.status = 'left'; }
           if (r.kind === 'permission') value.status = 'denied';
+          if (r.kind === 'round_robin' && ['proposed', 'running'].includes(String(value.status))) value.status = 'stopped';
           store.put(r.kind, r.id, value);
         }
         store.importEvents(redactTransport(e.events));
