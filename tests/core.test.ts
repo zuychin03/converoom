@@ -285,6 +285,19 @@ describe('room authority and interactions', () => {
       call('turn_request', { roomId: r.id, seatId: s.id, prompt: 'Run' }, agent),
     ).rejects.toThrow(/pausing/i);
   });
+  it('withdraws the approval request of a queued turn when it is cancelled', async () => {
+    const r = await room();
+    const s = await seat(r.id);
+    await call('seat_consent', { roomId: r.id, seatId: s.id, consent: true });
+    const t = await call<Turn>('turn_request', { roomId: r.id, seatId: s.id, prompt: 'Run' }, agent);
+    await call('turn_cancel', { roomId: r.id, turnId: t.id });
+    expect(store.get<Turn>('turn', t.id)?.status).toBe('cancelled');
+    expect(store.get<ToolArgs>('permission', t.permissionRequestId!)?.status).toBe('cancelled');
+    expect(store.events(r.id, 0, 100).filter((e) => e.type === 'permission.cancelled')).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ requestId: t.permissionRequestId }) }),
+    ]);
+    await expect(call('permission_grant', { requestId: t.permissionRequestId })).rejects.toThrow();
+  });
   it('preserves queued turns and approvals across pause and resume', async () => {
     const r = await room();
     const target = await seat(r.id);

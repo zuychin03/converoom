@@ -902,6 +902,7 @@ export function createCore(store: Store): Core {
     if (['queued', 'running', 'dispatching'].includes(t.status)) {
       t.status = t.status === 'queued' ? 'cancelled' : 'cancelling';
       if (t.status === 'cancelling') t.cancelRequestedAt = Date.now();
+      else cancelPermission(store, t.permissionRequestId);
     }
     store.put('turn', t.id, t);
     ev(a, r.id, 'turn.cancel_requested', { turnId: t.id, status: t.status });
