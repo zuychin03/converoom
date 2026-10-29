@@ -59,20 +59,21 @@ export function settlePause(store: Store, roomId: string): void {
     authority(store, { principalId: 'runtime' }, r, 'room.lifecycle', { lifecycle: 'paused', previous: 'pausing' });
   });
 }
-function cancelPermission(store: Store, id: string | undefined) {
+type Principal = Pick<Actor, 'principalId'>;
+function cancelPermission(store: Store, a: Principal, id: string | undefined) {
   const p = id ? store.get<Permission>('permission', id) : undefined;
   if (p?.status !== 'pending') return;
   store.put('permission', p.id, { ...p, status: 'cancelled' });
-  store.append(p.roomId, 'permission.cancelled', 'runtime', { requestId: p.id });
+  authority(store, a, store.get<Room>('room', p.roomId)!, 'permission.cancelled', { requestId: p.id, action: p.action, scopeDigest: p.scopeDigest });
 }
-function cancelTurn(store: Store, t: Turn, error: string, reason: string) {
+function cancelTurn(store: Store, a: Principal, t: Turn, error: string, reason: string) {
   store.put('turn', t.id, { ...t, status: 'cancelled', error });
-  cancelPermission(store, t.permissionRequestId);
+  cancelPermission(store, a, t.permissionRequestId);
   store.append(t.roomId, 'turn.cancelled', 'runtime', { turnId: t.id, reason });
 }
-function cancelQueued(store: Store, roomId: string, error: string, reason: string): Turn[] {
+function cancelQueued(store: Store, a: Principal, roomId: string, error: string, reason: string): Turn[] {
   const stopped = store.list<Turn>('turn', { roomId, status: ['queued'] });
-  for (const t of stopped) cancelTurn(store, t, error, reason);
+  for (const t of stopped) cancelTurn(store, a, t, error, reason);
   return stopped;
 }
 // A queued turn could never post its answer under these; turns accepted within the turn budget still run.
@@ -105,7 +106,7 @@ export function exhaustBudgets(store: Store, roomId: string, now = Date.now()): 
   const fresh = used.filter((b) => !r.exhaustedBudgets?.includes(b));
   if (!fresh.length && !(blocking && store.count('turn', { roomId, status: ['queued'] }))) return !!blocking;
   store.transaction(() => {
-    const stopped = blocking ? cancelQueued(store, roomId, 'Room ' + blocking + ' budget used up before the turn started', 'budget_exhausted') : [];
+    const stopped = blocking ? cancelQueued(store, { principalId: 'runtime' }, roomId, 'Room ' + blocking + ' budget used up before the turn started', 'budget_exhausted') : [];
     if (!fresh.length) return;
     store.put('room', roomId, { ...store.get<Room>('room', roomId)!, exhaustedBudgets: [...(r.exhaustedBudgets ?? []), ...fresh] });
     authority(store, { principalId: 'runtime' }, r, 'room.budget_exhausted', { budgets: fresh,
@@ -867,7 +868,7 @@ export function createCore(store: Store): Core {
     const r = host(a, str(x, 'roomId')), outcome = x.outcome ?? 'completed';
     if (outcome !== 'completed' && outcome !== 'cancelled') throw new E('invalid_argument', 'Outcome must be completed or cancelled');
     requireLifecycle(r, ['draft', 'active', 'pausing', 'paused'], 'close');
-    const stopped = cancelQueued(store, r.id, 'Room ' + outcome + ' before the turn started', 'room_' + outcome);
+    const stopped = cancelQueued(store, a, r.id, 'Room ' + outcome + ' before the turn started', 'room_' + outcome);
     cancelStarted(r);
     return setLifecycle(a, room(r.id), outcome, { ...reasonOf(x), ...(outcome === 'cancelled' ? { handoff: handoff(store, r, stopped) } : {}) });
   }));
@@ -902,7 +903,7 @@ export function createCore(store: Store): Core {
     if (['queued', 'running', 'dispatching'].includes(t.status)) {
       t.status = t.status === 'queued' ? 'cancelled' : 'cancelling';
       if (t.status === 'cancelling') t.cancelRequestedAt = Date.now();
-      else cancelPermission(store, t.permissionRequestId);
+      else cancelPermission(store, a, t.permissionRequestId);
     }
     store.put('turn', t.id, t);
     ev(a, r.id, 'turn.cancel_requested', { turnId: t.id, status: t.status });
@@ -1074,9 +1075,9 @@ export function createCore(store: Store): Core {
     if (!plan) throw new E('round_robin', 'No round-robin plan is open', 409);
     for (const id of plan.turnIds) {
       const t = store.get<Turn>('turn', id);
-      if (t?.status === 'queued') cancelTurn(store, t, 'Round robin stopped before the turn started', 'round_robin_stopped');
+      if (t?.status === 'queued') cancelTurn(store, a, t, 'Round robin stopped before the turn started', 'round_robin_stopped');
     }
-    cancelPermission(store, plan.requestId);
+    cancelPermission(store, a, plan.requestId);
     endPlan(store, a, plan, 'stopped', x.reason === undefined ? undefined : redactPublic(str(x, 'reason', 2000)));
     return store.get<RoundRobinPlan>('round_robin', plan.id);
   }));

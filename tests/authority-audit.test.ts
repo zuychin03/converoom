@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { createServer, humanIdentity } from '../apps/daemon/src/server.js';
 import { createStore, scopeDigest } from '../packages/store/src/index.js';
-import { createCore } from '../packages/core/src/index.js';
+import { createCore, exhaustBudgets } from '../packages/core/src/index.js';
 import type { Actor, Core, HumanMembership, Room, Seat, Store, ToolArgs, Turn } from '../packages/shared/src/contracts.js';
 
 const owner: Actor = { kind: 'human', principalId: 'owner-principal', ownerId: 'owner' };
@@ -68,6 +68,30 @@ it('records the human actor, an action digest, scope, expiry and policy for ever
       expect([owner.principalId, guest.principalId], type).toContain(e.actorId);
     }
   }
+});
+
+it.each<[string, (turn: Turn, lead: Actor) => unknown, (lead: Actor) => string]>([
+  ['its turn is cancelled', (turn) => call('turn_cancel', { roomId: room.id, turnId: turn.id }), () => owner.principalId],
+  ['the room closes', () => call('room_close', { roomId: room.id }), () => owner.principalId],
+  ['the agent host stops the round robin it proposed', async (turn, lead) => {
+    await call('round_robin_propose', { roomId: room.id, seatIds: [turn.seatId], rounds: 1, prompt: 'Debate' }, lead);
+    await call('round_robin_stop', { roomId: room.id }, lead);
+  }, (lead) => lead.principalId],
+  ['a room budget is used up', () => exhaustBudgets(store, room.id, Date.now() + 86400000), () => 'runtime'],
+])('records who withdrew a pending approval, and what it covered, when %s', async (_, stop, actor) => {
+  const worker = await call<Seat>('seat_add', { roomId: room.id, product: 'codex', mode: 'managed', name: 'Worker' });
+  const host = await call<Seat>('seat_add', { roomId: room.id, product: 'claude', mode: 'polling', name: 'Lead', role: 'host' });
+  await call('seat_consent', { roomId: room.id, seatId: worker.id, consent: true });
+  const lead: Actor = { kind: 'agent', principalId: host.principalId, ownerId: owner.ownerId };
+  await stop(await call<Turn>('turn_request', { roomId: room.id, seatId: worker.id, prompt: 'Review' }), lead);
+  const withdrawn = store.events(room.id, 0, 1000).filter((e) => e.type === 'permission.cancelled');
+  expect(withdrawn).toHaveLength(1);
+  const { actionDigest, policyVersion, ...content } = withdrawn[0].data as ToolArgs;
+  expect(store.get('permission', String(content.requestId))).toMatchObject({ status: 'cancelled', action: content.action, scopeDigest: content.scopeDigest });
+  expect(content).toEqual({ requestId: expect.any(String), action: expect.any(String), scopeDigest: expect.any(String) });
+  expect(actionDigest).toBe(scopeDigest(content));
+  expect(policyVersion).toEqual(expect.any(Number));
+  expect(withdrawn[0].actorId).toBe(actor(lead));
 });
 
 it('refuses every authority change from an agent, so agent tools cannot add to or rewrite the audit trail', async () => {
