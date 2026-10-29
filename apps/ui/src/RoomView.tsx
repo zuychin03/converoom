@@ -11,6 +11,8 @@ import {
   phaseAction,
   requestTurnAction,
   roundRobinAction,
+  saveTemplateAction,
+  seatProfileAction,
   stopRoundRobinAction,
 } from './actions.js';
 import { GrantSlip } from './Approvals.js';
@@ -37,6 +39,7 @@ import {
   OPEN_TURN,
   activity,
   capabilityLine,
+  profileLabel,
   data,
   fmtBytes,
   fmtClock,
@@ -92,6 +95,7 @@ const SYSTEM_LABELS: Record<string, string> = {
   'seat.joined': 'seat joined',
   'seat.left': 'seat left',
   'seat.consent': 'consent',
+  'seat.profile': 'model and effort',
   'policy.changed': 'limits',
   'host.transferred': 'host',
   'room.paused': 'paused',
@@ -559,6 +563,7 @@ export function RoomView({
                 selected={selected === seat.id}
                 onSelect={setSelected}
                 requestTurn={() => requestTurn(seat)}
+                editProfile={() => openAction(seatProfileAction(seat, state.discovery))}
                 shared={shared}
                 remote={seat.ownerId !== room.ownerId}
                 ownerLabel={string(state.members.find((m) => m.ownerId === seat.ownerId) ?? {}, 'displayName', 'Local room owner')}
@@ -581,6 +586,7 @@ function SeatRow({
   selected,
   onSelect,
   requestTurn,
+  editProfile,
   shared,
   remote,
   ownerLabel,
@@ -592,6 +598,7 @@ function SeatRow({
   selected: boolean;
   onSelect: (id: string | undefined) => void;
   requestTurn: () => void;
+  editProfile: () => void;
   shared?: boolean;
   remote?: boolean;
   ownerLabel: string;
@@ -638,6 +645,7 @@ function SeatRow({
         Owner · {ownerLabel}<br />
         {string(seat, 'product')} ·{' '}
         {managed ? 'new managed session per turn' : 'polls its inbox, outside runtime control'}<br />
+        {managed && <>Model and effort · {profileLabel(seat.profile) || 'agent defaults'}<br /></>}
         {capabilityLine(seat)}
       </p>
       {(managed || shared || remote) && turnTarget(seat) && (
@@ -659,6 +667,11 @@ function SeatRow({
             <Play size={12} aria-hidden="true" />
             Request turn
           </button>
+          {managed && !shared && !remote && (
+            <button type="button" className="button small" onClick={editProfile}>
+              Model and effort
+            </button>
+          )}
         </div>
       )}
       {error && <ErrorNotice dismiss={() => setError('')}>{error}</ErrorNotice>}
@@ -823,12 +836,15 @@ function RoomControls({
           type="button"
           className="button small"
           disabled={ended || planOpen || !seats.some((s) => s.role !== 'observer')}
-          onClick={() => openAction(roundRobinAction(id, seats, num(policy, 'maxRounds') ?? 6))}
+          onClick={() => openAction(roundRobinAction(id, seats, num(policy, 'maxRounds') ?? 6, room.template))}
         >
           Round robin
         </button>
         <button type="button" className="button small" disabled={ended} onClick={() => openAction(peerWakeAction(id, peerWake))}>
           {peerWake ? 'Stop agent wakes' : 'Allow agent wakes'}
+        </button>
+        <button type="button" className="button small" onClick={() => openAction(saveTemplateAction(id))}>
+          Save as template
         </button>
       </div>
       <h3 className="section-label">Open obligations</h3>
@@ -1329,7 +1345,7 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
   const seat = (id: unknown) => ctx.names.seat(id);
   switch (type) {
     case 'room.created':
-      return `${d.lifecycle === 'draft' ? 'Room drafted' : 'Room opened'} · ${string(d, 'objective')}`;
+      return `${d.lifecycle === 'draft' ? 'Room drafted' : 'Room opened'}${isRecord(d.template) ? ' from ' + string(d.template, 'name') : ''} · ${string(d, 'objective')}`;
     case 'room.lifecycle':
       return LIFECYCLE_LINES[string(d, 'lifecycle')]?.(d) ?? `Room ${string(d, 'lifecycle')}`;
     case 'room.phase':
@@ -1340,6 +1356,8 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `${seat(d.seatId)} left the room`;
     case 'seat.consent':
       return d.consent ? `Turn requests allowed for ${seat(d.seatId)}` : `Turn requests turned off for ${seat(d.seatId)}`;
+    case 'seat.profile':
+      return profileLabel(d.profile) ? `Model and effort for ${seat(d.seatId)} · ${profileLabel(d.profile)}` : `Model and effort for ${seat(d.seatId)} cleared · agent defaults`;
     case 'room.paused':
       return 'Room paused · new dispatch blocked';
     case 'room.open':

@@ -51,6 +51,35 @@ export interface Room {
   rounds?: number;
   remoteConnectionId?: string;
   exhaustedBudgets?: RoomBudget[];
+  template?: { id: string; name: string; rounds?: number };
+}
+// FR-56: SPEC's levels; each adapter maps them onto the values the vendor advertises and refuses any it cannot match.
+export type Effort = 'low' | 'medium' | 'high' | 'max';
+export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'max'];
+export interface SeatProfile { model?: string; effort?: Effort }
+// The vendor's own values, as the adapter set them.
+export interface AppliedProfile { model?: string; effort?: string }
+export interface TemplateSlot {
+  name: string;
+  role: 'host' | 'member' | 'observer';
+  mode: 'managed' | 'polling';
+  product?: Product;
+  profile?: SeatProfile;
+}
+export interface RoomTemplate {
+  id: string;
+  name: string;
+  description: string;
+  workflow: 'discussion' | 'coding';
+  agenda: string;
+  slots: TemplateSlot[];
+  // Budgets only ever lower the defaults.
+  policy: { peerWake: boolean } & Partial<Record<'maxRounds' | 'maxMessages' | 'maxDurationMs' | 'maxTurnMs', number>>;
+  // Suggested for the owner to start; a template never starts a plan itself.
+  roundRobin?: { rounds: number };
+  builtIn?: true;
+  ownerId?: string;
+  createdAt?: number;
 }
 export interface Seat {
   id: string;
@@ -66,6 +95,7 @@ export interface Seat {
   capabilities: { declared: string[]; probed: string[]; tested: string[] };
   sessionId?: string;
   membershipGeneration?: number;
+  profile?: SeatProfile;
 }
 export interface HumanMembership {
   id: string;
@@ -140,6 +170,9 @@ export interface Turn {
   roundRobinId?: string;
   roundRobinIndex?: number;
   peerWake?: boolean;
+  // Frozen from the seat when requested, so the grant covers it.
+  profile?: SeatProfile;
+  applied?: AppliedProfile;
   error?: string;
   inspection?: { finding: 'acted' | 'not_acted' | 'unclear'; note: string; at: number; by: string };
 }

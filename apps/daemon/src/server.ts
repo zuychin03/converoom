@@ -9,6 +9,7 @@ import {
   type Actor,
   type Product,
   type Room,
+  type RoomTemplate,
   type Runtime,
   type Seat,
   type Turn,
@@ -25,6 +26,7 @@ import { installationAuthority } from '../../../packages/core/src/audit.js';
 import type { SharedArtefact } from '../../../packages/shared/src/contracts.js';
 import { hash, humanIdentity, issueBridgeCredential, revokeBridgeCredential, secret } from './bridges.js';
 import { latestDiscovery } from '../../cli/src/discovery.js';
+import { BUILT_IN_TEMPLATES } from '../../../packages/core/src/templates.js';
 export { humanIdentity, issueBridgeCredential, ownerIdentity, revokeBridgeCredential } from './bridges.js';
 
 export const VERSION = '0.2.0';
@@ -82,6 +84,7 @@ export function snapshot(runtime: Runtime, roomId?: string): Record<string, unkn
     : ENDED_ROOMS.includes(r.lifecycle) ? r : { ...r, lastEventAt: lastEventAt(r) }));
   state.events = room ? redact(store.events(room.id, Math.max(0, room.seq - ROOM_EVENT_PAGE), ROOM_EVENT_PAGE)) : [];
   state.discovery = latestDiscovery(runtime.dataDir);
+  state.templates = redact([...BUILT_IN_TEMPLATES, ...store.list<RoomTemplate>('template').sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))]);
   state.sharedArtefacts = room ? store.list<SharedArtefact>('shared_artefact', { roomId: room.id }).map(artefactMetadata) : [];
   state.invitations = room ? store.list<Record<string, unknown>>('invitation', { roomId: room.id }).map((row) => {
     const { codeHash: _hash, ...metadata } = row; return metadata;
@@ -248,6 +251,9 @@ export async function createServer(
     'adapter_autoconnect',
     'seat_add',
     'seat_consent',
+    'seat_profile_set',
+    'template_save',
+    'template_delete',
     'policy_update',
     'permission_grant',
     'permission_deny',

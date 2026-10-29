@@ -35,6 +35,10 @@ const items = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const capital = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
 const end = (v: string) => (/[.!?]$/.test(v) ? v : v + '.');
 const reason = (base: string, why: unknown) => end(why ? base + ': ' + inline(why) : base);
+const profile = (v: unknown) => {
+  const p = record(v);
+  return [p.model ? code(p.model) : '', p.effort ? inline(p.effort) + ' effort' : ''].filter(Boolean).join(' at ');
+};
 const plural = (n: number, word: string) => n + ' ' + word + (n === 1 ? '' : 's');
 const FINDINGS: Record<string, string> = { acted: 'the agent acted', not_acted: 'the agent did not act', unclear: 'still unclear' };
 
@@ -114,12 +118,15 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     d.scopeDigest ? ', scope digest ' + code(d.scopeDigest) : '', expiry && d.expiresAt ? ', valid until ' + time(d.expiresAt) : '',
   ].join('');
   const SYSTEM: Record<string, (d: ToolArgs) => string> = {
-    'room.created': (d) => d.lifecycle === 'draft' ? 'Room drafted.' : 'Room opened.',
+    'room.created': (d) => (d.lifecycle === 'draft' ? 'Room drafted' : 'Room opened') +
+      (record(d.template).name ? ' from the ' + inline(record(d.template).name) + ' template.' : '.'),
     'room.lifecycle': (d) => LIFECYCLE[String(d.lifecycle)]?.(d) ?? end('Room ' + inline(d.lifecycle)),
     'room.phase': (d) => reason(`Phase moved from ${phase(d.previous)} to ${phase(d.phase)}`, d.reason),
     'seat.joined': (d) => `${seatLabel(d)} joined as a ${d.mode === 'managed' ? 'managed' : 'polling'} ${inline(d.role)}.`,
     'seat.left': (d) => `${seatName(d.seatId)} left the room.`,
     'seat.consent': (d) => d.consent === true ? `Turn requests allowed for ${seatName(d.seatId)}.` : `Turn requests turned off for ${seatName(d.seatId)}.`,
+    'seat.profile': (d) => profile(d.profile) ? `Model and effort for ${seatName(d.seatId)} set to ${profile(d.profile)}.`
+      : `Model and effort for ${seatName(d.seatId)} cleared; the agent's own defaults apply.`,
     'room.paused': () => 'Room paused; new dispatch is blocked.',
     'room.open': () => 'Room resumed.',
     'room.closed': () => 'Room closed.',
@@ -135,7 +142,8 @@ export function transcriptMarkdown(t: TranscriptSource): string {
       : reason(d.status === 'declined' ? 'Round robin declined' : `Round robin stopped after ${plural(Number(d.turns), 'turn')}`, d.reason),
     'turn.queued': (d) => `Turn requested for ${seatName(d.seatId)}.`,
     'turn.dispatching': (d) => `Dispatch committed for ${turn(d.turnId)}.`,
-    'turn.started': (d) => `${capital(turn(d.turnId))} started${d.externalPolling ? ', claimed by a polling agent' : ''}.`,
+    'turn.started': (d) => `${capital(turn(d.turnId))} started${d.externalPolling ? ', claimed by a polling agent' : ''}${
+      profile(d.applied) ? ' on ' + profile(d.applied) : ''}.`,
     'turn.completed': (d) => `${capital(turn(d.turnId))} completed.`,
     'turn.failed': (d) => reason(`${capital(turn(d.turnId))} failed`, d.error),
     'turn.cancelled': (d) => `${capital(turn(d.turnId))} was cancelled.`,

@@ -1,14 +1,18 @@
 import * as acp from '@agentclientprotocol/sdk';
 import { Readable, Writable } from 'node:stream';
 import { launch } from './process.js';
-import { ConveroomError, type Product } from '../../shared/src/contracts.js';
+import { ConveroomError, type AppliedProfile, type Product, type SeatProfile } from '../../shared/src/contracts.js';
+import { PRODUCT_PROFILES } from '../../shared/src/products.js';
 import { redactPublic } from '../../store/src/index.js';
 import type { ManagedMcp } from '../../mcp/src/managed.js';
 import type { ManagedSession, PermissionHandler } from './index.js';
 import { mountAcpWorkspace } from './acp-workspace.js';
+import { offers, resolveEffort, unsupported, type Offered } from './profile.js';
 
 // Positive evidence that a prompt never began executing; any other failure after sending leaves its outcome unknown.
 export const notStarted = <T extends Error>(error: T) => Object.assign(error, { notStarted: true as const });
+// Evidence that a session refused at startup left no native process running.
+export const stopped = (error: unknown, confirmed: boolean) => confirmed && error instanceof Error ? Object.assign(error, { stopped: true as const }) : error;
 // JSON-RPC refusals of the request itself; -32000 is ACP's authentication-required code.
 const REFUSED = new Set([-32700, -32600, -32601, -32602, -32000]);
 // -32800 is an agent aborting the request, which some agents send instead of a cancelled stop reason.
@@ -30,9 +34,38 @@ export async function bounded<T>(request: Promise<T>, ms: number): Promise<T> {
 // Native login method IDs these vendors document; selecting one refuses API-key authentication.
 export const NATIVE_AUTH: Partial<Record<Product, string>> = { grok: 'cached_token', antigravity: 'oauth-personal', cursor: 'cursor_login' };
 
+const KINDS = { model: { category: 'model', ids: ['model'] }, effort: { category: 'thought_level', ids: ['thought_level', 'reasoning_effort', 'effort'] } };
+const optionFor = (options: acp.SessionConfigOption[], kind: keyof typeof KINDS) =>
+  options.find((o) => o.type === 'select' && (o.category === KINDS[kind].category || KINDS[kind].ids.includes(o.id)));
+const choices = (o: acp.SessionConfigOption): Offered[] => o.type !== 'select' ? [] : (o.options as Array<acp.SessionConfigSelectOption | acp.SessionConfigSelectGroup>)
+  .flatMap((v) => 'group' in v ? v.options : [v]).map((v) => ({ value: v.value, name: v.name }));
+
+// FR-56: the agent's advertised session config options are the only source; a choice it does not offer or does not keep is refused.
+async function applyProfile(connection: acp.ClientConnection, sessionId: string, product: Product, profile: SeatProfile,
+  initial: acp.SessionConfigOption[]): Promise<AppliedProfile> {
+  const label = PRODUCT_PROFILES[product].label;
+  let options = initial;
+  const choose = async (kind: keyof typeof KINDS, wanted: string, pick: (offered: Offered[]) => string | undefined) => {
+    const option = optionFor(options, kind);
+    if (!option) throw unsupported(`${label} offers no ${kind} choice to Converoom`);
+    const offered = choices(option), value = pick(offered);
+    if (!value) throw unsupported(kind === 'model'
+      ? `${label} does not offer the model ${wanted}. It offers: ${offers(offered.map((o) => o.value))}`
+      : `${label} does not offer ${wanted} effort. It offers: ${offers(offered.map((o) => o.value))}`);
+    if (option.currentValue !== value)
+      options = (await bounded(connection.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: option.id, value }), 30000)).configOptions;
+    const kept = optionFor(options, kind)?.currentValue;
+    if (kept !== value) throw unsupported(`${label} kept ${kind} ${String(kept)} instead of ${value}`);
+  };
+  if (profile.model) await choose('model', profile.model, (offered) => offered.find((o) => o.value === profile.model || o.name === profile.model)?.value);
+  if (profile.effort) await choose('effort', profile.effort, (offered) => resolveEffort(profile.effort!, offered));
+  const model = optionFor(options, 'model')?.currentValue, effort = optionFor(options, 'effort')?.currentValue;
+  return { ...(typeof model === 'string' ? { model } : {}), ...(typeof effort === 'string' ? { effort } : {}) };
+}
+
 export async function startAcp(
   product: Product, entry: { command: string; args: string[] }, cwd: string,
-  onPermission: PermissionHandler, env: NodeJS.ProcessEnv, readOnly: boolean, mcp?: ManagedMcp,
+  onPermission: PermissionHandler, env: NodeJS.ProcessEnv, readOnly: boolean, mcp?: ManagedMcp, profile?: SeatProfile,
 ): Promise<ManagedSession> {
   let id = '', reply = '', replyBytes = 0, active = false, closed = false, cancelled = false;
   const client = acp.client({ name: 'converoom' })
@@ -105,8 +138,9 @@ export async function startAcp(
     if (readOnly && mode) await bounded(connection.agent.request(acp.methods.agent.session.setMode, {
       sessionId: id, modeId: mode.id,
     }), 30000);
+    const applied = profile ? await applyProfile(connection, id, product, profile, session.configOptions ?? []) : undefined;
     return {
-      id, product, capabilities: ['prompt', 'cancel', ...(!readOnly ? ['client-files', 'client-terminal'] : [])],
+      id, product, ...(applied ? { profile: applied } : {}), capabilities: ['prompt', 'cancel', ...(!readOnly ? ['client-files', 'client-terminal'] : [])],
       prompt: async (text) => {
         if (closed) throw notStarted(new ConveroomError('vendor_disconnected', 'Native session is closed'));
         if (active) throw notStarted(new ConveroomError('session_busy', 'A native prompt is already running'));
@@ -127,5 +161,5 @@ export async function startAcp(
       },
       close,
     };
-  } catch (error) { await close(); throw error; }
+  } catch (error) { throw stopped(error, await close()); }
 }

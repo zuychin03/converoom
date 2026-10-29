@@ -1,8 +1,10 @@
 import { isAbsolute } from 'node:path';
+import type { ChildProcess } from 'node:child_process';
 import { executable, launch, run } from './process.js';
-import { notStarted, startAcp } from './acp.js';
+import { notStarted, startAcp, stopped } from './acp.js';
+import { offers, resolveEffort, unsupported } from './profile.js';
 import { RpcPeer } from './rpc.js';
-import { ConveroomError, type Product, type ToolArgs } from '../../shared/src/contracts.js';
+import { ConveroomError, type AppliedProfile, type Effort, type Product, type SeatProfile, type ToolArgs } from '../../shared/src/contracts.js';
 import { redactPublic } from '../../store/src/index.js';
 import { MANAGED_TOOLS, type ManagedMcp } from '../../mcp/src/managed.js';
 import { PRODUCT_PROFILES, isManagedProduct } from '../../shared/src/products.js';
@@ -10,6 +12,7 @@ export interface ManagedSession {
   id: string;
   product: Product;
   capabilities: string[];
+  profile?: AppliedProfile;
   // A rejection marked notStarted proves the prompt never began; any other rejection after sending leaves the outcome unknown.
   prompt(text: string): Promise<string>;
   cancel(): Promise<void>;
@@ -61,6 +64,31 @@ export async function probeProduct(product: Product, cwd: string): Promise<ToolA
     extraUsage: 'vendor account settings may enable extra usage; Converoom does not control these', quota: 'unknown',
   };
 }
+const exited = (child: ChildProcess) => new Promise<boolean>((resolve) => {
+  if (child.exitCode !== null || child.signalCode !== null) return resolve(true);
+  const timer = setTimeout(() => resolve(false), 5000);
+  child.once('close', () => { clearTimeout(timer); resolve(true); });
+});
+async function codexModels(rpc: RpcPeer) {
+  const models: ToolArgs[] = [];
+  let cursor: unknown;
+  for (let page = 0; page < 5; page++) {
+    const list = await rpc.request('model/list', { includeHidden: true, ...(typeof cursor === 'string' ? { cursor } : {}) });
+    if (Array.isArray(list.data)) models.push(...(list.data as ToolArgs[]));
+    cursor = list.nextCursor;
+    if (typeof cursor !== 'string') break;
+  }
+  return models;
+}
+const modelName = (m: ToolArgs) => String(m.model ?? m.id);
+function codexEffort(models: ToolArgs[], model: string, level: Effort) {
+  const entry = models.find((m) => m.id === model || m.model === model);
+  const levels = Array.isArray(entry?.supportedReasoningEfforts)
+    ? (entry.supportedReasoningEfforts as ToolArgs[]).map((o) => ({ value: String(o.reasoningEffort) })) : [];
+  const effort = resolveEffort(level, levels);
+  if (!effort) throw unsupported(`${model} does not offer ${level} effort. It offers: ${offers(levels.map((l) => l.value))}`);
+  return effort;
+}
 export async function startManaged(
   product: Product,
   cwd: string,
@@ -68,6 +96,7 @@ export async function startManaged(
   env: NodeJS.ProcessEnv = {},
   readOnly = true,
   mcp?: ManagedMcp,
+  profile?: SeatProfile,
 ): Promise<ManagedSession> {
   if (!isManagedProduct(product)) throw new ConveroomError('managed_unsupported', 'This product participates through MCP polling; its managed adapter is unavailable', 409);
   const entry = await managedEntry(product, env);
@@ -105,8 +134,15 @@ export async function startManaged(
           403,
         );
       }
+      // FR-56: checked against this Codex's own model list before the prompt; nothing falls back to another model or level.
+      const models = profile?.model || profile?.effort ? await codexModels(rpc) : [];
+      const named = profile?.model ? models.find((m) => m.id === profile.model || m.model === profile.model) : undefined;
+      if (profile?.model && !named) throw unsupported(`Codex does not offer the model ${profile.model}. It offers: ${
+        offers(models.filter((m) => m.hidden !== true).map(modelName))}`);
+      let effort = named && profile?.effort ? codexEffort(models, modelName(named), profile.effort) : undefined;
       const result = await rpc.request('thread/start', {
         cwd,
+        ...(named ? { model: modelName(named) } : {}),
         modelProvider: 'openai',
         sandbox: readOnly ? 'read-only' : 'workspace-write',
         approvalPolicy: 'on-request',
@@ -114,6 +150,13 @@ export async function startManaged(
         developerInstructions:
           'Participate in a Converoom room. Return only the public answer, preserve dissent, follow the assigned workspace and task scope. Use the supplied Converoom MCP tools for public room context and directed replies. Do not commit, push, deploy or use a separately billed API provider. Native tools are trusted local; no containment promise.',
       });
+      const model = typeof result.model === 'string' ? result.model : undefined;
+      if (named && model !== modelName(named)) throw unsupported(`Codex started ${model ?? 'an unnamed model'} instead of ${modelName(named)}`);
+      if (profile?.effort && !effort) {
+        if (!model) throw unsupported('Codex did not say which model it started, so the effort cannot be checked');
+        effort = codexEffort(models, model, profile.effort);
+      }
+      const applied: AppliedProfile = { ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
       const thread = result.thread as ToolArgs,
         id = String(thread.id);
       let turnId = '', interrupt = false;
@@ -137,6 +180,7 @@ export async function startManaged(
       return {
         id,
         product,
+        ...(model ? { profile: applied } : {}),
         capabilities: ['prompt', 'cancel'],
         prompt: async (text) => {
           publicReply = '';
@@ -151,6 +195,7 @@ export async function startManaged(
               threadId: id,
               cwd,
               input: [{ type: 'text', text, text_elements: [] }],
+              ...(effort ? { effort } : {}),
             });
             turnId = String((response.turn as ToolArgs).id);
             // A cancel requested before the turn had an ID still has to reach it.
@@ -169,20 +214,13 @@ export async function startManaged(
         },
         close: async () => {
           child.kill();
-          return new Promise((resolve) => {
-            if (child.exitCode !== null) return resolve(true);
-            const timer = setTimeout(() => resolve(false), 5000);
-            child.once('close', () => {
-              clearTimeout(timer);
-              resolve(true);
-            });
-          });
+          return exited(child);
         },
       };
     } catch (e) {
       child.kill();
-      throw e;
+      throw stopped(e, await exited(child));
     }
   }
-  return startAcp(product, entry, cwd, onPermission, env, readOnly, mcp);
+  return startAcp(product, entry, cwd, onPermission, env, readOnly, mcp, profile);
 }

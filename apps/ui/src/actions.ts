@@ -1,5 +1,5 @@
 import { isRecord, string, type RecordData } from './api.js';
-import { num, phaseLabel, rosterOptions } from './model.js';
+import { discoveredModels, num, phaseLabel, rosterOptions, slotChoices, slotSeat } from './model.js';
 import { PRODUCT_IDS, PRODUCT_PROFILES } from '../../../packages/shared/src/products.js';
 import { PHASE_STEPS, type RoomPhase } from '../../../packages/shared/src/contracts.js';
 import type { Action, Field } from './components.js';
@@ -45,6 +45,84 @@ export const createRoomAction = (onCreated: (id: string) => void, discovery: Rec
   prepare: (args) => ({ ...args, ...seatsOf(args) }),
   onSuccess: (result) => onCreated(roomIdOf(result)),
 });
+
+const ROLES: Record<string, string> = { host: 'host', member: 'member', observer: 'observer' };
+// FR-56: each role slot becomes one seat chosen from the agents the last discovery found ready.
+export function templateRoomAction(template: RecordData, onCreated: (id: string) => void, discovery: RecordData | null = null): Action {
+  const ready = rosterOptions(discovery), slots = slotChoices(template, discovery), templateId = string(template, 'id');
+  return {
+    title: 'Create room from ' + string(template, 'name'),
+    command: 'room_create',
+    label: 'Create room',
+    description: [string(template, 'description'), 'The template sets the starter agenda, agent wakes and any lowered budgets.']
+      .filter(Boolean).map((s) => (/[.!?]$/.test(s) ? s : s + '.')).join(' '),
+    fields: [
+      { key: 'title', label: 'Room name', required: true },
+      { key: 'objective', label: 'Objective', required: true, type: 'textarea' },
+      { key: 'draft', label: 'Create as a draft: add seats and limits, then start it', type: 'checkbox' },
+      ...slots.map(({ slot, value }, i): Field => ({
+        key: 'slot' + i, label: string(slot, 'name') + ' · ' + (ROLES[string(slot, 'role')] ?? 'member'), type: 'select', placeholder: 'Leave empty',
+        options: ready, value,
+        ...(i === slots.length - 1 ? { hint: ready.length
+          ? 'Filled from the agents your last discovery found ready. Each managed turn still needs your consent and grant.'
+          : 'Discover agents on the Work page to fill these, or add seats to the room later.' } : {}),
+      })),
+    ],
+    prepare: (args) => {
+      const seats = slots.flatMap(({ slot }, i) => typeof args['slot' + i] === 'string' && args['slot' + i] ? [slotSeat(slot, String(args['slot' + i]))] : []);
+      const rest = Object.fromEntries(Object.entries(args).filter(([key]) => !/^slot\d+$/.test(key)));
+      return { ...rest, templateId, ...(seats.length ? { seats } : {}) };
+    },
+    onSuccess: (result) => onCreated(roomIdOf(result)),
+  };
+}
+
+export const saveTemplateAction = (roomId: string): Action => ({
+  title: 'Save as template',
+  command: 'template_save',
+  args: { roomId },
+  label: 'Save template',
+  description: 'Saves this room’s seats as role slots with their products, models and efforts, its latest agenda, agent wakes and any budgets you lowered. Messages and turns stay in this room.',
+  fields: [
+    { key: 'name', label: 'Template name', required: true },
+    { key: 'description', label: 'Description', type: 'textarea', hint: 'Optional. Shown when you choose a template.' },
+  ],
+});
+
+export const deleteTemplateAction = (template: RecordData): Action => ({
+  title: 'Delete template',
+  command: 'template_delete',
+  args: { templateId: template.id },
+  label: 'Delete template',
+  confirm: `Delete the saved template “${string(template, 'name')}”. Rooms already created from it keep their seats, agenda and limits.`,
+  danger: true,
+});
+
+const EFFORTS = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'max', label: 'Max: the highest level the model offers' },
+];
+export function seatProfileAction(seat: RecordData, discovery: RecordData | null): Action {
+  const product = string(seat, 'product'), profile = isRecord(seat.profile) ? seat.profile : {}, current = string(profile, 'model');
+  const models = discoveredModels(discovery, product), label = PRODUCT_PROFILES[product as keyof typeof PRODUCT_PROFILES]?.label ?? product;
+  const options = [...new Set([...models, ...(current ? [current] : [])])].map((m) => ({ value: m, label: m }));
+  return {
+    title: 'Model and effort',
+    command: 'seat_profile_set',
+    args: { roomId: seat.roomId, seatId: seat.id },
+    label: 'Save',
+    description: `Applies to turns requested from now on. ${label} is asked for exactly this before each turn; if it does not offer them, the turn fails and nothing is sent. Leave both empty for ${label}’s own defaults.`,
+    fields: [
+      models.length
+        ? { key: 'model', label: 'Model', type: 'select', placeholder: 'Agent default', options, value: current, hint: 'From your last discovery.' }
+        : { key: 'model', label: 'Model', value: current, hint: 'The name the agent uses for the model. Leave empty for its default.' },
+      { key: 'effort', label: 'Effort', type: 'select', placeholder: 'Agent default', options: EFFORTS, value: string(profile, 'effort') },
+    ],
+    prepare: ({ model, effort, ...rest }) => ({ ...rest, profile: { ...(model ? { model } : {}), ...(effort ? { effort } : {}) } }),
+  };
+}
 
 export const joinRoomAction = (onJoined: (id: string) => void): Action => ({
   title: 'Join room',
@@ -112,26 +190,32 @@ export const phaseAction = (roomId: string, phase: RoomPhase): Action => {
   };
 };
 
-export const roundRobinAction = (roomId: string, seats: RecordData[], maxRounds: number): Action => ({
-  title: 'Start round robin',
-  command: 'round_robin_propose',
-  args: { roomId },
-  label: 'Approve and start',
-  description: 'Each speaker takes one turn per round, one at a time, and the plan keeps going if the host disconnects. Room budgets still apply.',
-  confirm: 'Starting the plan approves each managed turn in it. It stops at the first turn that does not complete, and you can stop it at any time.',
-  fields: [
-    {
-      key: 'seatIds',
-      label: 'Speakers',
-      hint: 'Tick them in speaking order.',
-      type: 'choices',
-      required: true,
-      options: seats.filter((s) => s.role !== 'observer' && s.status !== 'left').map((s) => ({ value: string(s, 'id'), label: string(s, 'name') })),
-    },
-    { key: 'rounds', label: 'Rounds', type: 'number', required: true, value: '1', min: 1, max: maxRounds },
-    { key: 'prompt', label: 'Prompt for every turn', type: 'textarea', required: true },
-  ],
-});
+// A template's suggested plan only fills the form; the owner still starts it.
+export const roundRobinAction = (roomId: string, seats: RecordData[], maxRounds: number, suggested?: unknown): Action => {
+  const speakers = seats.filter((s) => s.role !== 'observer' && s.status !== 'left');
+  const rounds = isRecord(suggested) ? num(suggested, 'rounds') : undefined;
+  return {
+    title: 'Start round robin',
+    command: 'round_robin_propose',
+    args: { roomId },
+    label: 'Approve and start',
+    description: 'Each speaker takes one turn per round, one at a time, and the plan keeps going if the host disconnects. Room budgets still apply.',
+    confirm: 'Starting the plan approves each managed turn in it. It stops at the first turn that does not complete, and you can stop it at any time.',
+    fields: [
+      {
+        key: 'seatIds',
+        label: 'Speakers',
+        hint: 'Tick them in speaking order.',
+        type: 'choices',
+        required: true,
+        options: speakers.map((s) => ({ value: string(s, 'id'), label: string(s, 'name') })),
+        ...(rounds ? { value: speakers.map((s) => string(s, 'id')).join('\n') } : {}),
+      },
+      { key: 'rounds', label: 'Rounds', type: 'number', required: true, value: String(Math.min(rounds ?? 1, maxRounds)), min: 1, max: maxRounds },
+      { key: 'prompt', label: 'Prompt for every turn', type: 'textarea', required: true },
+    ],
+  };
+};
 
 export const stopRoundRobinAction = (roomId: string): Action => ({
   title: 'Stop round robin',

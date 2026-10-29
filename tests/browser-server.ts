@@ -59,7 +59,7 @@ const fixtureControl = createHttpServer(async (request, response) => {
     const harness = (product: string, status: string, registered: boolean, detail: string, signIn = 'not_checked') =>
       ({ product, status, installed: status !== 'not_installed', registered, signIn, detail, ...(status === 'not_installed' ? {} : { version: product + ' 1.0.0' }) });
     await writeFile(join(dir, 'discovery.json'), JSON.stringify({ at: Date.now(), harnesses: [
-      harness('codex', 'ready_managed', true, 'Codex can start managed sessions with its own sign-in.', 'signed_in'),
+      { ...harness('codex', 'ready_managed', true, 'Codex can start managed sessions with its own sign-in.', 'signed_in'), models: ['gpt-fixture', 'gpt-mini'] },
       harness('cursor', 'needs_login', false, 'Cursor does not offer its native cursor_login sign-in, and managed sessions do not use API keys. Sign in through Cursor, then discover again.'),
       harness('claude', 'needs_mcp_registration', false, 'Claude Code is installed but not connected to Converoom. Connect it to join rooms.', 'not_applicable'),
       harness('qoder', 'not_installed', false, 'Qoder is not installed on this machine.', 'not_applicable'),

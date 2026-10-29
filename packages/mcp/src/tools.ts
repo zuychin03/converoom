@@ -1,4 +1,4 @@
-import { ConveroomError } from '../../shared/src/contracts.js';
+import { ConveroomError, EFFORTS } from '../../shared/src/contracts.js';
 import { PRODUCT_IDS } from '../../shared/src/products.js';
 type Schema = {
   type: string;
@@ -71,8 +71,10 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
       product: { type: 'string', enum: [...PRODUCT_IDS] },
       name: small,
       draft: { type: 'boolean' },
+      templateId: small,
     },
   },
+  template_list: { required: [] },
   room_get: { required: ['roomId'] },
   room_list: { required: [] },
   room_join: { required: ['roomId'], fields: { name: small, product: small } },
@@ -218,11 +220,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = Object.entries(corpus).map(([n
     },
   };
 });
+const profile = { type: 'object', additionalProperties: false,
+  properties: { model: { ...small, maxLength: 128 }, effort: { type: 'string', enum: [...EFFORTS] } } };
 // Arguments only the paired owner may add to these tools; agent schemas never list them, and the core refuses them from agents too.
 const OWNER_FIELDS: Record<string, Record<string, unknown>> = {
   adapter_discover: { refresh: { type: 'boolean' } },
   room_create: { seats: { type: 'array', maxItems: 5, items: { type: 'object', required: ['product', 'mode'], additionalProperties: false,
-    properties: { product: { type: 'string', enum: [...PRODUCT_IDS] }, mode: { type: 'string', enum: ['managed', 'polling'] } } } } },
+    properties: { product: { type: 'string', enum: [...PRODUCT_IDS] }, mode: { type: 'string', enum: ['managed', 'polling'] }, name: small,
+      role: { type: 'string', enum: ['host', 'member', 'observer'] }, profile } } } },
 };
 export function validateToolArgs(name: string, args: Record<string, unknown>, owner = false): void {
   const tool = TOOL_DEFINITIONS.find((t) => t.name === name)?.inputSchema;

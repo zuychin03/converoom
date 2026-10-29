@@ -10,7 +10,9 @@ import {
   phaseAction,
   requestTurnAction,
   roundRobinAction,
+  saveTemplateAction,
   stopRoundRobinAction,
+  templateRoomAction,
 } from './actions.js';
 import { PHASE_STEPS, type RoomPhase } from '../../../packages/shared/src/contracts.js';
 import { ApprovalQueue } from './Approvals.js';
@@ -177,20 +179,13 @@ export function App() {
       setFailure(`${label} failed: ${cause instanceof Error ? cause.message : 'the room did not change.'}`),
     );
   };
-  const createRoom = () =>
-    setAction(
-      createRoomAction((id) => {
-        selectRoom(id);
-        setView('room');
-      }, snapshot?.discovery ?? null),
-    );
-  const joinRoom = () =>
-    setAction(
-      joinRoomAction((id) => {
-        selectRoom(id);
-        setView('room');
-      }),
-    );
+  const openRoom = (id: string) => {
+    selectRoom(id);
+    setView('room');
+  };
+  const createRoom = () => setAction(createRoomAction(openRoom, snapshot?.discovery ?? null));
+  const fromTemplate = (template: RecordData) => setAction(templateRoomAction(template, openRoom, snapshot?.discovery ?? null));
+  const joinRoom = () => setAction(joinRoomAction(openRoom));
   async function pair(event: React.FormEvent) {
     event.preventDefault();
     setPairing(true);
@@ -230,6 +225,9 @@ export function App() {
       { id: 'go-approvals', group: 'Actions', label: 'Go to Approvals', hint: `${pending.length} waiting`, run: go('approvals') },
       { id: 'create-room', group: 'Actions', label: 'Create room…', run: createRoom },
     );
+    for (const t of snapshot.templates)
+      list.push({ id: `template-${string(t, 'id')}`, group: 'Actions', label: `Create room from ${string(t, 'name')}…`,
+        keywords: string(t, 'description'), run: () => fromTemplate(t) });
     for (const [choice, label] of [['dark', 'Dark'], ['light', 'Light'], ['system', 'System']] as const)
       list.push({ id: `theme-${choice}`, group: 'Actions', label: `Theme: ${label}`, run: () => theme.setChoice(choice) });
     if (room) {
@@ -254,10 +252,11 @@ export function App() {
           list.push({ id: 'round-robin-stop', group: 'Actions', label: 'Stop round robin…', hint, run: () => setAction(stopRoundRobinAction(id)) });
         else if (seats.some((s) => s.role !== 'observer'))
           list.push({ id: 'round-robin', group: 'Actions', label: 'Start round robin…', hint,
-            run: () => setAction(roundRobinAction(id, seats, isRecord(room.policy) ? num(room.policy, 'maxRounds') ?? 6 : 6)) });
+            run: () => setAction(roundRobinAction(id, seats, isRecord(room.policy) ? num(room.policy, 'maxRounds') ?? 6 : 6, room.template)) });
         list.push({ id: 'peer-wake', group: 'Actions', label: peerWake ? 'Stop agent wakes…' : 'Allow agent wakes…', hint,
           run: () => setAction(peerWakeAction(id, peerWake)) });
       }
+      list.push({ id: 'save-template', group: 'Actions', label: 'Save as template…', hint, run: () => setAction(saveTemplateAction(id)) });
       for (const seat of snapshot.seats.filter((s) => s.roomId === id && s.mode === 'managed' && s.consent === true && turnTarget(s)))
         list.push({
           id: `turn-${string(seat, 'id')}`,
@@ -465,6 +464,7 @@ export function App() {
             read={(name, args) => client.command(name, args)}
             openAction={setAction}
             onPickRoom={selectRoom}
+            onTemplate={fromTemplate}
           />
         ) : (
           <ApprovalQueue permissions={pending} rooms={snapshot.rooms} openAction={setAction} />

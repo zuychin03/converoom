@@ -63,7 +63,7 @@ The agent expansion adds Antigravity, Kiro, Qoder and Grok Build to FR-01/05/11/
 | FR-53 | Open V1 acceptance | Managed V1 profiles shall use supported native subscription access, leaving vendor sign-in/credentials with their owning client. |
 | FR-54 | Open V1 acceptance | Quota/auth failures shall preserve work, respect shared account allowance and avoid implicit billing/provider changes. |
 | FR-55 | Future phase (V1.2) | Coding attempts shall record immutable per-turn workspace checkpoints and support rollback to a prior checkpoint within the active attempt. |
-| FR-56 | Future phase (V1.2) | Room creation and seat configuration shall support reusable workflow templates and adapter-verified model/reasoning-effort profiles. |
+| FR-56 | Locally implemented with fixture tests; live vendor and release acceptance open | Room creation and seat configuration shall support reusable workflow templates and adapter-verified model/reasoning-effort profiles. |
 | FR-57 | Future phase (V1.2) | Submission reviews shall support file and line-scoped diff annotations bound to exact content digests and rework turns. |
 | FR-58 | Future phase (V1.2) | Owners shall be able to export a verified integration candidate to a new local Git branch with a redacted Markdown PR brief. |
 | FR-59 | Future phase (V1.3) | An opt-in authenticated private HTTPS owner listener shall allow mobile monitoring, diff/checkpoint inspection and scoped human approvals. |

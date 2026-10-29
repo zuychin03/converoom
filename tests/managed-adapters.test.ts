@@ -194,3 +194,67 @@ it.each(['codex', 'cursor', 'antigravity', 'kiro', 'qoder', 'grok'])('injects th
     await rm(dir, { recursive: true, force: true });
   }
 }, 30000);
+
+const vendorLog = async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'converoom-profile-log-')), path = join(dir, 'vendor.log');
+  const read = async () => (await readFile(path, 'utf8').catch(() => '')).split('\n').filter(Boolean)
+    .map((line) => JSON.parse(line) as { method: string; params: ToolArgs });
+  return { path, read, remove: () => rm(dir, { recursive: true, force: true }) };
+};
+it('checks a Codex model and effort against model/list and starts the thread and turn with them', async () => {
+  const log = await vendorLog();
+  const session = await startManaged('codex', process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'profile', CONVEROOM_VENDOR_LOG: log.path },
+    true, undefined, { model: 'gpt-fixture', effort: 'max' });
+  try {
+    expect(session.profile).toEqual({ model: 'gpt-fixture', effort: 'xhigh' });
+    expect(await session.prompt('Answer')).toBe('Public protocol fixture answer');
+    const calls = await log.read();
+    expect(calls.find((c) => c.method === 'thread/start')?.params.model).toBe('gpt-fixture');
+    expect(calls.find((c) => c.method === 'turn/start')?.params.effort).toBe('xhigh');
+  } finally { expect(await session.close()).toBe(true); await log.remove(); }
+});
+// A named model is checked before any thread starts; an effort alone is checked against the model the thread reports, before any turn.
+it.each([
+  [{ model: 'gpt-fixture', effort: 'low' }, /gpt-fixture does not offer low effort\. It offers: minimal, medium, high, xhigh/, 'model/list'],
+  [{ model: 'gpt-missing' }, /Codex does not offer the model gpt-missing\. It offers: gpt-fixture/, 'model/list'],
+  [{ effort: 'low' }, /gpt-fixture does not offer low effort/, 'thread/start'],
+] as const)('refuses an unsupported Codex profile %j before the prompt', async (profile, message, last) => {
+  const log = await vendorLog();
+  try {
+    await expect(startManaged('codex', process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'profile', CONVEROOM_VENDOR_LOG: log.path },
+      true, undefined, profile)).rejects.toMatchObject({ code: 'profile_unsupported', message: expect.stringMatching(message), notStarted: true, stopped: true });
+    expect((await log.read()).map((c) => c.method).at(-1)).toBe(last);
+  } finally { await log.remove(); }
+});
+it('refuses a Codex thread that started on another model instead of the one asked for', async () => {
+  await expect(startManaged('codex', process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'other-model' }, true, undefined, { model: 'gpt-fixture' }))
+    .rejects.toMatchObject({ code: 'profile_unsupported', message: expect.stringMatching(/started gpt-other instead of gpt-fixture/), stopped: true });
+});
+it('reports that Codex stopped when it refuses a signed-out account', async () => {
+  await expect(startManaged('codex', process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'signed-out' }))
+    .rejects.toMatchObject({ code: 'subscription_required', stopped: true });
+});
+it.each(acpProducts)('sets the %s model and effort through ACP session config options before the prompt', async (product) => {
+  const log = await vendorLog();
+  const session = await startManaged(product, process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: 'public', CONVEROOM_VENDOR_LOG: log.path },
+    true, undefined, { model: 'fixture-deep', effort: 'max' });
+  try {
+    expect(session.profile).toEqual({ model: 'fixture-deep', effort: 'high' });
+    expect(await session.prompt('Answer')).toBe('Public protocol fixture answer');
+    const methods = (await log.read()).map((c) => c.method + (c.params?.configId ? ':' + String(c.params.configId) + '=' + String(c.params.value) : ''));
+    expect(methods.slice(methods.indexOf('session/new') + 1).filter((m) => m !== 'session/set_mode'))
+      .toEqual(['session/set_config_option:model=fixture-deep', 'session/set_config_option:thought=high', 'session/prompt']);
+  } finally { expect(await session.close()).toBe(true); await log.remove(); }
+});
+it.each([
+  ['no-config', { effort: 'high' }, /Qoder offers no effort choice to Converoom/],
+  ['public', { model: 'fixture-huge' }, /Qoder does not offer the model fixture-huge\. It offers: fixture-fast, fixture-deep/],
+  ['config-ignored', { effort: 'medium' }, /Qoder kept effort low instead of medium/],
+] as const)('refuses an unsupported ACP profile (%s) before any prompt', async (scenario, profile, message) => {
+  const log = await vendorLog();
+  try {
+    await expect(startManaged('qoder', process.cwd(), async () => false, { CONVEROOM_VENDOR_FIXTURE: scenario, CONVEROOM_VENDOR_LOG: log.path },
+      true, undefined, profile)).rejects.toMatchObject({ code: 'profile_unsupported', message: expect.stringMatching(message), notStarted: true, stopped: true });
+    expect((await log.read()).map((c) => c.method)).not.toContain('session/prompt');
+  } finally { await log.remove(); }
+});

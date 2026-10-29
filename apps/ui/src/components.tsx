@@ -166,6 +166,8 @@ export type Field = {
   required?: boolean;
   value?: string;
   options?: Array<{ value: string; label: string }>;
+  // Label of a select's empty choice.
+  placeholder?: string;
   min?: number;
   max?: number;
 };
@@ -346,7 +348,7 @@ export function ActionDialog({
                   disabled={busy}
                   onChange={(event) => set(field.key, event.target.value)}
                 >
-                  <option value="">Choose…</option>
+                  <option value="">{field.placeholder ?? 'Choose…'}</option>
                   {field.options?.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}

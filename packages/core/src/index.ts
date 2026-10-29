@@ -25,9 +25,10 @@ import {
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
 import { activeMembership, currentSeat, currentTurnAuthority, mountMembership, requireHumanParticipant, requireSeatOwner, SHARED_READS } from './membership.js';
 import { authority } from './audit.js';
+import { MAX_SAVED_TEMPLATES, findTemplate, seatProfile, templateFromRoom, templatePolicy, templatesFor } from './templates.js';
 // Reads rerun on retry, so their results are never stored under a client key.
 export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
-  'resource_profile_list', 'adapter_status', 'adapter_discover', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview']);
+  'resource_profile_list', 'adapter_status', 'adapter_discover', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview', 'template_list']);
 const limits = {
   maxActiveTurns: 2,
   maxRounds: 6,
@@ -168,6 +169,7 @@ export function turnExecutionScope(t: Turn, store: Store): ToolArgs {
     requestedBy: (t as Turn & { requestedBy: string }).requestedBy,
     policyVersion: t.policyVersion,
     interactionId: t.interactionId ?? null,
+    ...(t.profile ? { profile: t.profile } : {}),
     ...(t.roundRobinId ? { roundRobin: { id: t.roundRobinId, index: t.roundRobinIndex,
       digest: store.get<RoundRobinPlan>('round_robin', t.roundRobinId)?.digest } } : {}),
     ...(t.remoteProposalId ? { remoteProposalId: t.remoteProposalId,
@@ -290,6 +292,7 @@ function queueTurn(store: Store, a: Actor, r: Room, s: Seat | undefined, x: Tool
       membershipGeneration: s.membershipGeneration, maxTurnMs: Math.min(consent!.maxTurnMs, Number(r.policy.maxTurnMs)) } : {}),
     ...(x.attemptId ? { attemptId: String(x.attemptId) } : {}),
     ...(interaction ? { interactionId: interaction.id } : {}),
+    ...(s.mode === 'managed' && s.profile ? { profile: s.profile } : {}),
     ...(x.remoteProposalId ? { remoteProposalId: String(x.remoteProposalId),
       maxTurnMs: Math.min(Number(r.policy.maxTurnMs), Number(store.get<ToolArgs>('remote_proposal', String(x.remoteProposalId))?.maxTurnMs)) } : {}),
     ...extra,
@@ -458,6 +461,8 @@ export function createCore(store: Store): Core {
     const mode = x.mode === 'managed' ? 'managed' : 'polling';
     if (mode === 'managed' && PRODUCT_PROFILES[product].protocol === 'polling')
       throw new E('managed_unsupported', PRODUCT_PROFILES[product].label + ' joins through its own MCP conversation; it has no managed session', 409);
+    if (x.profile !== undefined && a.kind !== 'human') throw new E('human_required', 'Only the owner chooses a seat\'s model and effort', 403);
+    const profile = seatProfile(x.profile, mode);
     const membership = activeMembership(store, r.id, a.ownerId);
     if (a.ownerId !== r.ownerId) {
       if (!membership || (membership.role === 'observer' && role !== 'observer'))
@@ -476,6 +481,7 @@ export function createCore(store: Store): Core {
       mode,
       status: 'idle',
       consent: false,
+      ...(profile ? { profile } : {}),
       ...(a.ownerId !== r.ownerId ? { membershipGeneration: membership!.generation } : {}),
       capabilities: {
         declared: mode === 'managed' ? ['prompt', 'cancel'] : ['poll'],
@@ -548,11 +554,13 @@ export function createCore(store: Store): Core {
     },
   };
   // FR-62: the owner's roster, usually prefilled from discovery, is seated in the same transaction as the room.
+  // FR-56: a template brings its workflow, agenda, turn policy and budgets for anyone; only the owner's roster is seated.
   c.register('room_create', (a, x) => store.transaction(() => {
     const roster = x.seats === undefined ? [] : x.seats;
     if (!Array.isArray(roster) || roster.length > 5 || roster.some((s) => !s || typeof s !== 'object'))
       throw new E('invalid_argument', 'Seats must be a list of at most five products with a connection mode');
     if (roster.length && a.kind !== 'human') throw new E('human_required', 'Only the owner adds seats when creating a room', 403);
+    const template = x.templateId === undefined ? undefined : findTemplate(store, a.ownerId, str(x, 'templateId'));
     const r: Room = {
       id: randomUUID(),
       title: str(x, 'title', 256),
@@ -561,15 +569,17 @@ export function createCore(store: Store): Core {
       hostSeatId: null,
       lifecycle: x.draft === true ? 'draft' : 'active',
       phase: 'deliberation',
-      workflow: x.workflow === 'coding' ? 'coding' : 'discussion',
+      workflow: x.workflow === 'coding' || x.workflow === 'discussion' ? x.workflow : template?.workflow ?? 'discussion',
       createdAt: Date.now(),
-      policy: { ...limits, peerWake: true },
+      policy: template ? templatePolicy(template, limits) : { ...limits, peerWake: true },
       policyVersion: 1,
       seq: 0,
+      ...(template ? { template: { id: template.id, name: template.name, ...(template.roundRobin ? { rounds: template.roundRobin.rounds } : {}) } } : {}),
     };
     store.put('room', r.id, r);
     store.put('policy', r.id + ':1', { roomId: r.id, version: 1, policy: r.policy });
-    ev(a, r.id, 'room.created', { title: r.title, objective: r.objective, lifecycle: r.lifecycle });
+    ev(a, r.id, 'room.created', { title: r.title, objective: r.objective, lifecycle: r.lifecycle,
+      ...(template ? { template: { id: template.id, name: template.name } } : {}) });
     if (a.kind === 'agent')
       add(
         a,
@@ -580,10 +590,32 @@ export function createCore(store: Store): Core {
     for (const s of roster as ToolArgs[]) {
       const product = String(s.product);
       if (!isProduct(product)) throw new E('invalid_product', 'Choose a supported product');
-      add(a, room(r.id), { name: PRODUCT_PROFILES[product].label, product, mode: s.mode, role: 'member' });
+      add(a, room(r.id), { name: typeof s.name === 'string' && s.name.trim() ? s.name : PRODUCT_PROFILES[product].label, product, mode: s.mode,
+        role: s.role ?? 'member', profile: s.profile });
     }
+    // A starter agenda is not a round, so it leaves the round budget untouched.
+    if (template?.agenda) ev(a, r.id, 'agenda', { roomId: r.id, agenda: template.agenda, unresolved: [], templateId: template.id });
     return room(r.id);
   }));
+  c.register('template_list', (a) => templatesFor(store, a.ownerId));
+  c.register('template_save', (a, x) => {
+    owner(a);
+    const r = access(a, str(x, 'roomId'));
+    owner(a, r.id);
+    const name = str(x, 'name', 120), description = x.description === undefined ? '' : str(x, 'description', 1000);
+    if (store.list<{ ownerId: string }>('template').filter((t) => t.ownerId === a.ownerId).length >= MAX_SAVED_TEMPLATES)
+      throw new E('template_limit', 'Delete a saved template before saving another', 409);
+    const t = templateFromRoom(store, r, { name, description }, limits);
+    store.put('template', t.id, t);
+    return t;
+  });
+  c.register('template_delete', (a, x) => {
+    owner(a);
+    const t = findTemplate(store, a.ownerId, str(x, 'templateId'));
+    if (t.builtIn) throw new E('template_built_in', 'Built-in templates cannot be deleted', 409);
+    store.remove('template', t.id);
+    return t;
+  });
   c.register('room_get', (a, x) => access(a, str(x, 'roomId')));
   c.register('room_list', (a) =>
     store
@@ -621,6 +653,19 @@ export function createCore(store: Store): Core {
     store.put('seat', s.id, s);
     authority(store, a, room(id), 'seat.consent', { seatId: s.id, consent: s.consent });
     return s;
+  });
+  c.register('seat_profile_set', (a, x) => {
+    const id = str(x, 'roomId');
+    const s = store.get<Seat>('seat', str(x, 'seatId'));
+    if (!s || s.roomId !== id) throw new E('seat', 'Seat not found');
+    if (a.kind !== 'human') throw new E('human_required', 'Only the owner chooses a seat\'s model and effort', 403);
+    requireSeatOwner(c, a, s);
+    const profile = seatProfile(x.profile ?? null, s.mode);
+    const { profile: previous, ...rest } = s;
+    const next: Seat = { ...rest, ...(profile ? { profile } : {}) };
+    store.put('seat', s.id, next);
+    authority(store, a, room(id), 'seat.profile', { seatId: s.id, profile: profile ?? null, previous: previous ?? null });
+    return next;
   });
   c.register('room_leave', (a, x) => {
     const id = str(x, 'roomId');

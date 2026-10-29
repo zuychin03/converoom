@@ -14,6 +14,7 @@ import {
 } from './components.js';
 import { STAGES, acceptedOrder, commandLabel, fmtBytes, interruptedFor, num, readiness, requestDetails, shortId, taskProgress, workerSeat, type Kind } from './model.js';
 import { PRODUCT_PROFILES, type Product } from '../../../packages/shared/src/products.js';
+import { deleteTemplateAction } from './actions.js';
 
 export function WorkspaceView({
   state,
@@ -22,6 +23,7 @@ export function WorkspaceView({
   read,
   openAction,
   onPickRoom,
+  onTemplate,
 }: {
   state: Snapshot;
   room?: RecordData;
@@ -29,6 +31,7 @@ export function WorkspaceView({
   read: Run;
   openAction: (action: Action) => void;
   onPickRoom: (id: string) => void;
+  onTemplate: (template: RecordData) => void;
 }) {
   const now = useNow(5000);
   const roomId = room ? string(room, 'id') : '';
@@ -188,6 +191,7 @@ export function WorkspaceView({
         </>
       )}
       <AgentDiscovery discovery={state.discovery} run={run} openAction={openAction} />
+      <RoomTemplates templates={state.templates} openAction={openAction} onTemplate={onTemplate} />
       <section className="work-section" aria-labelledby="sources-title">
         <div className="section-head">
           <h2 id="sources-title" className="section-label">
@@ -479,6 +483,54 @@ function AgentDiscovery({ discovery, run, openAction }: { discovery: RecordData 
           })}
         </ul>
       )}
+    </section>
+  );
+}
+
+function RoomTemplates({
+  templates,
+  openAction,
+  onTemplate,
+}: {
+  templates: RecordData[];
+  openAction: (action: Action) => void;
+  onTemplate: (template: RecordData) => void;
+}) {
+  return (
+    <section className="work-section" aria-labelledby="templates-title">
+      <div className="section-head">
+        <h2 id="templates-title" className="section-label">
+          Room templates
+        </h2>
+      </div>
+      <p className="rail-note">
+        A template sets up a room&rsquo;s roles, starter agenda, agent wakes and lowered budgets. Its roles are filled from the
+        agents your last discovery found ready. Save your own from a room&rsquo;s controls.
+      </p>
+      <ul className="sources">
+        {templates.map((t) => {
+          const roles = objects(t, 'slots').map((s) => string(s, 'name')).join(', ');
+          return (
+            <li key={string(t, 'id')} className="source">
+              <span className="source-kind">{t.builtIn === true ? 'Built-in' : 'Saved'}</span>
+              <span className="source-name">{string(t, 'name')}</span>
+              <span className="source-path">
+                {[string(t, 'description'), roles ? 'Roles: ' + roles : ''].filter(Boolean).join(' · ')}
+              </span>
+              <span className="source-end">
+                <button type="button" className="button small" onClick={() => onTemplate(t)}>
+                  Use
+                </button>
+                {t.builtIn !== true && (
+                  <button type="button" className="button small" onClick={() => openAction(deleteTemplateAction(t))}>
+                    Delete
+                  </button>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }

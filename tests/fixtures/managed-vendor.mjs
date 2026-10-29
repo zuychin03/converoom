@@ -16,6 +16,13 @@ let client, roomId, pendingPrompt, clientCapabilities;
 const nativeAuth = { grok: 'cached_token', antigravity: 'oauth-personal', cursor: 'cursor_login' }[product];
 let authenticated = !nativeAuth;
 let nextId = 500;
+const efforts = ['minimal', 'medium', 'high', 'xhigh'].map((reasoningEffort) => ({ reasoningEffort, description: reasoningEffort }));
+const config = {
+  model: { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'fixture-fast',
+    options: [{ value: 'fixture-fast', name: 'Fast' }, { value: 'fixture-deep', name: 'Deep' }] },
+  thought: { id: 'thought', name: 'Thinking', category: 'thought_level', type: 'select', currentValue: 'low',
+    options: [{ group: 'levels', name: 'Levels', options: ['low', 'medium', 'high'].map((value) => ({ value, name: value })) }] },
+};
 const pending = new Map();
 const ask = (method, params) => new Promise((resolve, reject) => {
   const id = nextId++;
@@ -69,7 +76,8 @@ async function request(message) {
   } else if (message.method === 'account/read') {
     send({ id: message.id, result: { account: scenario === 'signed-out' ? null : { type: 'chatgpt', email: 'owner@example.com', planType: 'pro' } } });
   } else if (message.method === 'model/list') {
-    send({ id: message.id, result: { data: [{ id: 'gpt-fixture', model: 'gpt-fixture', displayName: 'GPT fixture' }], nextCursor: null } });
+    send({ id: message.id, result: { data: [{ id: 'gpt-fixture', model: 'gpt-fixture', displayName: 'GPT fixture', hidden: false, isDefault: true,
+      supportedReasoningEfforts: efforts, defaultReasoningEffort: 'medium' }], nextCursor: null } });
   } else if (message.method === 'thread/start') {
     const config = {};
     for (let i = 3; i < process.argv.length; i++) {
@@ -82,7 +90,8 @@ async function request(message) {
       if (config['mcp_servers.converoom.required'] !== true) throw new Error('Bridge must be required');
       await bridge({ command: config['mcp_servers.converoom.command'], args: config['mcp_servers.converoom.args'] });
     }
-    send({ id: message.id, result: { thread: { id: 'fixture-thread' } } });
+    send({ id: message.id, result: { thread: { id: 'fixture-thread' }, model: scenario === 'other-model' ? 'gpt-other' : message.params.model ?? 'gpt-fixture',
+      reasoningEffort: null } });
   } else if (message.method === 'turn/interrupt') {
     send({ id: message.id, result: {} });
     send({ method: 'turn/completed', params: { turn: { status: 'interrupted' } } });
@@ -94,13 +103,18 @@ async function request(message) {
     }
     if (scenario === 'drop') { send({ id: message.id, result: { turn: { id: 'fixture-turn' } } }); process.exit(1); }
     send({ id: message.id, result: { turn: { id: 'fixture-turn' } } });
-    await post();
+    if (!scenario) await post();
     send({ method: 'item/completed', params: { item: { type: 'agentMessage', text: 'Public protocol fixture answer' } } });
     send({ method: 'turn/completed', params: { turn: { status: 'completed' } } });
   } else if (message.method === 'session/new') {
     if (!authenticated || scenario === 'auth-required') throw new Error('Native authentication required');
     if (!scenario) await bridge(message.params.mcpServers.find((server) => server.name === 'converoom'));
-    send({ id: message.id, result: { sessionId: 'fixture-session' } });
+    send({ id: message.id, result: { sessionId: 'fixture-session', ...(scenario === 'no-config' ? {} : { configOptions: Object.values(config) }) } });
+  } else if (message.method === 'session/set_config_option') {
+    const option = config[message.params.configId];
+    if (!option) throw new Error('Unknown config option');
+    if (scenario !== 'config-ignored') option.currentValue = message.params.value;
+    send({ id: message.id, result: { configOptions: Object.values(config) } });
   } else if (message.method === 'session/prompt') {
     if (scenario === 'live-terminal') {
       await ask('terminal/create', { sessionId: 'fixture-session', command: process.execPath,

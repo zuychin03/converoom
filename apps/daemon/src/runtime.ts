@@ -147,7 +147,7 @@ export async function createRuntime(
     const entry = active.get(t.id)!;
     let attempt: Attempt | undefined;
     let bridge: Awaited<ReturnType<typeof managedBridge>> | undefined;
-    let nativeStartupBegan = false, promptSent = false;
+    let nativeStartupBegan = false, promptSent = false, startupStopped = false;
     let unpublished: string | undefined;
     try {
       let cwd = join(dataDir, 'sessions', s.id);
@@ -198,6 +198,7 @@ export async function createRuntime(
         attempt ? attemptEnvironment(attempt.id) : {},
         !attempt,
         bridge.server,
+        t.profile,
       );
       entry.session = session;
       const admittedAttempt = attempt ? store.get<Attempt>('attempt', attempt.id) : undefined;
@@ -229,6 +230,7 @@ export async function createRuntime(
         status: 'running',
         sessionId: session.id,
         startedAt: Date.now(),
+        ...(session.profile ? { applied: session.profile } : {}),
       });
       if (attempt) {
         attempt = { ...admittedAttempt!, status: 'running', sessionId: session.id,
@@ -242,6 +244,8 @@ export async function createRuntime(
         workspace: cwd,
         containment: 'trusted-local advisory',
         mcpInjected: true,
+        ...(t.profile ? { profile: t.profile } : {}),
+        ...(session.profile ? { applied: session.profile } : {}),
       });
       const room = store.get<Room>('room', t.roomId)!;
       const recent = store
@@ -300,6 +304,8 @@ export async function createRuntime(
         emit(t, 'turn.uncertain', { turnId: t.id });
       }
     } catch (e) {
+      // An adapter that refused at startup and saw its process exit leaves nothing running.
+      if (!entry.session && (e as { stopped?: unknown }).stopped === true) startupStopped = true;
       const current = store.get<Turn>('turn', t.id)!;
       const message = redactPublic(e instanceof Error ? e.message : 'Vendor failure');
       const code = e instanceof ConveroomError ? e.code : undefined;
@@ -329,7 +335,9 @@ export async function createRuntime(
           ? 'The answer is kept in this turn record and was not posted. Include it in the handoff.'
           : status === 'uncertain'
             ? 'The agent may have acted before this stopped. Inspect the room and workspace before requesting it again; nothing is rerun automatically.'
-            : 'Work preserved. Wait, sign in natively or explicitly reassign. No API/provider fallback.',
+            : failure === 'profile_unsupported'
+              ? 'Nothing was sent to the agent. Change or clear the seat\'s model and effort, then request the turn again.'
+              : 'Work preserved. Wait, sign in natively or explicitly reassign. No API/provider fallback.',
         ...(unpublished ? { retainedAnswer: retainAnswer(unpublished) } : {}),
       });
       emit(t, 'turn.' + status, { turnId: t.id, error: message, failure, ...(unpublished ? { answerRetained: true } : {}) });
@@ -343,7 +351,7 @@ export async function createRuntime(
     } finally {
       let credentialCleanupFailed = false;
       try { await bridge?.revoke(); } catch { credentialCleanupFailed = true; }
-      const confirmed = entry.session ? await entry.session.close().catch(() => false) : !nativeStartupBegan;
+      const confirmed = entry.session ? await entry.session.close().catch(() => false) : !nativeStartupBegan || startupStopped;
       if (entry.session && confirmed) store.put('turn', t.id, { ...store.get<Turn>('turn', t.id)!, sessionStoppedAt: Date.now() });
       const seat = store.get<Seat>('seat', s.id)!;
       store.put('seat', s.id, { ...seat, status: seat.status === 'left' ? 'left' : confirmed ? 'idle' : 'degraded' });

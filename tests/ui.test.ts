@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClient, ApiError, parseSnapshot } from '../apps/ui/src/api.js';
-import { createRoomAction, grantAction } from '../apps/ui/src/actions.js';
-import { capabilityLine, commandLabel, failureLabel, fmtBytes, interruptedFor, liveRoomId, readiness, requestDetails, roomEvents, rosterOptions, seatState, turnEvidence, turnKind, turnTarget, visibleTurn, withEarlier, workerSeat } from '../apps/ui/src/model.js';
+import { createRoomAction, grantAction, roundRobinAction, seatProfileAction, templateRoomAction } from '../apps/ui/src/actions.js';
+import { capabilityLine, profileLabel, slotChoices, slotSeat, commandLabel, failureLabel, fmtBytes, interruptedFor, liveRoomId, readiness, requestDetails, roomEvents, rosterOptions, seatState, turnEvidence, turnKind, turnTarget, visibleTurn, withEarlier, workerSeat } from '../apps/ui/src/model.js';
 import { coalesce } from '../apps/ui/src/refresh.js';
 import { roomStatus } from '../apps/ui/src/RoomView.js';
 
@@ -263,4 +263,63 @@ describe('agent discovery in the browser', () => {
       .map((product) => ({ product, status: 'ready_managed', installed: true, registered: false })) };
     expect(createRoomAction(() => {}, many).fields?.find((f) => f.key === 'seats')?.value?.split('\n')).toHaveLength(5);
   });
+});
+describe('templates and seat profiles in the browser', () => {
+  const discovery = { at: 1, harnesses: [
+    { product: 'codex', status: 'ready_managed', installed: true, registered: true, models: ['gpt-fixture', 'gpt-mini'] },
+    { product: 'cursor', status: 'ready_managed', installed: true, registered: true },
+    { product: 'claude', status: 'ready_polling', installed: true, registered: true },
+  ] };
+  const saved = { id: 'saved', name: 'Storage review', description: 'Build and review.', slots: [
+    { name: 'Builder', role: 'member', mode: 'managed', product: 'codex', profile: { model: 'gpt-fixture', effort: 'high' } },
+    { name: 'Lead', role: 'host', mode: 'polling', product: 'claude' },
+    { name: 'Reviewer', role: 'member', mode: 'managed', profile: { effort: 'max' } },
+  ] };
+  it('fills each role slot with its preferred ready product, else an unused ready agent in its mode', () => {
+    expect(slotChoices(saved, discovery).map((c) => c.value)).toEqual(['codex:managed', 'claude:polling', 'cursor:managed']);
+    expect(slotChoices(saved, { at: 1, harnesses: [discovery.harnesses[1]] }).map((c) => c.value)).toEqual(['cursor:managed', 'cursor:managed', 'cursor:managed']);
+    expect(slotChoices(saved, null).map((c) => c.value)).toEqual(['', '', '']);
+  });
+  it('keeps a slot\'s model only on its own product and drops the profile for a polling agent', () => {
+    expect(slotSeat(saved.slots[0]!, 'codex:managed')).toEqual({ product: 'codex', mode: 'managed', name: 'Builder', role: 'member',
+      profile: { model: 'gpt-fixture', effort: 'high' } });
+    expect(slotSeat(saved.slots[0]!, 'cursor:managed')).toEqual({ product: 'cursor', mode: 'managed', name: 'Builder', role: 'member', profile: { effort: 'high' } });
+    expect(slotSeat(saved.slots[0]!, 'claude:polling')).toEqual({ product: 'claude', mode: 'polling', name: 'Builder', role: 'member' });
+  });
+  it('creates a room from a template with the chosen agents seated as its roles', () => {
+    const action = templateRoomAction(saved, () => {}, discovery);
+    expect(action.fields?.filter((f) => f.key.startsWith('slot')).map((f) => [f.label, f.value]))
+      .toEqual([['Builder · member', 'codex:managed'], ['Lead · host', 'claude:polling'], ['Reviewer · member', 'cursor:managed']]);
+    expect(action.prepare?.({ title: 'T', objective: 'O', slot0: 'codex:managed', slot1: '', slot2: 'cursor:managed' })).toEqual({
+      title: 'T', objective: 'O', templateId: 'saved', seats: [
+        { product: 'codex', mode: 'managed', name: 'Builder', role: 'member', profile: { model: 'gpt-fixture', effort: 'high' } },
+        { product: 'cursor', mode: 'managed', name: 'Reviewer', role: 'member', profile: { effort: 'max' } },
+      ] });
+    expect(templateRoomAction(saved, () => {}, null).prepare?.({ title: 'T', objective: 'O' })).toEqual({ title: 'T', objective: 'O', templateId: 'saved' });
+  });
+  it('offers the discovered models for a seat and sends an empty profile to clear it', () => {
+    const seat = { id: 's', roomId: 'r', product: 'codex', mode: 'managed', profile: { model: 'gpt-hidden', effort: 'high' } };
+    const action = seatProfileAction(seat, discovery);
+    expect(action.fields?.[0]).toMatchObject({ type: 'select', value: 'gpt-hidden', options: [{ value: 'gpt-fixture' }, { value: 'gpt-mini' }, { value: 'gpt-hidden' }] });
+    expect(action.prepare?.({ roomId: 'r', seatId: 's', model: '', effort: '' })).toEqual({ roomId: 'r', seatId: 's', profile: {} });
+    expect(seatProfileAction({ ...seat, product: 'cursor' }, discovery).fields?.[0]?.type).toBeUndefined();
+    expect([profileLabel(seat.profile), profileLabel({ effort: 'max' }), profileLabel(undefined)]).toEqual(['gpt-hidden · high effort', 'max effort', '']);
+  });
+  it('shows the profile a turn asked for beside the values the agent ran with', () => {
+    const state = parseSnapshot({ seats: [{ id: 's', mode: 'managed', product: 'codex' }] });
+    const rows = Object.fromEntries(turnEvidence({ seatId: 's', status: 'completed', profile: { effort: 'max' }, applied: { model: 'gpt-fixture', effort: 'xhigh' } }, state));
+    expect(rows['Model and effort']).toBe('Asked max effort · ran gpt-fixture · xhigh effort');
+    expect(parseSnapshot({ templates: [saved] }).templates).toEqual([saved]);
+  });
+  it('fills a round robin from the template\'s suggested rounds with every speaker in seat order', () => {
+    const seats = [{ id: 'a', name: 'A', role: 'member' }, { id: 'b', name: 'B', role: 'observer' }, { id: 'c', name: 'C', role: 'member' }];
+    const fields = roundRobinAction('r', seats, 6, { id: 't', name: 'T', rounds: 2 }).fields!;
+    expect(fields.map((f) => f.value)).toEqual(['a\nc', '2', undefined]);
+    expect(roundRobinAction('r', seats, 6).fields!.map((f) => f.value)).toEqual([undefined, '1', undefined]);
+  });
+});
+it('ends a saved template description with a full stop before the template note', () => {
+  const note = 'The template sets the starter agenda, agent wakes and any lowered budgets.';
+  expect(templateRoomAction({ id: 't', name: 'T', description: 'Our cache review', slots: [] }, () => {}).description).toBe('Our cache review. ' + note);
+  expect(templateRoomAction({ id: 't', name: 'T', description: '', slots: [] }, () => {}).description).toBe(note);
 });

@@ -310,6 +310,10 @@ export function capabilityLine(seat: RecordData) {
   return `Declared ${named('declared', 'none')} · probed ${named('probed', 'not yet')} · tested ${named('tested', 'not yet')}`;
 }
 const clip = (id: string) => (id.length > 12 ? id.slice(0, 12) + '…' : id);
+export const profileLabel = (profile: unknown) => {
+  const p = isRecord(profile) ? profile : {};
+  return [string(p, 'model'), p.effort ? string(p, 'effort') + ' effort' : ''].filter(Boolean).join(' · ');
+};
 // Native tools can bypass room checks, so a managed session is labelled advisory rather than contained.
 export function turnEvidence(turn: RecordData, state: Snapshot): [string, string][] {
   const seat = state.seats.find((s) => s.id === turn.seatId), status = string(turn, 'status');
@@ -318,6 +322,9 @@ export function turnEvidence(turn: RecordData, state: Snapshot): [string, string
   const rows: [string, string][] = [['Dispatch', dispatched ? 'Committed ' + fmtClock(dispatched) : OPEN_TURN.includes(status) ? 'Not yet' : 'Never committed, so known not sent']];
   if (typeof turn.sessionId === 'string')
     rows.push(['Native session', clip(turn.sessionId) + ' · ' + (stopped ? 'stop confirmed ' + fmtClock(stopped) : ACTIVE_TURN.includes(status) ? 'running' : 'stop not confirmed')]);
+  if (turn.profile || turn.applied)
+    rows.push(['Model and effort', 'Asked ' + (profileLabel(turn.profile) || 'agent defaults') +
+      (turn.applied ? ' · ran ' + (profileLabel(turn.applied) || 'as the agent reported nothing') : '')]);
   if (typeof turn.failure === 'string') rows.push(['Outcome code', turn.failure]);
   if (cancel) rows.push(['Cancel requested', fmtClock(cancel)]);
   const answer = state.events.find((e) => e.id === turn.responseEventId);
@@ -333,6 +340,26 @@ const READINESS: Record<string, { kind: Kind; label: string }> = {
   not_installed: { kind: 'idle', label: 'Not installed' },
 };
 export const readiness = (status: string) => READINESS[status] ?? { kind: 'warn' as Kind, label: 'Unknown' };
+export const discoveredModels = (discovery: RecordData | null, product: string) =>
+  list(objects(discovery ?? {}, 'harnesses').find((h) => h.product === product) ?? {}, 'models').map(String);
+// FR-56: a slot takes its preferred product when ready, else an unused ready agent in its mode, else any ready agent.
+export function slotChoices(template: RecordData, discovery: RecordData | null) {
+  const ready = rosterOptions(discovery), used = new Set<string>();
+  return objects(template, 'slots').map((slot) => {
+    const free = (o: { value: string }) => !used.has(o.value), mode = (o: { value: string }) => o.value.endsWith(':' + string(slot, 'mode'));
+    const pick = (slot.product ? ready.find((o) => o.value.startsWith(string(slot, 'product') + ':')) : undefined)
+      ?? ready.find((o) => free(o) && mode(o)) ?? ready.find(free) ?? ready[0];
+    if (pick) used.add(pick.value);
+    return { slot, value: pick?.value ?? '' };
+  });
+}
+// A model name belongs to its product, so it moves with a slot only when the same product fills it; polling agents keep their own settings.
+export function slotSeat(slot: RecordData, choice: string) {
+  const [product = '', mode = ''] = choice.split(':'), profile = isRecord(slot.profile) ? slot.profile : {};
+  const kept = mode === 'managed' ? { ...(profile.effort ? { effort: profile.effort } : {}),
+    ...(profile.model && product === slot.product ? { model: profile.model } : {}) } : {};
+  return { product, mode, name: string(slot, 'name'), role: string(slot, 'role', 'member'), ...(Object.keys(kept).length ? { profile: kept } : {}) };
+}
 // FR-62: room creation offers the agents the latest discovery found ready, in the connection mode they are ready for.
 export function rosterOptions(discovery: RecordData | null) {
   const harnesses = discovery ? objects(discovery, 'harnesses') : [];

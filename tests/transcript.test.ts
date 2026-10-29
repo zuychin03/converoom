@@ -150,3 +150,25 @@ it('renders a shared history page from the public projection only', async () => 
     expect(page).toMatchObject({ hasMore: false, digest: scopeDigest(page.markdown), view: 'bounded-page' });
   } finally { core.store.close(); }
 });
+
+it('records templates, seat profiles and the model and effort a turn ran with in the transcript', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'converoom-transcript-'));
+  const runtime = await createRuntime(dir, { noScheduler: true });
+  try {
+    const owner = humanIdentity(runtime);
+    const call = <T = ToolArgs>(name: string, args: ToolArgs) => runtime.core.dispatch(owner, name, args) as Promise<T>;
+    const room = await call<Room>('room_create', { title: 'Twice', objective: 'Ask two agents', templateId: 'builtin:second-opinion',
+      seats: [{ product: 'codex', mode: 'managed', name: 'First opinion' }] });
+    const seat = runtime.core.store.list<Seat>('seat', { roomId: room.id })[0]!;
+    await call('seat_profile_set', { roomId: room.id, seatId: seat.id, profile: { model: 'gpt-fixture', effort: 'max' } });
+    await call('seat_profile_set', { roomId: room.id, seatId: seat.id, profile: {} });
+    const turn = await call<Turn>('turn_request', { roomId: room.id, seatId: seat.id, prompt: 'Answer' }).catch(() => undefined);
+    runtime.core.store.append(room.id, 'turn.started', 'runtime', { turnId: turn?.id ?? 'turn-1', applied: { model: 'gpt-fixture', effort: 'xhigh' } });
+    const markdown = exportTranscript(await call<RoomExport>('room_export', { roomId: room.id }));
+    expect(markdown).toContain(' · Owner · Room opened from the Second opinion template.');
+    expect(markdown).toMatch(/ · Owner · agenda\n\n```text\n1\. State the question/);
+    expect(markdown).toContain('Model and effort for First opinion (Codex seat) set to `gpt-fixture` at max effort.');
+    expect(markdown).toContain('Model and effort for First opinion (Codex seat) cleared; the agent\'s own defaults apply.');
+    expect(markdown).toMatch(/started on `gpt-fixture` at xhigh effort\./);
+  } finally { await runtime.stop(); await rm(dir, { recursive: true, force: true }); }
+}, 30000);

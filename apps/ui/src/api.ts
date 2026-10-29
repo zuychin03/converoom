@@ -15,7 +15,7 @@ export const collections = [
   'reviews',
   'candidates',
   'resources',
-  'members', 'invitations', 'ownerConsents', 'remoteConnections', 'remoteProposals', 'sharedArtefacts', 'interruptedCommands', 'roundRobins',
+  'members', 'invitations', 'ownerConsents', 'remoteConnections', 'remoteProposals', 'sharedArtefacts', 'interruptedCommands', 'roundRobins', 'templates',
 ] as const;
 export type Snapshot = { [K in (typeof collections)[number]]: RecordData[] } & { discovery: RecordData | null };
 export class ApiError extends Error {

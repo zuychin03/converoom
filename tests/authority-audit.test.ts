@@ -23,6 +23,7 @@ afterEach(() => store.close());
 const AUTHORITY: Record<string, string[]> = {
   'seat.joined': ['id', 'role', 'mode'],
   'seat.consent': ['seatId', 'consent'],
+  'seat.profile': ['seatId', 'profile', 'previous'],
   'policy.changed': ['version', 'previousVersion', 'policy'],
   'permission.requested': ['id', 'action', 'scope', 'scopeDigest', 'expiresAt'],
   'permission.granted': ['requestId', 'action', 'scope', 'scopeDigest', 'expiresAt'],
@@ -41,6 +42,7 @@ it('records the human actor, an action digest, scope, expiry and policy for ever
   const reviewer = await call<Seat>('seat_add', { roomId: room.id, product: 'codex', mode: 'managed', name: 'Reviewer' });
   await call<Seat>('seat_add', { roomId: room.id, product: 'codex', mode: 'managed', name: 'Lead', role: 'host' });
   for (const seat of [worker, reviewer]) await call('seat_consent', { roomId: room.id, seatId: seat.id, consent: true });
+  await call('seat_profile_set', { roomId: room.id, seatId: worker.id, profile: { effort: 'high' } });
   await call('policy_update', { roomId: room.id, policy: { maxMessages: 30 } });
   const granted = await call<Turn>('turn_request', { roomId: room.id, seatId: worker.id, prompt: 'Review' });
   await call('permission_grant', { requestId: granted.permissionRequestId });
