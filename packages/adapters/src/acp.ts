@@ -18,7 +18,7 @@ function promptFailure(error: unknown): never {
   throw typeof code === 'number' && REFUSED.has(code) ? notStarted(error as Error) : error;
 }
 
-async function bounded<T>(request: Promise<T>, ms: number): Promise<T> {
+export async function bounded<T>(request: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([request, new Promise<never>((_, reject) => {
@@ -26,6 +26,9 @@ async function bounded<T>(request: Promise<T>, ms: number): Promise<T> {
     })]);
   } finally { clearTimeout(timer); }
 }
+
+// Native login method IDs these vendors document; selecting one refuses API-key authentication.
+export const NATIVE_AUTH: Partial<Record<Product, string>> = { grok: 'cached_token', antigravity: 'oauth-personal', cursor: 'cursor_login' };
 
 export async function startAcp(
   product: Product, entry: { command: string; args: string[] }, cwd: string,
@@ -85,8 +88,7 @@ export async function startAcp(
     const init = await bounded(connection.agent.request(acp.methods.agent.initialize, initParams), 60000);
     if (init.protocolVersion !== acp.PROTOCOL_VERSION)
       throw new ConveroomError('protocol_version', 'Native agent negotiated an incompatible ACP version');
-    // Native login method IDs these vendors document; selecting one refuses API-key authentication.
-    const methodId = ({ grok: 'cached_token', antigravity: 'oauth-personal', cursor: 'cursor_login' } as Partial<Record<Product, string>>)[product];
+    const methodId = NATIVE_AUTH[product];
     if (methodId) {
       const method = init.authMethods?.find((m) => m.id === methodId && !('type' in m && m.type === 'terminal'));
       if (!method) throw new ConveroomError('subscription_required', 'Native ' + methodId + ' authentication is required; API authentication is disabled', 403);

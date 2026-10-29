@@ -17,7 +17,7 @@ export const collections = [
   'resources',
   'members', 'invitations', 'ownerConsents', 'remoteConnections', 'remoteProposals', 'sharedArtefacts', 'interruptedCommands', 'roundRobins',
 ] as const;
-export type Snapshot = { [K in (typeof collections)[number]]: RecordData[] };
+export type Snapshot = { [K in (typeof collections)[number]]: RecordData[] } & { discovery: RecordData | null };
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -35,14 +35,17 @@ export function isRecord(value: unknown): value is RecordData {
 }
 export function parseSnapshot(value: unknown): Snapshot {
   if (!isRecord(value)) throw new Error('Invalid state received. Refresh to try again.');
-  return Object.fromEntries(
-    collections.map((key) => {
-      const items = value[key] ?? [];
-      if (!Array.isArray(items) || items.some((item) => !isRecord(item)))
-        throw new Error(`Invalid ${key} received. Refresh to try again.`);
-      return [key, items];
-    }),
-  ) as Snapshot;
+  return {
+    ...Object.fromEntries(
+      collections.map((key) => {
+        const items = value[key] ?? [];
+        if (!Array.isArray(items) || items.some((item) => !isRecord(item)))
+          throw new Error(`Invalid ${key} received. Refresh to try again.`);
+        return [key, items];
+      }),
+    ),
+    discovery: isRecord(value.discovery) ? value.discovery : null,
+  } as Snapshot;
 }
 type Transport = (url: string, init?: RequestInit) => Promise<Response>;
 export function createClient(transport: Transport = (url, init) => fetch(url, init), shared = false) {

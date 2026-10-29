@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClient, ApiError, parseSnapshot } from '../apps/ui/src/api.js';
-import { grantAction } from '../apps/ui/src/actions.js';
-import { capabilityLine, commandLabel, failureLabel, fmtBytes, interruptedFor, liveRoomId, requestDetails, roomEvents, seatState, turnEvidence, turnKind, turnTarget, visibleTurn, withEarlier, workerSeat } from '../apps/ui/src/model.js';
+import { createRoomAction, grantAction } from '../apps/ui/src/actions.js';
+import { capabilityLine, commandLabel, failureLabel, fmtBytes, interruptedFor, liveRoomId, readiness, requestDetails, roomEvents, rosterOptions, seatState, turnEvidence, turnKind, turnTarget, visibleTurn, withEarlier, workerSeat } from '../apps/ui/src/model.js';
 import { coalesce } from '../apps/ui/src/refresh.js';
 import { roomStatus } from '../apps/ui/src/RoomView.js';
 
@@ -232,5 +232,35 @@ describe('browser command boundary', () => {
     expect(urls).toEqual(['/api/state?room=room%20one%2F2', '/api/state', '/api/rooms/room%20one%2F2/events?before=101']);
     const broken = createClient(async () => new Response(JSON.stringify({ events: 'none' }), { status: 200 }));
     await expect(broken.earlierEvents('room', 5)).rejects.toThrow('Invalid room history');
+  });
+});
+describe('agent discovery in the browser', () => {
+  const discovery = { at: 1, harnesses: [
+    { product: 'codex', status: 'ready_managed', installed: true, registered: false },
+    { product: 'claude', status: 'ready_polling', installed: true, registered: true },
+    { product: 'cursor', status: 'needs_login', installed: true, registered: false },
+    { product: 'qoder', status: 'not_installed', installed: false, registered: false },
+  ] };
+  it('pairs every readiness with an icon kind and a word', () => {
+    expect(['ready_managed', 'ready_polling', 'needs_login', 'needs_mcp_registration', 'not_installed'].map(readiness)).toEqual([
+      { kind: 'ok', label: 'Ready, managed' }, { kind: 'ok', label: 'Ready, polling' }, { kind: 'needs', label: 'Sign-in needed' },
+      { kind: 'needs', label: 'Not connected' }, { kind: 'idle', label: 'Not installed' }]);
+  });
+  it('keeps the latest discovery in the browser state', () => {
+    expect(parseSnapshot({ discovery }).discovery).toEqual(discovery);
+    expect(parseSnapshot({}).discovery).toBeNull();
+  });
+  it('prefills a new room with the ready agents and seats them with the room', () => {
+    expect(rosterOptions(discovery)).toEqual([{ value: 'codex:managed', label: 'Codex · new managed session' },
+      { value: 'claude:polling', label: 'Claude Code · existing MCP conversation' }]);
+    const action = createRoomAction(() => {}, discovery);
+    expect(action.fields?.find((f) => f.key === 'seats')).toMatchObject({ type: 'choices', value: 'codex:managed\nclaude:polling' });
+    expect(action.prepare?.({ title: 'Roster', seats: ['claude:polling'] })).toEqual({ title: 'Roster', seats: [{ product: 'claude', mode: 'polling' }] });
+    expect(createRoomAction(() => {}, null).fields?.some((f) => f.key === 'seats')).toBe(false);
+  });
+  it('preselects no more ready agents than a room can seat', () => {
+    const many = { at: 1, harnesses: ['codex', 'cursor', 'antigravity', 'kiro', 'qoder', 'grok']
+      .map((product) => ({ product, status: 'ready_managed', installed: true, registered: false })) };
+    expect(createRoomAction(() => {}, many).fields?.find((f) => f.key === 'seats')?.value?.split('\n')).toHaveLength(5);
   });
 });

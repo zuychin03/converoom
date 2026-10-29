@@ -199,6 +199,7 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
     fields: { action: small, scope: { type: 'object' }, summary: string },
   },
   runtime_capabilities: { required: [] },
+  adapter_discover: { required: [] },
   room_usage: { required: ['roomId'] },
 };
 export const TOOL_DEFINITIONS: ToolDefinition[] = Object.entries(corpus).map(([name, def]) => {
@@ -217,9 +218,16 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = Object.entries(corpus).map(([n
     },
   };
 });
-export function validateToolArgs(name: string, args: Record<string, unknown>): void {
-  const schema = TOOL_DEFINITIONS.find((t) => t.name === name)?.inputSchema;
-  if (!schema) throw new ConveroomError('unknown_command', 'Unknown room tool');
+// Arguments only the paired owner may add to these tools; agent schemas never list them, and the core refuses them from agents too.
+const OWNER_FIELDS: Record<string, Record<string, unknown>> = {
+  adapter_discover: { refresh: { type: 'boolean' } },
+  room_create: { seats: { type: 'array', maxItems: 5, items: { type: 'object', required: ['product', 'mode'], additionalProperties: false,
+    properties: { product: { type: 'string', enum: [...PRODUCT_IDS] }, mode: { type: 'string', enum: ['managed', 'polling'] } } } } },
+};
+export function validateToolArgs(name: string, args: Record<string, unknown>, owner = false): void {
+  const tool = TOOL_DEFINITIONS.find((t) => t.name === name)?.inputSchema;
+  if (!tool) throw new ConveroomError('unknown_command', 'Unknown room tool');
+  const schema = owner && OWNER_FIELDS[name] ? { ...tool, properties: { ...tool.properties, ...OWNER_FIELDS[name] } } : tool;
   const validate = (s: Record<string, unknown>, value: unknown, path: string): void => {
     if (s.enum && !(s.enum as unknown[]).includes(value))
       throw new ConveroomError('invalid_argument', 'Invalid ' + path);

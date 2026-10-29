@@ -12,7 +12,8 @@ import {
   type Action,
   type Run,
 } from './components.js';
-import { STAGES, acceptedOrder, commandLabel, fmtBytes, interruptedFor, num, requestDetails, shortId, taskProgress, workerSeat, type Kind } from './model.js';
+import { STAGES, acceptedOrder, commandLabel, fmtBytes, interruptedFor, num, readiness, requestDetails, shortId, taskProgress, workerSeat, type Kind } from './model.js';
+import { PRODUCT_PROFILES, type Product } from '../../../packages/shared/src/products.js';
 
 export function WorkspaceView({
   state,
@@ -186,6 +187,7 @@ export function WorkspaceView({
           </section>
         </>
       )}
+      <AgentDiscovery discovery={state.discovery} run={run} openAction={openAction} />
       <section className="work-section" aria-labelledby="sources-title">
         <div className="section-head">
           <h2 id="sources-title" className="section-label">
@@ -393,6 +395,89 @@ function WorkspaceCleanup({ read, openAction }: { read: Run; openAction: (action
             </ul>
           </div>
         ),
+      )}
+    </section>
+  );
+}
+
+const SIGN_IN: Record<string, string> = { signed_in: 'signed in', signed_out: 'not signed in', not_checked: 'sign-in checked at the first managed turn' };
+
+function AgentDiscovery({ discovery, run, openAction }: { discovery: RecordData | null; run: Run; openAction: (action: Action) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const harnesses = discovery ? objects(discovery, 'harnesses') : [];
+  const connectable = harnesses.filter((h) => h.installed === true && h.registered !== true);
+  const names = connectable.map((h) => PRODUCT_PROFILES[string(h, 'product') as Product]?.label ?? string(h, 'product')).join(', ');
+  async function discover() {
+    setBusy(true);
+    setError('');
+    try {
+      await run('adapter_discover', { refresh: true });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Discovery did not finish. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="work-section" aria-labelledby="agents-title">
+      <div className="section-head">
+        <h2 id="agents-title" className="section-label">
+          Agents on this computer
+        </h2>
+        <div className="row-actions">
+          <button type="button" className="button small" disabled={busy} aria-busy={busy} onClick={() => void discover()}>
+            {busy ? 'Discovering' : discovery ? 'Discover again' : 'Discover agents'}
+          </button>
+          {connectable.length > 0 && (
+            <button
+              type="button"
+              className="button small"
+              disabled={busy}
+              onClick={() =>
+                openAction({
+                  title: 'Connect agents',
+                  command: 'adapter_autoconnect',
+                  label: 'Connect',
+                  description: `Registers Converoom and its room skill with ${names}. Other settings in their configuration files stay as they are, agents already connected keep their credentials, and auto-start stays off. Restart each agent's MCP connection afterwards.`,
+                  onSuccess: (result) => {
+                    const failed = isRecord(result) ? objects(result, 'failed') : [];
+                    if (failed.length) setError('Not connected: ' + failed.map((f) => `${string(f, 'product')} (${string(f, 'message')})`).join('; '));
+                  },
+                })
+              }
+            >
+              Connect {connectable.length === 1 ? names : `${connectable.length} agents`}
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="rail-note">
+        Discovery starts each installed agent's own program briefly to see whether it answers and how it signs in. It sends no
+        prompt and keeps no account details. {discovery ? `Last run ${new Date(num(discovery, 'at') ?? 0).toLocaleString('en-AU')}.` : 'It has not run yet.'}
+      </p>
+      {error && <ErrorNotice dismiss={() => setError('')}>{error}</ErrorNotice>}
+      {harnesses.length > 0 && (
+        <ul className="sources">
+          {harnesses.map((h) => {
+            const product = string(h, 'product'), state = readiness(string(h, 'status'));
+            // A deferred sign-in check only reassures on a ready row; a row that needs sign-in already says why.
+            const signIn = h.status === 'needs_login' && h.signIn === 'not_checked' ? '' : SIGN_IN[string(h, 'signIn')];
+            return (
+              <li key={product} className="source">
+                <span className="source-kind">{PRODUCT_PROFILES[product as Product]?.label ?? product}</span>
+                <span className="source-name">{string(h, 'detail')}</span>
+                <code className="source-path">{string(h, 'version')}</code>
+                <span className="source-end">
+                  <Status kind={state.kind}>{state.label}</Status>
+                  <span className="source-meta">
+                    {[signIn, h.registered === true ? 'connected to Converoom' : ''].filter(Boolean).join(' · ')}
+                  </span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </section>
   );

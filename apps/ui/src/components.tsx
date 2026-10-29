@@ -178,6 +178,8 @@ export type Action = {
   fields?: Field[];
   args?: RecordData;
   danger?: boolean;
+  // Shapes the collected field values into the command's arguments.
+  prepare?: (args: RecordData) => RecordData;
   onSuccess?: (result: unknown) => void;
 };
 export type Run = (name: string, args: RecordData) => Promise<unknown>;
@@ -232,7 +234,7 @@ export function ActionDialog({
         else if (value || field.required) args[field.key] = value;
       }
       setBusy(true);
-      const result = await run(action.command, args);
+      const result = await run(action.command, action.prepare ? action.prepare(args) : args);
       action.onSuccess?.(result);
       close();
     } catch (cause) {

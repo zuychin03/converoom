@@ -16,7 +16,7 @@ export interface ManagedSession {
   close(): Promise<boolean>;
 }
 export type PermissionHandler = (scope: ToolArgs) => Promise<boolean>;
-async function managedEntry(product: Product, env: NodeJS.ProcessEnv = {}) {
+export async function managedEntry(product: Product, env: NodeJS.ProcessEnv = {}) {
   const override = product === 'antigravity' ? env.CONVEROOM_ANTIGRAVITY_ACP ?? process.env.CONVEROOM_ANTIGRAVITY_ACP : undefined;
   if (override && !isAbsolute(override))
     throw new ConveroomError('invalid_executable', 'CONVEROOM_ANTIGRAVITY_ACP must be an absolute native executable path');

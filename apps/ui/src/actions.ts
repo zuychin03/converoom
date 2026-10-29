@@ -1,15 +1,26 @@
 import { isRecord, string, type RecordData } from './api.js';
-import { num, phaseLabel } from './model.js';
+import { num, phaseLabel, rosterOptions } from './model.js';
 import { PRODUCT_IDS, PRODUCT_PROFILES } from '../../../packages/shared/src/products.js';
 import { PHASE_STEPS, type RoomPhase } from '../../../packages/shared/src/contracts.js';
-import type { Action } from './components.js';
+import type { Action, Field } from './components.js';
 
 export const PRODUCTS = PRODUCT_IDS.map((value) => ({ value, label: PRODUCT_PROFILES[value].label }));
 const POLLING_ONLY = PRODUCT_IDS.filter((value) => PRODUCT_PROFILES[value].protocol === 'polling').map((value) => PRODUCT_PROFILES[value].label).join(' and ');
 
 const roomIdOf = (result: unknown) => (isRecord(result) ? string(result, 'id') : '');
 
-export const createRoomAction = (onCreated: (id: string) => void): Action => ({
+// FR-62: a new room offers the agents the latest discovery found ready, and seats the chosen ones with the room.
+function seatField(discovery: RecordData | null): Field[] {
+  const ready = rosterOptions(discovery);
+  return ready.length ? [{
+    key: 'seats', label: 'Agents to seat', type: 'choices', options: ready, value: ready.slice(0, 5).map((o) => o.value).join('\n'),
+    hint: 'Your last discovery found these ready. A room seats up to five, and each managed turn still needs your consent and grant.',
+  }] : [];
+}
+const seatsOf = (args: RecordData) => Array.isArray(args.seats)
+  ? { seats: args.seats.map((value) => { const [product, mode] = String(value).split(':'); return { product, mode }; }) } : {};
+
+export const createRoomAction = (onCreated: (id: string) => void, discovery: RecordData | null = null): Action => ({
   title: 'Create room',
   command: 'room_create',
   label: 'Create room',
@@ -29,7 +40,9 @@ export const createRoomAction = (onCreated: (id: string) => void): Action => ({
       ],
     },
     { key: 'draft', label: 'Create as a draft: add seats and limits, then start it', type: 'checkbox' },
+    ...seatField(discovery),
   ],
+  prepare: (args) => ({ ...args, ...seatsOf(args) }),
   onSuccess: (result) => onCreated(roomIdOf(result)),
 });
 

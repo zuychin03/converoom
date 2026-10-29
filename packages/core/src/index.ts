@@ -27,7 +27,7 @@ import { activeMembership, currentSeat, currentTurnAuthority, mountMembership, r
 import { authority } from './audit.js';
 // Reads rerun on retry, so their results are never stored under a client key.
 export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
-  'resource_profile_list', 'adapter_status', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview']);
+  'resource_profile_list', 'adapter_status', 'adapter_discover', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview']);
 const limits = {
   maxActiveTurns: 2,
   maxRounds: 6,
@@ -547,7 +547,12 @@ export function createCore(store: Store): Core {
       }
     },
   };
-  c.register('room_create', (a, x) => {
+  // FR-62: the owner's roster, usually prefilled from discovery, is seated in the same transaction as the room.
+  c.register('room_create', (a, x) => store.transaction(() => {
+    const roster = x.seats === undefined ? [] : x.seats;
+    if (!Array.isArray(roster) || roster.length > 5 || roster.some((s) => !s || typeof s !== 'object'))
+      throw new E('invalid_argument', 'Seats must be a list of at most five products with a connection mode');
+    if (roster.length && a.kind !== 'human') throw new E('human_required', 'Only the owner adds seats when creating a room', 403);
     const r: Room = {
       id: randomUUID(),
       title: str(x, 'title', 256),
@@ -572,8 +577,13 @@ export function createCore(store: Store): Core {
         { name: x.name ?? 'Host', product: x.product ?? 'codex', role: 'host' },
         a.principalId,
       );
+    for (const s of roster as ToolArgs[]) {
+      const product = String(s.product);
+      if (!isProduct(product)) throw new E('invalid_product', 'Choose a supported product');
+      add(a, room(r.id), { name: PRODUCT_PROFILES[product].label, product, mode: s.mode, role: 'member' });
+    }
     return room(r.id);
-  });
+  }));
   c.register('room_get', (a, x) => access(a, str(x, 'roomId')));
   c.register('room_list', (a) =>
     store

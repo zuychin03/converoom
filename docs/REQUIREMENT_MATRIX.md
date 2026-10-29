@@ -69,7 +69,7 @@ The agent expansion adds Antigravity, Kiro, Qoder and Grok Build to FR-01/05/11/
 | FR-59 | Future phase (V1.3) | An opt-in authenticated private HTTPS owner listener shall allow mobile monitoring, diff/checkpoint inspection and scoped human approvals. |
 | FR-60 | Future phase (V1.3) | Owner-remote mobile sessions shall remain strictly isolated from `/shared` participant routes and local-only machine setup. |
 | FR-61 | Future phase (V1.2) | When a seat exhausts quota, loses authentication or disconnects mid-session, the runtime shall support structured takeover of its open interactions, host role or in-progress coding attempt by another eligible seat. |
-| FR-62 | Future phase (V1.2) | The runtime and CLI shall automatically discover installed agent harnesses, probe non-inference readiness and support one-action or automatic MCP/skill connection. |
+| FR-62 | Locally implemented with fixture tests; live vendor and release acceptance open | The runtime and CLI shall automatically discover installed agent harnesses, probe non-inference readiness and support one-action or automatic MCP/skill connection. |
 | FR-63 | Future phase (V1.2) | Owners shall be able to import bounded conversation/session context from connected agent harnesses, and authorised seats to request such imports, referenced via `@context` mentions. |
 | FR-64 | Future phase (V1.2) | Rooms shall support scoped sub-threads and layered context flow with pinned invariants and rolling compaction. |
 | FR-65 | Future phase (V1.2) | Human owners shall be able to barge in mid-session to steer queued turns, deliver urgent directives on Converoom tool results or cooperatively interrupt-and-amend an active managed turn. |

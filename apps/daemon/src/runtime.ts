@@ -1,5 +1,5 @@
 import { mkdir, cp, writeFile } from 'node:fs/promises';
-import { PRODUCT_IDS } from '../../../packages/shared/src/products.js';
+import { PRODUCT_IDS, type Product } from '../../../packages/shared/src/products.js';
 import { join, dirname, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +39,10 @@ import { canonicalRoot } from '../../../packages/adapters/src/process.js';
 import { managedBridge } from '../../../packages/mcp/src/managed.js';
 import { mountParticipant, type RemoteTransportFactory } from '../../../packages/remote/src/client.js';
 import { currentTurnAuthority } from '../../../packages/core/src/membership.js';
+import { installationAuthority } from '../../../packages/core/src/audit.js';
+import { isConnected, latestDiscovery, markConnected, runDiscovery } from '../../cli/src/discovery.js';
+import { connectProduct } from '../../cli/src/connect.js';
+import { issueBridgeCredential, revokeBridgeCredential } from './bridges.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
   ConveroomError,
@@ -478,6 +482,43 @@ export async function createRuntime(
       ticking = false;
     }
   };
+  const humanOwner = (a: Actor, what: string) => {
+    if (a.kind !== 'human') throw new ConveroomError('human_required', 'Only the owner can ' + what, 403);
+    core.requireOwner(a);
+  };
+  // FR-62: a scan launches each installed vendor briefly, so it runs only when the owner asks; agents read the latest result.
+  core.register('adapter_discover', async (a, x) => {
+    if (x.refresh === true) humanOwner(a, 'run discovery');
+    return { discovery: x.refresh === true ? await runDiscovery(dataDir) : latestDiscovery(dataDir) };
+  });
+  core.register('adapter_autoconnect', async (a) => {
+    humanOwner(a, 'connect agents');
+    const discovery = latestDiscovery(dataDir) ?? await runDiscovery(dataDir);
+    const result = { connected: [] as Product[], alreadyConnected: [] as Product[], notInstalled: [] as Product[],
+      failed: [] as { product: Product; message: string }[] };
+    const bridges = {
+      issue: async (product: Product) => {
+        const issued = issueBridgeCredential(runtime, product);
+        installationAuthority(store, a, 'bridge.credential_issued', { principalId: issued.principalId, product });
+        return issued;
+      },
+      revoke: async (principalId: string) => revokeBridgeCredential(store, principalId),
+    };
+    for (const h of discovery.harnesses) {
+      if (!h.installed) result.notInstalled.push(h.product);
+      else if (await isConnected(dataDir, h.product)) result.alreadyConnected.push(h.product);
+      else {
+        try {
+          await connectProduct(dataDir, h.product, bridges);
+          result.connected.push(h.product);
+        } catch (e) {
+          result.failed.push({ product: h.product, message: redactPublic(e instanceof Error ? e.message : 'Connection failed') });
+        }
+      }
+    }
+    await markConnected(dataDir, discovery, [...result.connected, ...result.alreadyConnected]);
+    return result;
+  });
   core.register('adapter_status', async (a) => {
     core.requireOwner(a);
     return Promise.all(
@@ -565,7 +606,7 @@ export async function createRuntime(
     if (remoteTicking || stopped) return;
     remoteTicking = true; void participant.tick().finally(() => { remoteTicking = false; });
   }, options.remoteTickMs ?? 1000);
-  return {
+  const runtime: Runtime = {
     core,
     dataDir,
     stop: () =>
@@ -588,4 +629,5 @@ export async function createRuntime(
         store.close();
       })()),
   };
+  return runtime;
 }

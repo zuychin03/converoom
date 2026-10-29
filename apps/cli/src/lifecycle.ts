@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { ConveroomError, type Product } from '../../../packages/shared/src/contracts.js';
 import { isProduct } from '../../../packages/shared/src/products.js';
 import { backupDatabase, createStore, databaseSchema, scopeDigest } from '../../../packages/store/src/index.js';
-import { revokeBridgeCredential } from '../../daemon/src/server.js';
+import { revokeBridgeCredential } from '../../daemon/src/bridges.js';
 import { VERSION, editConfig, installSkill, installStable, json, mcpArgs, privateJson, registeredEntry, removeSkill, samePath } from './support.js';
 import { credentialLocation, migrateCredentials, removeCredential } from './credentials.js';
 

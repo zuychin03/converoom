@@ -50,6 +50,20 @@ const fixtureControl = createHttpServer(async (request, response) => {
   if (request.method === 'POST' && requestUrl.pathname === '/reset') {
     for (const room of runtime.core.store.list<Room>('room').filter((r) => !ENDED_ROOMS.includes(r.lifecycle)))
       await runtime.core.dispatch(humanIdentity(runtime), 'room_close', { roomId: room.id });
+    await rm(join(dir, 'discovery.json'), { force: true });
+    response.writeHead(204).end();
+    return;
+  }
+  // A recorded result, so the flow never launches real vendor programs.
+  if (request.method === 'POST' && requestUrl.pathname === '/discovery') {
+    const harness = (product: string, status: string, registered: boolean, detail: string, signIn = 'not_checked') =>
+      ({ product, status, installed: status !== 'not_installed', registered, signIn, detail, ...(status === 'not_installed' ? {} : { version: product + ' 1.0.0' }) });
+    await writeFile(join(dir, 'discovery.json'), JSON.stringify({ at: Date.now(), harnesses: [
+      harness('codex', 'ready_managed', true, 'Codex can start managed sessions with its own sign-in.', 'signed_in'),
+      harness('cursor', 'needs_login', false, 'Cursor does not offer its native cursor_login sign-in, and managed sessions do not use API keys. Sign in through Cursor, then discover again.'),
+      harness('claude', 'needs_mcp_registration', false, 'Claude Code is installed but not connected to Converoom. Connect it to join rooms.', 'not_applicable'),
+      harness('qoder', 'not_installed', false, 'Qoder is not installed on this machine.', 'not_applicable'),
+    ] }));
     response.writeHead(204).end();
     return;
   }

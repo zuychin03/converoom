@@ -330,3 +330,14 @@ describe('room authority and interactions', () => {
     expect((await call<Room>('room_get', { roomId: r.id })).hostSeatId).toBe(s.id);
   });
 });
+it('creates a room with the owner\'s chosen roster in one step, and refuses a roster from an agent or one that cannot be seated', async () => {
+  const r = await call<Room>('room_create', { title: 'Roster', objective: 'Pick a storage engine',
+    seats: [{ product: 'codex', mode: 'managed' }, { product: 'claude', mode: 'polling' }] });
+  expect(store.list<Seat>('seat', { roomId: r.id }).map((s) => [s.name, s.product, s.mode, s.role])).toEqual([
+    ['Codex', 'codex', 'managed', 'member'], ['Claude Code', 'claude', 'polling', 'member']]);
+  await expect(call('room_create', { title: 'Agent roster', objective: 'Add seats', seats: [{ product: 'codex', mode: 'managed' }] }, agent))
+    .rejects.toMatchObject({ code: 'human_required' });
+  await expect(call('room_create', { title: 'Unseatable', objective: 'Managed Claude Code', seats: [{ product: 'claude', mode: 'managed' }] }))
+    .rejects.toMatchObject({ code: 'managed_unsupported' });
+  expect(store.list<Room>('room').map((room) => room.title)).toEqual(['Roster']);
+});

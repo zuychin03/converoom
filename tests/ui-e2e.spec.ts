@@ -160,6 +160,24 @@ test('complete human room lifecycle at desktop and mobile', async ({ page, reque
   await page.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-interrupted.png', fullPage: true });
   await clearing.getByRole('button', { name: 'Clear', exact: true }).click();
   await expect(interrupted).toBeHidden();
+  expect((await request.post('http://127.0.0.1:43318/discovery')).ok()).toBe(true);
+  await page.getByRole('button', { name: 'Refresh state' }).click();
+  const discovered = page.getByRole('region', { name: 'Agents on this computer' });
+  for (const status of ['Ready, managed', 'Sign-in needed', 'Not connected', 'Not installed'])
+    await expect(discovered.getByText(status, { exact: true })).toBeVisible();
+  await expect(discovered.getByRole('button', { name: 'Connect 2 agents' })).toBeVisible();
+  expect(await discovered.evaluate((section) => section.scrollWidth <= section.clientWidth)).toBe(true);
+  await axe(page);
+  await discovered.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-agents.png' });
+  await page.getByRole('button', { name: 'Open index' }).click();
+  await page.getByRole('combobox', { name: 'Search rooms, entry numbers and actions' }).fill('Create room');
+  await page.getByRole('dialog', { name: 'Index' }).getByRole('option', { name: /Create room/ }).first().click();
+  const creating = page.getByRole('dialog', { name: 'Create room' });
+  await expect(creating.getByRole('checkbox', { name: 'Codex · new managed session' })).toBeChecked();
+  await axe(page);
+  await creating.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-roster.png' });
+  await page.keyboard.press('Escape');
+  await expect(creating).toBeHidden();
   await page.getByRole('button', { name: 'Room', exact: true }).click();
   await expect(page.getByText('Uncertain · timed out', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Record inspection' }).click();

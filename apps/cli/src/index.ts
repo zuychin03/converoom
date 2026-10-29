@@ -3,7 +3,6 @@ import { existsSync } from 'node:fs';
 import { open, writeFile, unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { humanCommand } from './human.js';
 import { restoreHistory } from './history.js';
@@ -14,9 +13,11 @@ import { createSharedServer } from '../../daemon/src/shared-server.js';
 import { sharedStartOptions } from './shared.js';
 import { assertCurrent, ensureInstalled, installationStatus, recover, uninstall, upgrade } from './lifecycle.js';
 import { cleanupPreviewLines, cleanupResultLines } from './cleanup.js';
-import { CLIENT_SECRETS, credentialLocation, credentialStorage, migrateCredentials, removeCredential, writeCredential } from './credentials.js';
+import { credentialLocation, credentialStorage, migrateCredentials, removeCredential } from './credentials.js';
 import { serveMcp } from '../../../packages/mcp/src/index.js';
 import { launchConsole } from '../../../packages/mcp/src/runtime.js';
+import { connectProduct, defaultConfig, defaultSkills } from './connect.js';
+import { autoConnectable, discoveryLines, runDiscovery } from './discovery.js';
 import {
   dataDirectory,
   privateDirectory,
@@ -24,14 +25,12 @@ import {
   json,
   secret,
   editConfig,
-  mcpArgs,
   connectionReport,
-  installSkill,
   removeSkill,
   VERSION,
 } from './support.js';
 import { probeProduct } from '../../../packages/adapters/src/index.js';
-import { PRODUCT_IDS, PRODUCT_PROFILES, isProduct } from '../../../packages/shared/src/products.js';
+import { PRODUCT_IDS, isProduct } from '../../../packages/shared/src/products.js';
 import { redactPublic } from '../../../packages/store/src/index.js';
 import { exportTranscript, type RoomExport } from '../../../packages/core/src/transcript.js';
 import type { Product, ToolArgs } from '../../../packages/shared/src/contracts.js';
@@ -90,7 +89,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     }
     return humanCommand((await metadata()).url, code, name, args);
   };
-  const config = (p: Product) => join(homedir(), ...PRODUCT_PROFILES[p].config);
   if (command === 'version') {
     console.log(VERSION);
     return;
@@ -100,7 +98,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'Converoom ' +
         VERSION +
         '\nProducts: ' + products.join(', ') +
-        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor | upgrade | recover [--rollback [--confirm]] | uninstall [--confirm [--delete-data DATA_DIR]]\nonboard --products codex,cursor [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] [--auto-start] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup [--confirm CODE] | cleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
+        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor [--discover] | upgrade | recover [--rollback [--confirm]] | uninstall [--confirm [--delete-data DATA_DIR]]\nonboard --products codex,cursor | onboard --auto [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] [--auto-start] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup [--confirm CODE] | cleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
     );
     return;
   }
@@ -110,6 +108,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === 'doctor') {
+    // FR-62: only this explicit request launches vendor protocol servers; ordinary doctor does not.
+    if (argv.includes('--discover')) {
+      console.log(JSON.stringify({ discovery: await runDiscovery(dataDir) }, null, 2));
+      return;
+    }
     let running = false;
     try {
       const m = await metadata();
@@ -138,7 +141,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           credentialStorage: await credentialStorage(),
           products: await Promise.all(products.map(async (p) => ({
             ...(await probeProduct(p, dataDir)),
-            ...(await connectionReport(p, dataDir, config(p), active)),
+            ...(await connectionReport(p, dataDir, defaultConfig(p), active)),
             credentialStored: await credentialLocation(join(dataDir, 'clients', p + '.json')) ?? 'none saved',
           }))),
           smoke: 'Approve a bounded managed turn in the room UI; doctor never starts inference',
@@ -286,14 +289,22 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === 'onboard') {
-    const selected = parseOnboardProducts(flag('--products') ?? 'codex');
-    await onboard(await ensureInstalled(dataDir), dataDir, selected, !argv.includes('--no-open'));
+    const auto = argv.includes('--auto');
+    if (auto && flag('--products')) throw new Error('Choose --auto or --products, not both.');
+    const stable = await ensureInstalled(dataDir);
+    let selected: Product[];
+    if (auto) {
+      const discovery = await runDiscovery(dataDir);
+      console.log(discoveryLines(discovery).join('\n'));
+      selected = autoConnectable(discovery);
+    } else selected = parseOnboardProducts(flag('--products') ?? 'codex');
+    await onboard(stable, dataDir, selected, !argv.includes('--no-open'));
     return;
   }
   if (command === 'connect' || command === 'disconnect') {
     const product = argv[1] as Product;
     if (!isProduct(product)) throw new Error('Choose ' + products.join(', '));
-    const path = resolve(flag('--config') ?? config(product)),
+    const path = resolve(flag('--config') ?? defaultConfig(product)),
       clientFile = join(dataDir, 'clients', product + '.json');
     if (command === 'disconnect') {
       let kept: string | undefined;
@@ -310,22 +321,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       if (kept) console.log('Kept your edited room skill: ' + kept);
       return;
     }
-    const stable = await ensureInstalled(dataDir);
-    const skills = resolve(
-      flag('--skills-dir') ??
-        (flag('--config')
-          ? join(resolve(path, '..'), 'skills', 'converoom-room')
-          : join(homedir(), ...PRODUCT_PROFILES[product].skills)),
-    );
-    const skill = await installSkill(skills);
-    if (existsSync(clientFile)) {
-      const previous = await json<{ principalId: string }>(clientFile);
-      await local('/local/revoke', { principalId: previous.principalId });
-    }
-    const stored = await writeCredential(clientFile, { ...(await local('/local/credentials', { product,
-      ...(flag('--remote-connection') ? { remoteConnectionId: flag('--remote-connection') } : {}) })), skill, config: path }, CLIENT_SECRETS);
+    const skills = resolve(flag('--skills-dir') ?? (flag('--config') ? join(resolve(path, '..'), 'skills', 'converoom-room') : defaultSkills(product)));
     const autoStart = argv.includes('--auto-start');
-    await editConfig(path, product, { command: process.execPath, args: mcpArgs(stable, product, dataDir, autoStart) });
+    const stored = await connectProduct(dataDir, product, {
+      issue: (p) => local('/local/credentials', { product: p, ...(flag('--remote-connection') ? { remoteConnectionId: flag('--remote-connection') } : {}) }),
+      revoke: (principalId) => local('/local/revoke', { principalId }),
+    }, { config: path, skills, autoStart });
     console.log('Connected ' + product + '. Restart its MCP connection.\n' + (stored === 'credential-manager'
       ? 'Its credential is in Windows Credential Manager.' : 'Windows Credential Manager is unavailable here, so its credential is in a private file.'));
     if (autoStart) console.log('Auto-start is on: when Converoom is not running, a ' + product + ' tool call starts it in a new window, ' +

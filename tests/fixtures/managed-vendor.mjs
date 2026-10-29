@@ -1,11 +1,16 @@
 import { createInterface } from 'node:readline';
 import { readFile } from 'node:fs/promises';
+import { appendFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const product = process.argv[2];
 const scenario = process.env.CONVEROOM_VENDOR_FIXTURE;
+if (process.argv.includes('--version')) {
+  console.log(product + ' fixture 1.0.0');
+  process.exit(0);
+}
 const send = (value) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...value }) + '\n');
 let client, roomId, pendingPrompt, clientCapabilities;
 const nativeAuth = { grok: 'cached_token', antigravity: 'oauth-personal', cursor: 'cursor_login' }[product];
@@ -62,7 +67,9 @@ async function request(message) {
       throw new Error('Non-native authentication selected');
     authenticated = true; send({ id: message.id, result: {} });
   } else if (message.method === 'account/read') {
-    send({ id: message.id, result: { account: { type: 'chatgpt' } } });
+    send({ id: message.id, result: { account: scenario === 'signed-out' ? null : { type: 'chatgpt', email: 'owner@example.com', planType: 'pro' } } });
+  } else if (message.method === 'model/list') {
+    send({ id: message.id, result: { data: [{ id: 'gpt-fixture', model: 'gpt-fixture', displayName: 'GPT fixture' }], nextCursor: null } });
   } else if (message.method === 'thread/start') {
     const config = {};
     for (let i = 3; i < process.argv.length; i++) {
@@ -196,5 +203,8 @@ async function request(message) {
 const input = createInterface({ input: process.stdin });
 input.on('line', (line) => {
   const message = JSON.parse(line);
+  if (process.env.CONVEROOM_VENDOR_LOG && message.method)
+    appendFileSync(process.env.CONVEROOM_VENDOR_LOG, JSON.stringify({ product, method: message.method, params: message.params }) + '\n');
+  if (scenario === 'hang') return;
   void request(message).catch((error) => send({ id: message.id, error: { code: -32000, message: error.message } }));
 });

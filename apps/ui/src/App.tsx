@@ -182,7 +182,7 @@ export function App() {
       createRoomAction((id) => {
         selectRoom(id);
         setView('room');
-      }),
+      }, snapshot?.discovery ?? null),
     );
   const joinRoom = () =>
     setAction(

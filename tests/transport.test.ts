@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, issueBridgeCredential } from '../apps/daemon/src/server.js';
@@ -367,4 +367,37 @@ describe('local identity boundary', () => {
     runtime.core.store.put('task', 'scoped-room:task', { generation: 2 });
     expect((await request()).statusCode).toBe(401);
   });
+});
+it('lets the paired browser run discovery, one-step connection and a seated room, which stay out of agent reach', async () => {
+  const { runtime, server, headers } = await fixture();
+  const pair = await server.app.inject({ method: 'POST', url: '/api/pair', headers, payload: { code: 'local-pair-code' } });
+  const cookie = String(pair.headers['set-cookie']).split(';')[0];
+  const session = await server.app.inject({ method: 'GET', url: '/api/session', headers: { ...headers, cookie } });
+  const human = (name: string, args: Record<string, unknown>) => server.app.inject({ method: 'POST', url: '/api/commands',
+    headers: { ...headers, cookie, 'x-csrf-token': session.json().csrf }, payload: { name, args } });
+  const seats = [{ product: 'codex', mode: 'managed' }, { product: 'claude', mode: 'polling' }];
+  const owned: [string, Record<string, unknown>][] = [['adapter_discover', { refresh: true }], ['adapter_autoconnect', {}],
+    ['room_create', { title: 'Roster', objective: 'Seat the ready agents', clientKey: 'roster', seats }]];
+  for (const [name, args] of owned) expect((await human(name, args)).json()).toMatchObject({ result: { name } });
+  const credential = issueBridgeCredential(runtime, 'codex');
+  const agent = (name: string, args: Record<string, unknown> = {}) => server.app.inject({ method: 'POST', url: '/agent/commands',
+    headers: { host: headers.host, authorization: 'Bearer ' + credential.token }, payload: { name, args } });
+  expect((await agent('adapter_discover')).statusCode).toBe(200);
+  for (const [name, args] of owned) expect((await agent(name, args)).statusCode).toBe(400);
+});
+it('includes the latest owner-requested discovery in the browser state', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'converoom-http-'));
+  cleanup.push(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }));
+  const runtime = await createRuntime(dir, { noScheduler: true });
+  cleanup.push(() => runtime.stop());
+  const server = await createServer(runtime, { port: 0, pairingCode: 'local-pair-code', controlToken: 'installation-fixture-token' });
+  cleanup.push(() => server.close());
+  const headers = { host: new URL(server.url).host, origin: server.url };
+  const pair = await server.app.inject({ method: 'POST', url: '/api/pair', headers, payload: { code: 'local-pair-code' } });
+  const cookie = String(pair.headers['set-cookie']).split(';')[0];
+  const state = async () => (await server.app.inject({ method: 'GET', url: '/api/state', headers: { ...headers, cookie } })).json();
+  expect((await state()).discovery).toBeNull();
+  const discovery = { at: 1, harnesses: [{ product: 'codex', status: 'ready_managed', installed: true, registered: false, signIn: 'signed_in', detail: 'Ready' }] };
+  await writeFile(join(dir, 'discovery.json'), JSON.stringify(discovery));
+  expect((await state()).discovery).toEqual(discovery);
 });

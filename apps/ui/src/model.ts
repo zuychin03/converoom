@@ -1,5 +1,5 @@
-import { isRecord, list, string, type RecordData, type Snapshot } from './api.js';
-import { isManagedProduct } from '../../../packages/shared/src/products.js';
+import { isRecord, list, objects, string, type RecordData, type Snapshot } from './api.js';
+import { PRODUCT_PROFILES, isManagedProduct, isProduct } from '../../../packages/shared/src/products.js';
 import { ENDED_ROOMS, type RoomLifecycle } from '../../../packages/shared/src/contracts.js';
 
 export type Kind = 'live' | 'needs' | 'ok' | 'warn' | 'fail' | 'idle' | 'paused' | 'closed';
@@ -324,4 +324,21 @@ export function turnEvidence(turn: RecordData, state: Snapshot): [string, string
   if (answer) rows.push(['Posted answer', 'Entry ' + pad(num(answer, 'seq') ?? 0)]);
   rows.push(['Containment', 'Trusted local and advisory, not a sandbox']);
   return rows;
+}
+const READINESS: Record<string, { kind: Kind; label: string }> = {
+  ready_managed: { kind: 'ok', label: 'Ready, managed' },
+  ready_polling: { kind: 'ok', label: 'Ready, polling' },
+  needs_login: { kind: 'needs', label: 'Sign-in needed' },
+  needs_mcp_registration: { kind: 'needs', label: 'Not connected' },
+  not_installed: { kind: 'idle', label: 'Not installed' },
+};
+export const readiness = (status: string) => READINESS[status] ?? { kind: 'warn' as Kind, label: 'Unknown' };
+// FR-62: room creation offers the agents the latest discovery found ready, in the connection mode they are ready for.
+export function rosterOptions(discovery: RecordData | null) {
+  const harnesses = discovery ? objects(discovery, 'harnesses') : [];
+  return harnesses.flatMap((h) => {
+    const product = string(h, 'product'), mode = h.status === 'ready_managed' ? 'managed' : h.status === 'ready_polling' ? 'polling' : '';
+    if (!mode || !isProduct(product)) return [];
+    return [{ value: product + ':' + mode, label: PRODUCT_PROFILES[product].label + (mode === 'managed' ? ' · new managed session' : ' · existing MCP conversation') }];
+  });
 }

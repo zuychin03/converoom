@@ -1,7 +1,6 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
-import { isProduct } from '../../../packages/shared/src/products.js';
 import fastifyStatic from '@fastify/static';
-import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,8 +13,6 @@ import {
   type Seat,
   type Turn,
   type ToolArgs,
-  type RemoteConnection,
-  type Store,
   ENDED_ROOMS,
 } from '../../../packages/shared/src/contracts.js';
 import { TOOL_DEFINITIONS, validateToolArgs } from '../../../packages/mcp/src/tools.js';
@@ -26,10 +23,11 @@ import { READ_COMMANDS } from '../../../packages/core/src/index.js';
 import { artefactMetadata } from '../../../packages/core/src/shared-artefacts.js';
 import { installationAuthority } from '../../../packages/core/src/audit.js';
 import type { SharedArtefact } from '../../../packages/shared/src/contracts.js';
+import { hash, humanIdentity, issueBridgeCredential, revokeBridgeCredential, secret } from './bridges.js';
+import { latestDiscovery } from '../../cli/src/discovery.js';
+export { humanIdentity, issueBridgeCredential, ownerIdentity, revokeBridgeCredential } from './bridges.js';
 
 export const VERSION = '0.2.0';
-const secret = () => randomBytes(32).toString('base64url');
-const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const equal = (a: string, b: string) =>
   a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 // Each of these is refused before the command writes anything.
@@ -37,52 +35,6 @@ const UNCOMMITTED = ['invalid_argument', 'unknown_command', 'unauthorised', 'inv
 const outcome = (name: string, args: ToolArgs) => ({ committed: !READ_COMMANDS.has(name), retrySafe: READ_COMMANDS.has(name) ||
   (typeof args.clientKey === 'string' && TOOL_DEFINITIONS.some((t) => t.name === name) &&
     !['task_claim', 'task_submit', 'verification_request', 'integration_prepare'].includes(name)) });
-export function humanIdentity(runtime: Runtime): Actor {
-  return ownerIdentity(runtime.core.store);
-}
-export function ownerIdentity(store: Store): Actor {
-  let actor = store.get<Actor>('identity', 'human');
-  if (!actor) {
-    const id = crypto.randomUUID();
-    actor = { kind: 'human', principalId: id, ownerId: id };
-    store.put('identity', 'human', actor);
-  }
-  return actor;
-}
-export function revokeBridgeCredential(store: Store, principalId: string): void {
-  let revoked = false;
-  for (const credential of store.list<Actor>('bridge'))
-    if (credential.principalId === principalId) {
-      // Hash keys are not exposed by Store.list; credentials are revoked through an indexed principal record.
-      store.put('revoked', credential.principalId, true);
-      revoked = true;
-    }
-  if (revoked) installationAuthority(store, ownerIdentity(store), 'bridge.credential_revoked', { principalId });
-}
-export function issueBridgeCredential(
-  runtime: Runtime,
-  product: Product,
-  remoteConnectionId?: string,
-): { token: string; principalId: string; remoteConnectionId?: string } {
-  if (!isProduct(product))
-    throw new ConveroomError('invalid_product', 'Choose a supported product');
-  const token = secret();
-  const principalId = crypto.randomUUID();
-  if (remoteConnectionId) {
-    const c = runtime.core.store.get<RemoteConnection>('remote_connection', remoteConnectionId);
-    if (!c || c.localOwnerId !== humanIdentity(runtime).ownerId || c.status !== 'connected' || c.mode !== 'polling' || c.product !== product)
-      throw new ConveroomError('remote_registration', 'Own connected polling product required', 403);
-  }
-  runtime.core.store.put('bridge', hash(token), {
-    kind: 'agent',
-    principalId,
-    ownerId: humanIdentity(runtime).ownerId,
-    product,
-    ...(remoteConnectionId ? { remoteConnectionId } : {}),
-    createdAt: Date.now(),
-  });
-  return { token, principalId, ...(remoteConnectionId ? { remoteConnectionId } : {}) };
-}
 export function redact(value: unknown): unknown {
   return redactTransport(value);
 }
@@ -129,6 +81,7 @@ export function snapshot(runtime: Runtime, roomId?: string): Record<string, unkn
     ? { ...r, lastEventAt: lastEventAt(r), messageCount: store.eventCount(r.id, 'message') }
     : ENDED_ROOMS.includes(r.lifecycle) ? r : { ...r, lastEventAt: lastEventAt(r) }));
   state.events = room ? redact(store.events(room.id, Math.max(0, room.seq - ROOM_EVENT_PAGE), ROOM_EVENT_PAGE)) : [];
+  state.discovery = latestDiscovery(runtime.dataDir);
   state.sharedArtefacts = room ? store.list<SharedArtefact>('shared_artefact', { roomId: room.id }).map(artefactMetadata) : [];
   state.invitations = room ? store.list<Record<string, unknown>>('invitation', { roomId: room.id }).map((row) => {
     const { codeHash: _hash, ...metadata } = row; return metadata;
@@ -291,6 +244,8 @@ export async function createServer(
     return { events: end > start ? redact(runtime.core.store.events(room.id, start, end - start)) : [] };
   });
   const humanCommands = new Set([
+    'adapter_discover',
+    'adapter_autoconnect',
     'seat_add',
     'seat_consent',
     'policy_update',
@@ -335,7 +290,7 @@ export async function createServer(
     if (['principalId', 'ownerId', 'actor', 'kind'].some((k) => k in args))
       throw new ConveroomError('invalid_argument', 'Identity is supplied by the transport');
     const tool = TOOL_DEFINITIONS.find((t) => t.name === body.name);
-    if (tool) validateToolArgs(body.name, args);
+    if (tool) validateToolArgs(body.name, args, actor.kind === 'human');
     else if (actor.kind !== 'human' || !humanCommands.has(body.name))
       throw new ConveroomError('unknown_command', 'Unsupported command');
     const result = await runtime.core.dispatch(actor, body.name, args);
