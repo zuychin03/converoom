@@ -65,20 +65,21 @@ const deadPid = async () => {
 };
 const output = (log: ReturnType<typeof vi.spyOn>) => log.mock.calls.flat().join('\n');
 
-it('upgrades to this package: backs up the store, repoints registrations without new credentials and refreshes unchanged skills', async () => {
+it('upgrades to this package: backs up the store, repoints registrations keeping auto-start, without new credentials, and refreshes unchanged skills', async () => {
   const root = await mkdtemp(join(tmpdir(), 'converoom-upgrade-'));
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   try {
     const f = await installation(root, { version: OLD, selectedAt: 1 });
+    await editConfig(f.codexConfig, 'codex', { command: process.execPath, args: [f.old, 'mcp', '--client', 'codex', '--data-dir', f.dataDir, '--auto-start'] });
     await main(['upgrade', '--data-dir', f.dataDir]);
     const stable = join(f.dataDir, 'runtime', VERSION, 'dist', 'cli.js');
     expect(existsSync(join(f.dataDir, 'runtime', VERSION, 'installation.json'))).toBe(true);
     const active = JSON.parse(await readFile(f.activeFile, 'utf8'));
     expect(active).toMatchObject({ version: VERSION, previous: OLD });
     expect(active.upgrade).toBeUndefined();
-    expect(await registered('codex', f.codexConfig)).toEqual({ command: process.execPath, args: [stable, 'mcp', '--client', 'codex', '--data-dir', f.dataDir] });
+    expect(await registered('codex', f.codexConfig)).toEqual({ command: process.execPath, args: [stable, 'mcp', '--client', 'codex', '--data-dir', f.dataDir, '--auto-start'] });
     expect(await readFile(f.codexConfig, 'utf8')).toContain('model = "preserve"');
-    expect((await registered('cursor', f.cursorConfig)).args[0]).toBe(stable);
+    expect((await registered('cursor', f.cursorConfig)).args).toEqual([stable, 'mcp', '--client', 'cursor', '--data-dir', f.dataDir]);
     expect(JSON.parse(await readFile(f.cursorConfig, 'utf8')).mcpServers.other).toEqual({ command: 'other' });
     expect(await readFile(join(f.skills.codex, 'SKILL.md'), 'utf8')).toBe(await bundledSkill());
     expect(await readFile(join(f.skills.cursor, 'SKILL.md'), 'utf8')).toBe('Owner notes\n');

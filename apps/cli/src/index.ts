@@ -16,6 +16,7 @@ import { assertCurrent, ensureInstalled, installationStatus, recover, uninstall,
 import { cleanupPreviewLines, cleanupResultLines } from './cleanup.js';
 import { CLIENT_SECRETS, credentialLocation, credentialStorage, migrateCredentials, removeCredential, writeCredential } from './credentials.js';
 import { serveMcp } from '../../../packages/mcp/src/index.js';
+import { launchConsole } from '../../../packages/mcp/src/runtime.js';
 import {
   dataDirectory,
   privateDirectory,
@@ -23,6 +24,7 @@ import {
   json,
   secret,
   editConfig,
+  mcpArgs,
   connectionReport,
   installSkill,
   removeSkill,
@@ -98,12 +100,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'Converoom ' +
         VERSION +
         '\nProducts: ' + products.join(', ') +
-        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor | upgrade | recover [--rollback [--confirm]] | uninstall [--confirm [--delete-data DATA_DIR]]\nonboard --products codex,cursor [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup [--confirm CODE] | cleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
+        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor | upgrade | recover [--rollback [--confirm]] | uninstall [--confirm [--delete-data DATA_DIR]]\nonboard --products codex,cursor [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] [--auto-start] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup [--confirm CODE] | cleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
     );
     return;
   }
   if (command === 'mcp') {
-    await serveMcp(dataDir, flag('--client') ?? 'codex', flag('--credential-file'));
+    await serveMcp(dataDir, flag('--client') ?? 'codex', flag('--credential-file'),
+      argv.includes('--auto-start') ? { launch: launchConsole(fileURLToPath(import.meta.url), dataDir) } : undefined);
     return;
   }
   if (command === 'doctor') {
@@ -321,12 +324,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     }
     const stored = await writeCredential(clientFile, { ...(await local('/local/credentials', { product,
       ...(flag('--remote-connection') ? { remoteConnectionId: flag('--remote-connection') } : {}) })), skill, config: path }, CLIENT_SECRETS);
-    await editConfig(path, product, {
-      command: process.execPath,
-      args: [stable, 'mcp', '--client', product, '--data-dir', dataDir],
-    });
+    const autoStart = argv.includes('--auto-start');
+    await editConfig(path, product, { command: process.execPath, args: mcpArgs(stable, product, dataDir, autoStart) });
     console.log('Connected ' + product + '. Restart its MCP connection.\n' + (stored === 'credential-manager'
       ? 'Its credential is in Windows Credential Manager.' : 'Windows Credential Manager is unavailable here, so its credential is in a private file.'));
+    if (autoStart) console.log('Auto-start is on: when Converoom is not running, a ' + product + ' tool call starts it in a new window, ' +
+      'which shows the pairing code. Connect again without --auto-start to turn it off.');
     return;
   }
   if (command === 'upgrade' || command === 'recover' || command === 'uninstall') {

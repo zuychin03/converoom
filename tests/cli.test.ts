@@ -1,5 +1,5 @@
 import { it, expect, vi } from 'vitest';
-import { connectionReport, editConfig, installSkill, privateJson } from '../apps/cli/src/support.js';
+import { connectionReport, editConfig, installSkill, privateJson, registeredEntry } from '../apps/cli/src/support.js';
 import { main } from '../apps/cli/src/index.js';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { createServer } from '../apps/daemon/src/server.js';
@@ -77,6 +77,29 @@ it.each([['an edited', true], ['an unchanged', false]] as const)('disconnect rem
     expect(log.mock.calls.flat().join('\n').includes(skill)).toBe(edited);
   } finally { log.mockRestore(); await server.close(); await runtime.stop(); await rm(root, { recursive: true, force: true }); }
 }, 30000);
+it('records auto-start in the registration only when connect asks for it, and doctor reports it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'converoom-autostart-'));
+  const dataDir = join(root, 'data'), config = join(root, 'config.toml'), skills = join(root, 'skills', 'converoom-room');
+  const runtime = await createRuntime(dataDir, { noScheduler: true });
+  const server = await createServer(runtime, { port: 0, controlToken: 'connect-fixture' });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    await writeFile(join(dataDir, 'runtime.json'), JSON.stringify({ url: server.url, controlToken: 'connect-fixture' }));
+    await writeFile(config, 'model = "preserve"\n');
+    const connect = (...extra: string[]) => main(['connect', 'codex', '--config', config, '--skills-dir', skills, '--data-dir', dataDir, ...extra]);
+    await connect('--auto-start');
+    expect((await registeredEntry('codex', config))?.args.slice(1)).toEqual(['mcp', '--client', 'codex', '--data-dir', dataDir, '--auto-start']);
+    expect(await connectionReport('codex', dataDir, config)).toMatchObject({ registration: 'registered', autoStart: true });
+    expect(log.mock.calls.flat().join('\n')).toContain('Auto-start is on');
+    await connect();
+    expect((await registeredEntry('codex', config))?.args).not.toContain('--auto-start');
+    expect(await connectionReport('codex', dataDir, config)).toMatchObject({ registration: 'registered', autoStart: false });
+    await connect('--auto-start');
+    await main(['disconnect', 'codex', '--config', config, '--data-dir', dataDir]);
+    expect(await connectionReport('codex', dataDir, config)).toMatchObject({ registration: 'not registered', autoStart: false });
+    expect(await readFile(config, 'utf8')).toContain('model = "preserve"');
+  } finally { log.mockRestore(); await server.close(); await runtime.stop(); await rm(root, { recursive: true, force: true }); }
+}, 180000);
 it('reports whether a product is registered for this data directory and its saved credential is still active', async () => {
   const root = await mkdtemp(join(tmpdir(), 'converoom-doctor-'));
   const dataDir = join(root, 'data'), codexConfig = join(root, 'codex.toml'), cursorConfig = join(root, 'cursor.json'), qoderConfig = join(root, 'qoder.json');
@@ -91,9 +114,10 @@ it('reports whether a product is registered for this data directory and its save
     await editConfig(codexConfig, 'codex', { command: 'node', args: ['stable/cli.js', 'mcp', '--client', 'codex', '--data-dir', dataDir] });
     await editConfig(cursorConfig, 'cursor', { command: 'node', args: ['stable/cli.js', 'mcp', '--client', 'cursor', '--data-dir', join(root, 'other')] });
     await writeFile(qoderConfig, '{ not json');
-    expect(await connectionReport('codex', dataDir, join(root, 'default.toml'), active)).toEqual({ registration: 'registered', config: codexConfig, credential: 'active' });
+    expect(await connectionReport('codex', dataDir, join(root, 'default.toml'), active))
+      .toEqual({ registration: 'registered', config: codexConfig, credential: 'active', autoStart: false });
     expect(await connectionReport('cursor', dataDir, cursorConfig, active))
-      .toEqual({ registration: 'registered for another data directory', config: cursorConfig, credential: 'none saved' });
+      .toEqual({ registration: 'registered for another data directory', config: cursorConfig, credential: 'none saved', autoStart: false });
     expect(await connectionReport('kiro', dataDir, join(root, 'missing.json'), active)).toMatchObject({ registration: 'no config file' });
     expect(await connectionReport('qoder', dataDir, qoderConfig, active)).toMatchObject({ registration: 'unreadable config' });
     expect(await connectionReport('codex', dataDir, codexConfig)).toMatchObject({ credential: 'saved; runtime not running, so not checked' });

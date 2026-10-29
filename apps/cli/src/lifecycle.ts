@@ -7,7 +7,7 @@ import { ConveroomError, type Product } from '../../../packages/shared/src/contr
 import { isProduct } from '../../../packages/shared/src/products.js';
 import { backupDatabase, createStore, databaseSchema, scopeDigest } from '../../../packages/store/src/index.js';
 import { revokeBridgeCredential } from '../../daemon/src/server.js';
-import { VERSION, editConfig, installSkill, installStable, json, privateJson, registeredEntry, removeSkill, samePath } from './support.js';
+import { VERSION, editConfig, installSkill, installStable, json, mcpArgs, privateJson, registeredEntry, removeSkill, samePath } from './support.js';
 import { credentialLocation, migrateCredentials, removeCredential } from './credentials.js';
 
 interface Active {
@@ -108,7 +108,7 @@ async function repoint(dataDir: string, cli: string, refreshSkills: boolean): Pr
     const entry = await ownEntry(product, saved.config, dataDir);
     if (entry && !samePath(entry.args[0] ?? '', cli)) {
       await editConfig(saved.config!, product, { command: entry.command && existsSync(entry.command) ? entry.command : process.execPath,
-        args: [cli, 'mcp', '--client', product, '--data-dir', dataDir] });
+        args: mcpArgs(cli, product, dataDir, entry.args.includes('--auto-start')) });
       notes.push(`Pointed ${product} at ${cli} in ${saved.config}`);
     }
     const skill = saved.skill && join(saved.skill.path, 'SKILL.md');

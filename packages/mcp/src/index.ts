@@ -2,9 +2,9 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { TOOL_DEFINITIONS, validateToolArgs } from './tools.js';
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { MANAGED_TOOLS, type ManagedScope } from './managed.js';
+import { RuntimeUnavailable, runtimeCaller, type AutoStart } from './runtime.js';
 import { SHARED_READS, SHARED_WRITES } from '../../core/src/membership.js';
 import { mountReadServices } from './read-services.js';
 import { readCredential } from '../../../apps/cli/src/credentials.js';
@@ -12,6 +12,7 @@ export async function serveMcp(
   dataDir: string,
   client: string,
   credentialFile?: string,
+  autoStart?: AutoStart,
 ): Promise<void> {
   const credential = await readCredential<{ token: string; principalId: string; scope?: ManagedScope; remoteConnectionId?: string }>(
     credentialFile ?? join(dataDir, 'clients', client + '.json'));
@@ -26,12 +27,10 @@ export async function serveMcp(
       inputSchema: { ...t.inputSchema, type: 'object' as const },
     })),
   }));
+  const call = runtimeCaller({ dataDir, client, token: credential.token, autoStart });
   const command = async (name: string, args: Record<string, unknown>) => {
     validateToolArgs(name, args);
-    const runtime = JSON.parse(await readFile(join(dataDir, 'runtime.json'), 'utf8')) as { url: string };
-    const response = await fetch(runtime.url + '/agent/commands', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + credential.token },
-      body: JSON.stringify({ name, args }), signal: AbortSignal.timeout(35000) });
-    return { response, value: await response.json() as { result?: unknown; error?: { message?: string }; committed?: boolean; retrySafe?: boolean } };
+    return call(name, args);
   };
   mountReadServices(server, async (name, args) => {
     const { response, value } = await command(name, args);
@@ -48,7 +47,9 @@ export async function serveMcp(
         isError: !response.ok,
       };
     } catch (e) {
-      const value = { error: { message: e instanceof Error ? e.message : 'Bridge unavailable', committed: null, retrySafe: false } };
+      const value = { error: e instanceof RuntimeUnavailable
+        ? { code: e.code, message: e.message, committed: e.committed, retrySafe: e.retrySafe, startCommand: e.startCommand }
+        : { message: e instanceof Error ? e.message : 'Bridge unavailable', committed: null, retrySafe: false } };
       return {
         content: [
           {

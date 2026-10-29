@@ -10,7 +10,7 @@ export function parseOnboardProducts(value: string): Product[] {
   if (!products.every(isProduct)) throw new Error('Choose a supported product: ' + PRODUCT_IDS.join(', '));
   return products as Product[];
 }
-async function localRuntime(dataDir: string): Promise<LocalRuntime | undefined> {
+export async function localRuntime(dataDir: string): Promise<LocalRuntime | undefined> {
   try {
     const meta = JSON.parse(await readFile(join(dataDir, 'runtime.json'), 'utf8')) as LocalRuntime;
     const url = new URL(meta.url);

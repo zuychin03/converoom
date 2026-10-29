@@ -1,4 +1,5 @@
 import { it, expect } from 'vitest';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -76,6 +77,24 @@ it('runs the same stdio room corpus for all eight vendor bridge identities', asy
     for (const c of clients) await c.close();
     await server.close();
     await runtime.stop();
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 30000);
+it('answers runtime_unavailable through the stdio bridge, and starts nothing, when the runtime is not running and auto-start is off', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'converoom-mcp-'));
+  const c = new Client({ name: 'fixture-unavailable', version: '1.0' }, { capabilities: {} });
+  try {
+    await mkdir(join(dir, 'clients'));
+    await writeFile(join(dir, 'clients', 'codex.json'), JSON.stringify({ token: 'fixture-token', principalId: 'fixture' }));
+    await c.connect(new StdioClientTransport({ command: process.execPath,
+      args: [join(process.cwd(), 'dist', 'cli.js'), 'mcp', '--client', 'codex', '--data-dir', dir], stderr: 'pipe' }));
+    const r = await c.callTool({ name: 'runtime_capabilities', arguments: {} });
+    expect(r.isError).toBe(true);
+    expect(r.structuredContent).toEqual({ error: { code: 'runtime_unavailable', message: expect.stringContaining('converoom start'),
+      committed: false, retrySafe: true, startCommand: 'converoom start --data-dir "' + dir + '"' } });
+    for (const file of ['runtime.json', 'runtime.lock', 'autostart.lock']) expect(existsSync(join(dir, file))).toBe(false);
+  } finally {
+    await c.close();
     await rm(dir, { recursive: true, force: true });
   }
 }, 30000);

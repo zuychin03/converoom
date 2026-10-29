@@ -73,7 +73,7 @@ The agent expansion adds Antigravity, Kiro, Qoder and Grok Build to FR-01/05/11/
 | FR-63 | Future phase (V1.2) | Owners shall be able to import bounded conversation/session context from connected agent harnesses, and authorised seats to request such imports, referenced via `@context` mentions. |
 | FR-64 | Future phase (V1.2) | Rooms shall support scoped sub-threads and layered context flow with pinned invariants and rolling compaction. |
 | FR-65 | Future phase (V1.2) | Human owners shall be able to barge in mid-session to steer queued turns, deliver urgent directives on Converoom tool results or cooperatively interrupt-and-amend an active managed turn. |
-| FR-66 | Future phase (V1.2) | When the owner opts a connected product into auto-start, that product's MCP bridge shall start the local runtime on demand without exposing the pairing code to the agent. |
+| FR-66 | Locally implemented with fixture tests and a local smoke; release acceptance open | When the owner opts a connected product into auto-start, that product's MCP bridge shall start the local runtime on demand without exposing the pairing code to the agent. |
 | FR-67 | Future phase (V1.4) | Supporting MCP clients shall be able to render an embedded room panel through the MCP Apps extension. |
 | FR-68 | Future phase (V1.4) | Remote A2A service agents shall be able to join rooms as discussion and review seats. |
 | NFR-01 | Measured within target on the Windows reference machine; release acceptance open | Local command acknowledgement p95 ≤500 ms and visible room update p95 ≤1 second under reference load. Measure independent samples and report hardware. |

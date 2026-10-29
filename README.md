@@ -42,7 +42,7 @@ node dist/cli.js connect grok
 
 Connect also registers the bundled room skill. Use `--config PATH` and `--skills-dir PATH` for an explicit location. Disconnect removes the unchanged owned skill and MCP entry; edited skill files are preserved. Reconnecting revokes the previous bridge credential.
 
-Sign in through your native vendor client beforehand. Doctor starts no model inference and distinguishes the normal CLI from the managed executable. It also reports whether each product's Converoom registration points at this data directory and whether its saved bridge credential is still active. In the room UI, add managed seats, allow turn requests and grant a bounded turn request. Granting a room-host role does not grant execution.
+Sign in through your native vendor client beforehand. Doctor starts no model inference and distinguishes the normal CLI from the managed executable. It also reports whether each product's Converoom registration points at this data directory, whether its saved bridge credential is still active and whether auto-start is on. `converoom connect PRODUCT --auto-start` lets that product's agents start Converoom in its own window when it is not running; see [agent support](docs/AGENT_SUPPORT.md). In the room UI, add managed seats, allow turn requests and grant a bounded turn request. Granting a room-host role does not grant execution.
 
 ## Local npm / npx installation
 

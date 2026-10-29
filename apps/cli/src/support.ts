@@ -260,6 +260,9 @@ export async function removeSkill(skill: { path: string; digest: string }): Prom
   if (scopeDigest(await readFile(file, 'utf8')) !== skill.digest) return file;
   await rm(file);
 }
+// FR-66: the opt-in lives in the product's own registration, so a plain connect or a disconnect removes it.
+export const mcpArgs = (cli: string, product: string, dataDir: string, autoStart: boolean) =>
+  [cli, 'mcp', '--client', product, '--data-dir', dataDir, ...(autoStart ? ['--auto-start'] : [])];
 export const samePath = (a: string, b: string) =>
   process.platform === 'win32' ? resolve(a).toLowerCase() === resolve(b).toLowerCase() : resolve(a) === resolve(b);
 // Reads only Converoom's own entry, in the formats editConfig writes; other servers and settings are never returned.
@@ -298,14 +301,15 @@ export async function connectionReport(product: string, dataDir: string, default
       : state === undefined ? 'saved; runtime not running, so not checked' : state ? 'active' : 'revoked or unknown to this runtime';
   }
   const config = typeof saved?.config === 'string' ? saved.config : defaultConfig;
-  let registration: string;
+  let registration: string, autoStart = false;
   if (!existsSync(config)) registration = 'no config file';
   else {
     try {
       const args = (await registeredEntry(product, config))?.args, at = args?.indexOf('--data-dir') ?? -1;
       registration = !args ? 'not registered'
         : at >= 0 && args[at + 1] && samePath(args[at + 1], dataDir) ? 'registered' : 'registered for another data directory';
+      autoStart = registration === 'registered' && !!args?.includes('--auto-start');
     } catch { registration = 'unreadable config'; }
   }
-  return { registration, config, credential };
+  return { registration, config, credential, autoStart };
 }
