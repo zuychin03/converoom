@@ -101,6 +101,7 @@ const FAILURE_REASONS: Record<string, string> = {
 const withReason = (base: string, turn: RecordData) =>
   FAILURE_REASONS[string(turn, 'failure')] ? base + ' · ' + FAILURE_REASONS[string(turn, 'failure')] : base;
 export const failureLabel = (turn: RecordData) => withReason('Failed', turn);
+const CANCEL_REASONS: Record<string, string> = { permission_denied: 'denied', permission_expired: 'approval expired' };
 export const FINDINGS: Record<string, string> = { acted: 'agent acted', not_acted: 'agent did not act', unclear: 'still unclear' };
 
 export interface SeatState {
@@ -159,7 +160,11 @@ export function turnKind(turn: RecordData, state: Snapshot, now: number): { kind
   if (status === 'cancelling') return { kind: 'warn', label: 'Cancelling' };
   if (status === 'completed') return { kind: 'ok', label: 'Completed' };
   if (status === 'failed') return { kind: 'fail', label: failureLabel(turn) };
-  if (status === 'cancelled') return { kind: 'closed', label: 'Cancelled' };
+  if (status === 'cancelled') {
+    const ending = state.events.find((e) => e.type === 'turn.cancelled' && data(e).turnId === turn.id);
+    const reason = ending ? CANCEL_REASONS[string(data(ending), 'reason')] : undefined;
+    return { kind: 'closed', label: reason ? 'Cancelled · ' + reason : 'Cancelled' };
+  }
   if (status === 'uncertain') {
     const finding = isRecord(turn.inspection) ? FINDINGS[string(turn.inspection, 'finding')] : undefined;
     return finding ? { kind: 'closed', label: 'Uncertain · inspected, ' + finding } : { kind: 'warn', label: withReason('Uncertain', turn) };

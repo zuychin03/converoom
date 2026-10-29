@@ -334,6 +334,19 @@ function queuePlanTurn(store: Store, r: Room, plan: RoundRobinPlan) {
 export function advanceTurnPolicies(store: Store, roomId: string, now = Date.now()): void {
   const r = store.get<Room>('room', roomId);
   if (!r) return;
+  // A denied or lapsed approval can never start its turn, and a queued turn holds its seat against peer wakes.
+  for (const t of store.list<Turn>('turn', { roomId, status: ['queued'] })) {
+    const p = store.get<Permission>('permission', t.permissionRequestId ?? '');
+    if (!p || (p.status !== 'denied' && !(['pending', 'granted'].includes(p.status) && p.expiresAt <= now))) continue;
+    store.transaction(() => {
+      if (p.status === 'pending') {
+        store.put('permission', p.id, { ...p, status: 'expired' });
+        authority(store, RUNTIME, r, 'permission.expired', { requestId: p.id, action: p.action, scopeDigest: p.scopeDigest, expiresAt: p.expiresAt });
+      }
+      const denied = p.status === 'denied';
+      cancelTurn(store, RUNTIME, t, `Approval ${denied ? 'denied' : 'expired'} before the turn started`, denied ? 'permission_denied' : 'permission_expired');
+    });
+  }
   for (const plan of store.list<RoundRobinPlan>('round_robin', { roomId, status: OPEN_PLANS })) {
     const end = (status: RoundRobinPlan['status'], reason?: string) => store.transaction(() => endPlan(store, RUNTIME, plan, status, reason));
     if (ENDED_ROOMS.includes(r.lifecycle)) {
@@ -1091,6 +1104,7 @@ export function createCore(store: Store): Core {
     const denied = authority(store, a, room(p.roomId), 'permission.denied', { requestId: p.id, action: p.action, scopeDigest: p.scopeDigest, expiresAt: p.expiresAt });
     const plan = p.action === 'round_robin' ? store.get<RoundRobinPlan>('round_robin', String(p.scope.planId)) : undefined;
     if (plan?.status === 'proposed' && plan.requestId === p.id) endPlan(store, a, plan, 'declined', 'The owner declined the plan');
+    if (p.action === 'turn_execute') advanceTurnPolicies(store, p.roomId);
     return denied;
   });
   const approvePlan = (a: Actor, plan: RoundRobinPlan, requestId?: string) => {

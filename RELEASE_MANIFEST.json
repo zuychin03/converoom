@@ -3,11 +3,11 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "4f611aee2eaf23243ded07278320aec4ddad76c5f9984bb00c1e829ec9c96a0c"
+      "sha256": "a8db14587254320f48cddc0315cfec0e448a0edf1693b943c53ee03403dc6edc"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "2d55a79f79d87631aa9227b96d7fafbd77592ad9d140d9b7227d5cbf4e1172a8"
+      "sha256": "6e9c6ce1284863fb0101e7a66d1b513c3930d4df4fd76d6024c5abb1aed30190"
     },
     {
       "path": "dist/server.js",
@@ -15,7 +15,7 @@
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "aebee191cd5443972981eba1f873a45e361a3e5412392ef91da28475b4dfe25f"
+      "sha256": "22dc2bf940570f76f7e7d8969b3a5e4d8088c868042392bb2900b85d66422ab5"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -34,8 +34,8 @@
       "sha256": "c61ebe2e19fba11803f8d40b7cb14b803d8df09d6885b996ced3ea6223c0679f"
     },
     {
-      "path": "dist/ui/assets/index-jbDZEqfv.js",
-      "sha256": "9891e783c4795d237db663805363042295f3049d682a43f87d7f116a74645dfb"
+      "path": "dist/ui/assets/index-CjRjZdu7.js",
+      "sha256": "5e0a37c3cd20e0e1336d30e816dfa48bb00735af989836073632a3300aa7249a"
     },
     {
       "path": "dist/ui/assets/martian-mono-cyrillic-ext-wght-normal-DAknEryR.woff2",
@@ -67,7 +67,7 @@
     },
     {
       "path": "dist/ui/index.html",
-      "sha256": "dba2ad3df9db1618bda627e7541d7c44e8bffd0855acdb1cc265dadab0a3f914"
+      "sha256": "08b0b1b83fd1e0a61f8c68a024b92e8d899c13c1822936c75b1d16062b864ea9"
     },
     {
       "path": "plugins/README.md",

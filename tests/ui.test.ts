@@ -27,6 +27,17 @@ describe('browser command boundary', () => {
     expect(turnKind(inspected, state(inspected), 0)).toEqual({ kind: 'closed', label: 'Uncertain · inspected, agent did not act' });
     expect(seatState(seat, state(inspected), 0)).toMatchObject({ kind: 'idle', label: 'Ready' });
   });
+  it('says why a turn was cancelled when its approval was denied or expired', () => {
+    const seat = { id: 'seat', mode: 'managed', product: 'codex', role: 'member', consent: true };
+    const turn = { id: 'turn', seatId: 'seat', status: 'cancelled', createdAt: 1 };
+    const cancelled = (reason: string) => parseSnapshot({ seats: [seat], turns: [turn],
+      events: [{ id: 'cancel-event', roomId: 'room', seq: 3, type: 'turn.cancelled', data: { turnId: 'turn', reason } }] });
+    expect(turnKind(turn, cancelled('permission_denied'), 0)).toEqual({ kind: 'closed', label: 'Cancelled · denied' });
+    expect(turnKind(turn, cancelled('permission_expired'), 0)).toEqual({ kind: 'closed', label: 'Cancelled · approval expired' });
+    expect(turnKind(turn, cancelled('room_completed'), 0)).toEqual({ kind: 'closed', label: 'Cancelled' });
+    expect(turnKind(turn, parseSnapshot({ seats: [seat], turns: [turn] }), 0)).toEqual({ kind: 'closed', label: 'Cancelled' });
+    expect(seatState(seat, cancelled('permission_denied'), 0)).toMatchObject({ kind: 'idle', label: 'Ready' });
+  });
   it('lists the execution evidence an owner needs to inspect a turn', () => {
     const state = parseSnapshot({ seats: [{ id: 'managed', mode: 'managed' }, { id: 'polling', mode: 'polling' }],
       events: [{ id: 'answer-event', roomId: 'room', seq: 12, type: 'message', data: {} }] });

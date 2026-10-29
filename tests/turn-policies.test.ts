@@ -80,6 +80,54 @@ it('records why an agent question could not wake its target and does not retry i
   expect(turnsFor(critic)).toHaveLength(0);
 });
 
+it('frees a seat for its next question once its owner denies a woken turn, and does not wake the denied one again', async () => {
+  const { r, host, critic } = await setup();
+  await ask(r.id, host, critic, 'Is SQLite enough?');
+  await ask(r.id, host, critic, 'And under load?', 'challenge');
+  const [denied] = turnsFor(critic);
+  await call('permission_deny', { requestId: denied.permissionRequestId });
+  expect(store.get<Turn>('turn', denied.id)).toMatchObject({ status: 'cancelled', error: 'Approval denied before the turn started' });
+  expect(events(r.id, 'turn.cancelled').map((e) => [e.actorId, e.data])).toEqual([['runtime', { turnId: denied.id, reason: 'permission_denied' }]]);
+  const next = turnsFor(critic).find((t) => t.id !== denied.id)!;
+  expect(next).toMatchObject({ status: 'queued', peerWake: true });
+  expect(next.prompt).toContain('Host sent you a challenge');
+  await call('turn_cancel', { roomId: r.id, turnId: next.id });
+  expect(turnsFor(critic)).toHaveLength(2);
+});
+
+it('cancels a woken turn whose approval expires unanswered, and wakes the seat for a later question', async () => {
+  let now = Date.now();
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const { r, host, critic } = await setup();
+  await ask(r.id, host, critic, 'Is SQLite enough?');
+  const [lapsed] = turnsFor(critic);
+  now += 3600001;
+  advanceTurnPolicies(store, r.id);
+  expect(store.get<Turn>('turn', lapsed.id)).toMatchObject({ status: 'cancelled', error: 'Approval expired before the turn started' });
+  expect(store.get<Permission>('permission', lapsed.permissionRequestId!)?.status).toBe('expired');
+  expect(events(r.id, 'permission.expired').map((e) => e.actorId)).toEqual(['runtime']);
+  expect(events(r.id, 'turn.cancelled').map((e) => e.data)).toEqual([{ turnId: lapsed.id, reason: 'permission_expired' }]);
+  await ask(r.id, host, critic, 'And under load?', 'challenge');
+  expect(turnsFor(critic).filter((t) => t.status === 'queued')).toEqual([expect.objectContaining({ peerWake: true })]);
+});
+
+it('cancels a granted turn that could not start before its approval expired, which stops its round robin', async () => {
+  let now = Date.now();
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const { r, host, critic } = await setup();
+  const running = await call<RoundRobinPlan>('round_robin_propose', { roomId: r.id, seatIds: [critic.id], rounds: 2, prompt: 'Compare' });
+  const [granted] = turnsFor(critic);
+  expect(store.get<Permission>('permission', granted.permissionRequestId!)?.status).toBe('granted');
+  now += 3600001;
+  advanceTurnPolicies(store, r.id);
+  expect(store.get<Turn>('turn', granted.id)).toMatchObject({ status: 'cancelled', error: 'Approval expired before the turn started' });
+  expect(store.get<Permission>('permission', granted.permissionRequestId!)?.status).toBe('granted');
+  expect(events(r.id, 'permission.expired')).toHaveLength(0);
+  expect(plan(running.id)).toMatchObject({ status: 'stopped', reason: 'Turn 1 ended cancelled: Approval expired before the turn started' });
+  await ask(r.id, host, critic, 'Is SQLite enough?');
+  expect(turnsFor(critic).filter((t) => t.status === 'queued')).toEqual([expect.objectContaining({ peerWake: true })]);
+});
+
 it('counts mentions made during a woken turn toward the hop limit', async () => {
   const { r, host, critic, builder } = await setup();
   await call('policy_update', { roomId: r.id, policy: { maxMentionHops: 2 } });

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { createServer, humanIdentity } from '../apps/daemon/src/server.js';
 import { createStore, scopeDigest } from '../packages/store/src/index.js';
-import { createCore, exhaustBudgets } from '../packages/core/src/index.js';
+import { advanceTurnPolicies, createCore, exhaustBudgets } from '../packages/core/src/index.js';
 import type { Actor, Core, HumanMembership, Room, Seat, Store, ToolArgs, Turn } from '../packages/shared/src/contracts.js';
 
 const owner: Actor = { kind: 'human', principalId: 'owner-principal', ownerId: 'owner' };
@@ -94,6 +94,21 @@ it.each<[string, (turn: Turn, lead: Actor) => unknown, (lead: Actor) => string]>
   expect(actionDigest).toBe(scopeDigest(content));
   expect(policyVersion).toEqual(expect.any(Number));
   expect(withdrawn[0].actorId).toBe(actor(lead));
+});
+
+it('records the runtime, and what the request covered, when a turn approval expires unanswered', async () => {
+  const worker = await call<Seat>('seat_add', { roomId: room.id, product: 'codex', mode: 'managed', name: 'Worker' });
+  await call('seat_consent', { roomId: room.id, seatId: worker.id, consent: true });
+  const turn = await call<Turn>('turn_request', { roomId: room.id, seatId: worker.id, prompt: 'Review' });
+  advanceTurnPolicies(store, room.id, Date.now() + 3600001);
+  const expired = store.events(room.id, 0, 1000).filter((e) => e.type === 'permission.expired');
+  expect(expired).toHaveLength(1);
+  const { actionDigest, policyVersion, ...content } = expired[0].data as ToolArgs;
+  expect(content).toEqual({ requestId: turn.permissionRequestId, action: 'turn_execute', scopeDigest: expect.any(String), expiresAt: expect.any(Number) });
+  expect(store.get('permission', turn.permissionRequestId!)).toMatchObject({ status: 'expired', scopeDigest: content.scopeDigest, expiresAt: content.expiresAt });
+  expect(actionDigest).toBe(scopeDigest(content));
+  expect(policyVersion).toEqual(expect.any(Number));
+  expect(expired[0].actorId).toBe('runtime');
 });
 
 it('refuses every authority change from an agent, so agent tools cannot add to or rewrite the audit trail', async () => {

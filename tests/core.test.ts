@@ -298,6 +298,23 @@ describe('room authority and interactions', () => {
     ]);
     await expect(call('permission_grant', { requestId: t.permissionRequestId })).rejects.toThrow();
   });
+  it('cancels a queued turn when its owner denies the approval, and one an earlier version left queued after a denial', async () => {
+    const r = await room();
+    const s = await seat(r.id);
+    await call('seat_consent', { roomId: r.id, seatId: s.id, consent: true });
+    const t = await call<Turn>('turn_request', { roomId: r.id, seatId: s.id, prompt: 'Run' }, agent);
+    await call('permission_deny', { requestId: t.permissionRequestId });
+    expect(store.get<Turn>('turn', t.id)).toMatchObject({ status: 'cancelled', error: 'Approval denied before the turn started' });
+    expect(store.get<ToolArgs>('permission', t.permissionRequestId!)?.status).toBe('denied');
+    expect(store.events(r.id, 0, 100).filter((e) => e.type === 'permission.cancelled')).toEqual([]);
+    await expect(call('permission_grant', { requestId: t.permissionRequestId })).rejects.toThrow(/expired or resolved/);
+    const stuck = await call<Turn>('turn_request', { roomId: r.id, seatId: s.id, prompt: 'Run again' }, agent);
+    store.put('permission', stuck.permissionRequestId!, { ...store.get<ToolArgs>('permission', stuck.permissionRequestId!)!, status: 'denied' });
+    await call('room_post', { roomId: r.id, text: 'Anyone there?' }, agent);
+    expect(store.get<Turn>('turn', stuck.id)).toMatchObject({ status: 'cancelled', error: 'Approval denied before the turn started' });
+    expect(store.events(r.id, 0, 100).filter((e) => e.type === 'turn.cancelled').map((e) => e.data))
+      .toEqual([{ turnId: t.id, reason: 'permission_denied' }, { turnId: stuck.id, reason: 'permission_denied' }]);
+  });
   it('preserves queued turns and approvals across pause and resume', async () => {
     const r = await room();
     const target = await seat(r.id);

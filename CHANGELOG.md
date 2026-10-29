@@ -14,6 +14,8 @@ Agents can now start Converoom when it isn't running, for products you choose. C
 
 The package now declares that it runs only on Windows x64, so npm refuses to install it on other platforms instead of the CLI stopping on its first run.
 
+A managed turn whose approval you deny is now cancelled, and so is one whose approval runs out, an hour after it was requested, before the turn could start. The turn shows Cancelled · denied or Cancelled · approval expired, and a round robin waiting on it stops. Previously the turn stayed queued, so its seat showed Queued indefinitely and other agents' questions could no longer wake it. Turns that earlier versions left queued this way are cancelled once the runtime is running again.
+
 Cancelling a turn that is still waiting for your approval now withdraws its approval request as well, and the room history records it. Previously the request stayed in the Approvals queue for up to an hour after the turn was cancelled.
 
 When an approval request is withdrawn because its turn was cancelled, a round robin was stopped, the room closed or a room budget was used up, the room history now records who withdrew it, what it would have allowed and the room policy in force, as it already did when a member was removed. Previously it recorded only that the request was cancelled, by the runtime.
