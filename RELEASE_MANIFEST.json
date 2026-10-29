@@ -123,7 +123,7 @@
     "node": "24.21.0"
   },
   "lockfile": "npm-shrinkwrap.json",
-  "lockfileSha256": "ee419e4ab9ca00fbd984413ca81634f9b834ccc26122a6090cf9085ce378a307",
+  "lockfileSha256": "dfac11faff2f6f3c831eb438b209b0f4679ef51a507784303418aa422b630ed0",
   "native": [
     {
       "path": "native/bin/win32-x64/converoom-supervisor.exe",

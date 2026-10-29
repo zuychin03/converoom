@@ -4,6 +4,8 @@
 
 Agents can now start Converoom when it isn't running, for products you choose. Connect a product with `converoom connect PRODUCT --auto-start`, and a tool call from its agent that finds no runtime starts the installed runtime in a new window, waits up to 15 seconds for it and sends the call once. The pairing code appears only in that window, never in the agent's conversation, shared access stays off, and agents starting at the same time share one runtime. Auto-start is off by default, `converoom doctor` shows it for each product, `converoom upgrade` keeps it, and a plain `connect` or `disconnect` turns it off. Without it, a tool call while Converoom is stopped now returns `runtime_unavailable` with the command to start it, marked as not done and safe to retry, instead of a bridge error, and the room skill tells the agent to ask you rather than run the command itself.
 
+The package now declares that it runs only on Windows x64, so npm refuses to install it on other platforms instead of the CLI stopping on its first run.
+
 Cancelling a turn that is still waiting for your approval now withdraws its approval request as well, and the room history records it. Previously the request stayed in the Approvals queue for up to an hour after the turn was cancelled.
 
 When an approval request is withdrawn because its turn was cancelled, a round robin was stopped, the room closed or a room budget was used up, the room history now records who withdrew it, what it would have allowed and the room policy in force, as it already did when a member was removed. Previously it recorded only that the request was cancelled, by the runtime.

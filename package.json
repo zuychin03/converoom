@@ -7,6 +7,12 @@
   "engines": {
     "node": ">=24.14 <25"
   },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
   "bin": {
     "converoom": "dist/cli.js"
   },

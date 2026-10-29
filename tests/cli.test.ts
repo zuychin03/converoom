@@ -77,6 +77,10 @@ it.each([['an edited', true], ['an unchanged', false]] as const)('disconnect rem
     expect(log.mock.calls.flat().join('\n').includes(skill)).toBe(edited);
   } finally { log.mockRestore(); await server.close(); await runtime.stop(); await rm(root, { recursive: true, force: true }); }
 }, 30000);
+it('declares Windows x64, the only platform the CLI accepts, to npm so other installs are refused before first run', async () => {
+  const pkg = JSON.parse(await readFile('package.json', 'utf8')), lock = JSON.parse(await readFile('npm-shrinkwrap.json', 'utf8'));
+  for (const entry of [pkg, lock.packages['']]) expect(entry).toMatchObject({ os: ['win32'], cpu: ['x64'] });
+});
 it('records auto-start in the registration only when connect asks for it, and doctor reports it', async () => {
   const root = await mkdtemp(join(tmpdir(), 'converoom-autostart-'));
   const dataDir = join(root, 'data'), config = join(root, 'config.toml'), skills = join(root, 'skills', 'converoom-room');
