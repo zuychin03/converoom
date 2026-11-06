@@ -315,6 +315,23 @@ describe('room authority and interactions', () => {
     expect(store.events(r.id, 0, 100).filter((e) => e.type === 'turn.cancelled').map((e) => e.data))
       .toEqual([{ turnId: t.id, reason: 'permission_denied' }, { turnId: stuck.id, reason: 'permission_denied' }]);
   });
+  it.each<[string, (t: Turn) => Promise<unknown>, string, string]>([
+    ['granted', (t) => call('permission_grant', { requestId: t.permissionRequestId }), 'queued', 'granted'],
+    ['denied', (t) => call('permission_deny', { requestId: t.permissionRequestId }), 'cancelled', 'denied'],
+    ['withdrawn', (t) => call('turn_cancel', { roomId: t.roomId, turnId: t.id }), 'cancelled', 'cancelled'],
+    ['expired', async () => vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3600001), 'queued', 'pending'],
+  ])('refuses to deny an approval once it is %s, leaving the turn, the request and the audit as they were', async (_, resolve, turnStatus, requestStatus) => {
+    const r = await room();
+    const s = await seat(r.id);
+    await call('seat_consent', { roomId: r.id, seatId: s.id, consent: true });
+    const t = await call<Turn>('turn_request', { roomId: r.id, seatId: s.id, prompt: 'Run' }, agent);
+    await resolve(t);
+    const recorded = store.events(r.id, 0, 100).length;
+    await expect(call('permission_deny', { requestId: t.permissionRequestId })).rejects.toThrow(/expired or resolved/);
+    expect([store.get<Turn>('turn', t.id)?.status, store.get<ToolArgs>('permission', t.permissionRequestId!)?.status])
+      .toEqual([turnStatus, requestStatus]);
+    expect(store.events(r.id, 0, 100)).toHaveLength(recorded);
+  });
   it('preserves queued turns and approvals across pause and resume', async () => {
     const r = await room();
     const target = await seat(r.id);

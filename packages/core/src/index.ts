@@ -1100,6 +1100,8 @@ export function createCore(store: Store): Core {
     if (!p) throw new E('permission', 'Request not found');
     requireHumanParticipant(c, a, p.roomId);
     if (p.ownerId !== a.ownerId) throw new E('permission_owner', 'Permission owner required', 403);
+    if (p.status !== 'pending' || p.expiresAt <= Date.now())
+      throw new E('permission', 'Request expired or resolved', 409);
     store.put('permission', p.id, { ...p, status: 'denied' });
     const denied = authority(store, a, room(p.roomId), 'permission.denied', { requestId: p.id, action: p.action, scopeDigest: p.scopeDigest, expiresAt: p.expiresAt });
     const plan = p.action === 'round_robin' ? store.get<RoundRobinPlan>('round_robin', String(p.scope.planId)) : undefined;
