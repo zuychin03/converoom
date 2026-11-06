@@ -39,7 +39,7 @@ import { canonicalRoot } from '../../../packages/adapters/src/process.js';
 import { managedBridge } from '../../../packages/mcp/src/managed.js';
 import { mountParticipant, type RemoteTransportFactory } from '../../../packages/remote/src/client.js';
 import { currentTurnAuthority } from '../../../packages/core/src/membership.js';
-import { installationAuthority } from '../../../packages/core/src/audit.js';
+import { authority, installationAuthority } from '../../../packages/core/src/audit.js';
 import { isConnected, latestDiscovery, markConnected, runDiscovery } from '../../cli/src/discovery.js';
 import { connectProduct } from '../../cli/src/connect.js';
 import { issueBridgeCredential, revokeBridgeCredential } from './bridges.js';
@@ -137,9 +137,11 @@ export async function createRuntime(
     store.transaction(() => {
       const current = store.get<Permission>('permission', request.id);
       if (current?.status !== 'pending') return;
-      const status = current.expiresAt <= Date.now() ? 'expired' : 'cancelled';
-      store.put('permission', current.id, { ...current, status });
-      emit(t, 'permission.' + status, { requestId: current.id });
+      const expired = current.expiresAt <= Date.now();
+      store.put('permission', current.id, { ...current, status: expired ? 'expired' : 'cancelled' });
+      const covered = { requestId: current.id, action: current.action, scopeDigest: current.scopeDigest };
+      authority(store, { principalId: 'runtime' }, store.get<Room>('room', t.roomId)!, expired ? 'permission.expired' : 'permission.cancelled',
+        expired ? { ...covered, expiresAt: current.expiresAt } : covered);
     });
     return false;
   };

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
+import { scopeDigest } from '../packages/store/src/index.js';
 import type { Permission } from '../packages/core/src/index.js';
 import type { Actor, ToolArgs, Turn } from '../packages/shared/src/contracts.js';
 import { pendingPermissions, agentWaitEnds } from '../apps/ui/src/model.js';
@@ -43,7 +44,14 @@ it.each(['timeout', 'cancel', 'grant', 'deny'] as const)(
       expect(pendingPermissions(state, now)).toHaveLength(0);
       await expect(call('permission_grant', { requestId: request.id })).rejects.toThrow();
       if (outcome === 'timeout' || outcome === 'cancel') {
-        expect(runtime.core.store.events(String(room.id)).filter((e) => e.type === 'permission.' + expected)).toHaveLength(1);
+        const ended = runtime.core.store.events(String(room.id)).filter((e) => e.type === 'permission.' + expected);
+        expect(ended).toHaveLength(1);
+        expect(ended[0].actorId).toBe('runtime');
+        const { actionDigest, policyVersion, ...content } = ended[0].data as ToolArgs;
+        expect(content).toEqual({ requestId: request.id, action: 'vendor_tool', scopeDigest: request.scopeDigest,
+          ...(outcome === 'timeout' ? { expiresAt: request.expiresAt } : {}) });
+        expect(actionDigest).toBe(scopeDigest(content));
+        expect(policyVersion).toEqual(expect.any(Number));
         expect(runtime.core.store.list<ToolArgs>('grant').some((g) => g.requestId === request.id)).toBe(false);
       }
       await expect.poll(() => runtime.core.store.get<Turn>('turn', String(turn.id))?.status).toBe(
