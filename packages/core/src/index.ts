@@ -543,6 +543,7 @@ export function createCore(store: Store): Core {
         'verification_request',
         'integration_prepare',
         'candidate_apply',
+        'candidate_export_branch',
         'workspace_cleanup',
         'attempt_release',
         'attempt_rollback',

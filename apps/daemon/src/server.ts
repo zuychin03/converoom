@@ -44,6 +44,7 @@ const installation = {
   profiles: 'profile',
   repos: 'repo',
   resources: 'resource',
+  settings: 'setting',
   remoteConnections: 'remote_connection',
   remoteProposals: 'remote_proposal',
 };
@@ -268,6 +269,8 @@ export async function createServer(
     'resource_profile_list',
     'candidate_review',
     'candidate_apply',
+    'candidate_export_branch',
+    'export_author_update',
     'workspace_cleanup',
     'workspace_cleanup_preview',
     'attempt_release',

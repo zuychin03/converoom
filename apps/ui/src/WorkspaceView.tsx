@@ -41,6 +41,8 @@ export function WorkspaceView({
   const candidates = state.candidates.filter((c) => c.roomId === roomId);
   const repoOptions = state.repos.map((r) => ({ value: string(r, 'id'), label: string(r, 'name') }));
   const profileOptions = state.profiles.map((p) => ({ value: string(p, 'id'), label: string(p, 'name') }));
+  const authorSetting = state.settings.find((s) => s.id === 'export_author');
+  const author = authorSetting ? `${string(authorSetting, 'name')} <${string(authorSetting, 'email')}>` : DEFAULT_AUTHOR;
   return (
     <div className="work">
       <div className="page-head">
@@ -143,6 +145,28 @@ export function WorkspaceView({
               <h2 id="candidates-title" className="section-label">
                 Combined candidates
               </h2>
+              <div className="row-actions">
+              <button
+                type="button"
+                className="button small"
+                onClick={() =>
+                  openAction({
+                    title: 'Commit author for exported branches',
+                    command: 'export_author_update',
+                    args: {},
+                    label: 'Save author',
+                    description: `Exported branches get one commit authored and committed as this person. Leave both empty to use ${DEFAULT_AUTHOR}.`,
+                    fields: [
+                      { key: 'name', label: 'Name', value: authorSetting ? string(authorSetting, 'name') : '' },
+                      { key: 'email', label: 'Email', value: authorSetting ? string(authorSetting, 'email') : '' },
+                    ],
+                    prepare: ({ name, email, ...rest }) =>
+                      String(name ?? '').trim() || String(email ?? '').trim() ? { ...rest, name, email } : rest,
+                  })
+                }
+              >
+                Commit author
+              </button>
               <button
                 type="button"
                 className="button small"
@@ -177,7 +201,11 @@ export function WorkspaceView({
               >
                 Prepare candidate
               </button>
+              </div>
             </div>
+            <p className="rail-note">
+              Exported branches are committed as <strong>{author}</strong>.
+            </p>
             {candidates.length === 0 ? (
               <p className="rail-note">
                 Accepted submissions combine into one candidate here, checked fresh before you apply it.
@@ -185,7 +213,8 @@ export function WorkspaceView({
             ) : (
               <ul className="candidates">
                 {candidates.map((c) => (
-                  <CandidateRow key={string(c, 'id')} candidate={c} state={state} openAction={openAction} />
+                  <CandidateRow key={string(c, 'id')} candidate={c} state={state} roomOpen={room.lifecycle === 'active'} author={author}
+                    openAction={openAction} />
                 ))}
               </ul>
             )}
@@ -1035,16 +1064,27 @@ function Checkpoints({
   );
 }
 
+const DEFAULT_AUTHOR = 'Converoom <converoom@localhost>';
+const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'candidate';
 function CandidateRow({
   candidate,
   state,
+  roomOpen,
+  author,
   openAction,
 }: {
   candidate: RecordData;
   state: Snapshot;
+  roomOpen: boolean;
+  author: string;
   openAction: (action: Action) => void;
 }) {
+  const [brief, setBrief] = useState<RecordData>();
+  const [copied, setCopied] = useState(false);
   const status = string(candidate, 'status');
+  const room = state.rooms.find((r) => r.id === candidate.roomId) ?? {};
+  const repo = state.repos.find((r) => r.id === candidate.repoId) ?? {};
+  const exports = objects(candidate, 'exports');
   const digest = string(candidate, 'resultDigest');
   const kind: Kind =
     status === 'applied' || status === 'verified' || status === 'accepted'
@@ -1099,8 +1139,62 @@ function CandidateRow({
           >
             Apply to checkout
           </button>
+          <button
+            type="button"
+            className="button small"
+            disabled={!roomOpen || !['accepted', 'applied'].includes(status)}
+            onClick={() =>
+              openAction({
+                title: 'Export to a new branch',
+                command: 'candidate_export_branch',
+                args: { roomId: candidate.roomId, candidateId: candidate.id },
+                label: 'Export branch',
+                description: `Creates the branch in ${string(repo, 'path')} with one commit holding result ${digest.slice(0, 12)}, based on ${
+                  string(repo, 'head').slice(0, 12)} and authored as ${author}. Your working tree and current branch stay as they are, nothing is pushed, and a branch name that exists or is protected is refused.`,
+                fields: [
+                  { key: 'branch', label: 'New branch name', required: true, value: 'converoom/' + slug(string(room, 'title')) },
+                  { key: 'message', label: 'Commit message', type: 'textarea', value: string(room, 'title') },
+                ],
+                prepare: ({ message, ...rest }) => (String(message ?? '').trim() ? { ...rest, message } : rest),
+                onSuccess: (result) => {
+                  setCopied(false);
+                  setBrief(isRecord(result) ? result : undefined);
+                },
+              })
+            }
+          >
+            Export branch
+          </button>
         </div>
       </div>
+      {exports.length > 0 && (
+        <div className="candidate-exports">
+          <h4 className="section-label">Exported branches</h4>
+          <ul>
+            {exports.map((e) => (
+              <li key={string(e, 'branch')}>
+                <code>{string(e, 'branch')}</code> · commit <code>{string(e, 'commit').slice(0, 12)}</code> · PR brief in{' '}
+                <code>{string(e, 'briefPath')}</code>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {brief && (
+        <details className="task-changes candidate-brief" open>
+          <summary>PR brief for {string(brief, 'branch')}</summary>
+          <div className="row-actions">
+            <button
+              type="button"
+              className="button small"
+              onClick={() => void navigator.clipboard.writeText(string(brief, 'brief')).then(() => setCopied(true), () => setCopied(false))}
+            >
+              {copied ? 'Copied' : 'Copy brief'}
+            </button>
+          </div>
+          <pre tabIndex={0} aria-label={'PR brief text for ' + string(brief, 'branch')}>{string(brief, 'brief')}</pre>
+        </details>
+      )}
     </li>
   );
 }

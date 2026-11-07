@@ -16,7 +16,8 @@ import {
 import { splitLines } from '../../shared/src/diff.js';
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
 import { cancelTurn, RESULT_EXPIRY_BATCH, RESULT_RETENTION_MS } from '../../core/src/index.js';
-import { authority } from '../../core/src/audit.js';
+import { authority, installationAuthority } from '../../core/src/audit.js';
+import { bytesDigest } from '../../shared/src/hash.js';
 import { run, canonicalRoot } from '../../adapters/src/process.js';
 import {
   snapshot,
@@ -31,6 +32,7 @@ import {
 import { provisionFixture, type FixtureBroker, type FixtureProfile } from './broker.js';
 import { attemptTree, checkpointStore, ignoredPaths, CHECKPOINT_LIMIT, type Checkpoint } from './checkpoints.js';
 import { treeDiff } from './diff.js';
+import { prBrief } from './brief.js';
 const executionEnvironments = new Map<string, NodeJS.ProcessEnv>();
 export const attemptEnvironment = (id: string) => executionEnvironments.get(id) ?? {};
 interface Repo {
@@ -165,6 +167,9 @@ const RELEASE_RETENTION_MS = 7 * 86400000;
 const ACTIVE_ATTEMPT = ['provisioning', 'ready', 'running', 'checkpointing', 'rolling_back', 'submitting', 'completed', 'draining'];
 const ACTIVE_CANDIDATE = ['prepared', 'verified', 'accepted', 'applying'];
 const RESUMED = 'An earlier removal did not finish';
+const DEFAULT_EXPORT_AUTHOR = { name: 'Converoom', email: 'converoom@localhost' };
+// Names teams commonly protect are refused even before they exist; existing branches are refused separately.
+const PROTECTED_BRANCH = /^(main|master|develop|development|trunk|production|prod|stable|staging|release|HEAD)$|^(release|hotfix)\//i;
 export function mountWorkspace(
   core: Core,
   dataDir: string,
@@ -1246,6 +1251,103 @@ export function mountWorkspace(
         candidateId: c.id,
         resultDigest: c.resultDigest,
       });
+    }),
+  );
+  // FR-58: the owner chooses who exported commits are authored by; until then they carry a Converoom identity.
+  const exportAuthor = () => {
+    const set = s.get<{ name: string; email: string }>('setting', 'export_author');
+    return set ? { name: set.name, email: set.email } : DEFAULT_EXPORT_AUTHOR;
+  };
+  core.register('export_author_update', (a, x) => {
+    core.requireOwner(a);
+    if (x.name === undefined && x.email === undefined) {
+      s.remove('setting', 'export_author');
+      installationAuthority(s, a, 'export_author.reset', { ...DEFAULT_EXPORT_AUTHOR });
+      return { exportAuthor: exportAuthor(), default: true };
+    }
+    const name = str(x, 'name', 128).trim(), email = str(x, 'email', 254).trim();
+    if (/[<>\r\n]/.test(name) || !/^[^\s<>@]+@[^\s<>@]+$/.test(email))
+      throw new E('invalid_argument', 'Give a name without angle brackets and an email address like name@example.com');
+    s.put('setting', 'export_author', { id: 'export_author', ownerId: a.ownerId, name, email, updatedAt: Date.now() });
+    installationAuthority(s, a, 'export_author.updated', { name, email });
+    return { exportAuthor: exportAuthor(), default: false };
+  });
+  core.register('candidate_export_branch', (a, x) =>
+    journal(a, 'candidate_export_branch', x, async () => {
+      const roomId = str(x, 'roomId');
+      core.requireOwner(a, roomId);
+      const room = core.requireRoom(a, roomId), c = get<Candidate>('candidate', str(x, 'candidateId'));
+      if (c.roomId !== roomId || !['accepted', 'applied'].includes(c.status))
+        throw new E('candidate', 'Review the verified final candidate before exporting it', 409);
+      const manifests = c.manifestIds.map((id) => get<Manifest>('manifest', id));
+      manifests.forEach(assertCurrent);
+      const repo = repoAccess(a, c.repoId), v = get<Verification>('verification', c.verificationId!);
+      const content = compose(await load(repo.foundationPath), await Promise.all(manifests.map(async (m) => (await manifestData(m)).delta)));
+      if (content.digest !== c.resultDigest || v.status !== 'passing' || v.contentDigest !== c.resultDigest)
+        throw new E('evidence', 'Candidate content or its passing checks changed');
+      const branch = str(x, 'branch', 200), message = x.message === undefined ? '' : str(x, 'message', 4000).trim();
+      if (PROTECTED_BRANCH.test(branch)) throw new E('protected_ref', 'Choose a new branch name; ' + branch + ' is protected', 409);
+      const git = async (args: string[], cwd: string, env: NodeJS.ProcessEnv = {}) =>
+        run('git', ['-c', 'core.hooksPath=' + join(dataDir, 'empty-hooks'), ...args], cwd, 120000, env);
+      const format = await git(['check-ref-format', '--branch', branch], repo.path);
+      if (format.exitCode || format.output.trim() !== branch) throw new E('invalid_ref', 'That is not a valid Git branch name');
+      const refs = (await git(['for-each-ref', '--format=%(refname)', 'refs/heads'], repo.path)).output.split('\n').map((r) => r.trim().toLowerCase());
+      const current = (await git(['symbolic-ref', '-q', 'HEAD'], repo.path)).output.trim().toLowerCase();
+      const ref = 'refs/heads/' + branch;
+      if ([...refs, current].some((r) => r === ref.toLowerCase() || r.startsWith(ref.toLowerCase() + '/') || ref.toLowerCase().startsWith(r + '/')))
+        throw new E('ref_exists', 'A branch named ' + branch + ' already exists or clashes with one; choose a new name', 409);
+      if ((await git(['cat-file', '-e', repo.head + '^{commit}'], repo.path)).exitCode)
+        throw new E('repository', 'The repository no longer has the commit this candidate is based on');
+      const author = exportAuthor(), id = randomUUID(), path = await clone(repo, 'export-' + id);
+      try {
+        const local = async (args: string[], env?: NodeJS.ProcessEnv) => {
+          const result = await git(args, path, env);
+          if (result.exitCode) throw new E('export_failed', 'Git could not build the export commit');
+          return result.output.trim();
+        };
+        await writeSnapshot(path, content);
+        await local(['add', '--all', '--force', '--', '.']);
+        const tree = await local(['write-tree']);
+        // The commit must reproduce the verified bytes once checked out, so filters that change them refuse the export.
+        await writeSnapshot(path, { files: [], digest: scopeDigest([]) });
+        await local(['checkout-index', '--all', '--force']);
+        if ((await snapshot(path)).digest !== content.digest)
+          throw new E('checkout_conversion', 'Git filters change the candidate content; export refused');
+        const identity = { GIT_AUTHOR_NAME: author.name, GIT_AUTHOR_EMAIL: author.email, GIT_COMMITTER_NAME: author.name, GIT_COMMITTER_EMAIL: author.email };
+        const commit = await local(['commit-tree', tree, '-p', repo.head, '-m',
+          message || String(room.title ?? 'Converoom candidate')], identity);
+        await local(['update-ref', 'refs/converoom/export', commit]);
+        if ((await git(['fetch', '--no-tags', '--no-write-fetch-head', '--no-recurse-submodules', path, 'refs/converoom/export'], repo.path)).exitCode)
+          throw new E('export_failed', 'The export commit could not be copied into the repository');
+        // An all-zero old value makes Git refuse to overwrite a branch created meanwhile.
+        if ((await git(['update-ref', '-m', 'converoom: export candidate ' + c.id, ref, commit, '0'.repeat(repo.head.length)], repo.path)).exitCode)
+          throw new E('ref_exists', 'A branch named ' + branch + ' was created meanwhile; choose a new name', 409);
+        const decision = s.lastEvent(roomId, 'decision');
+        const brief = prBrief({
+          room: room as unknown as ToolArgs, decision, branch, commit, base: repo.head, author,
+          interactions: s.list<ToolArgs>('interaction', { roomId }), seats: s.list<ToolArgs>('seat', { roomId }),
+          candidate: c as unknown as ToolArgs, verification: v as unknown as ToolArgs,
+          manifests: manifests.map((m) => ({
+            manifest: m as unknown as ToolArgs, task: task(roomId, m.taskId) as unknown as ToolArgs,
+            review: s.list<Review>('review', { roomId }).filter((r) => r.manifestId === m.id).sort((p, q) => q.createdAt - p.createdAt)[0],
+            verification: s.list<Verification>('verification').filter((w) => w.manifestId === m.id && w.status === 'passing')
+              .at(-1) as unknown as ToolArgs | undefined,
+          })),
+        });
+        const briefDigest = bytesDigest(brief), briefPath = join(dataDir, 'artefacts', 'brief-' + id + '.md');
+        await mkdir(join(dataDir, 'artefacts'), { recursive: true });
+        await writeFile(briefPath, brief, { mode: 0o600 });
+        const exported = { branch, commit, base: repo.head, author, briefPath, briefDigest, at: Date.now() };
+        s.transaction(() => {
+          const latest = get<Candidate & { exports?: unknown[] }>('candidate', c.id);
+          s.put('candidate', c.id, { ...latest, exports: [...(latest.exports ?? []), exported] });
+          authority(s, a, room, 'candidate.exported', { candidateId: c.id, resultDigest: c.resultDigest, branch, commit,
+            base: repo.head, author, briefDigest });
+        });
+        return { ...exported, candidateId: c.id, brief };
+      } finally {
+        await rm(path, { recursive: true, force: true, maxRetries: 3 }).catch(() => undefined);
+      }
     }),
   );
   const workspaceRoot = join(dataDir, 'workspaces');

@@ -75,6 +75,7 @@ const fixtureControl = createHttpServer(async (request, response) => {
     for (const room of runtime.core.store.list<Room>('room').filter((r) => !ENDED_ROOMS.includes(r.lifecycle)))
       await runtime.core.dispatch(humanIdentity(runtime), 'room_close', { roomId: room.id });
     await rm(join(dir, 'discovery.json'), { force: true });
+    runtime.core.store.remove('setting', 'export_author');
     response.writeHead(204).end();
     return;
   }
@@ -162,6 +163,20 @@ const fixtureControl = createHttpServer(async (request, response) => {
     await call('verification_request', { roomId: room.id, manifestId: manifest.id });
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ roomId: room.id, manifestId: manifest.id }));
+    return;
+  }
+  // A reviewed combined candidate, ready to export.
+  if (request.method === 'POST' && requestUrl.pathname === '/export') {
+    const { room, attempt, call } = await claimedAttempt(requestUrl.searchParams.get('title') ?? 'Export room', { 'README.md': 'one\n' }, []);
+    await writeFile(join(String(attempt.path), 'README.md'), 'two\n');
+    const manifest = await call('task_submit', { roomId: room.id, attemptId: attempt.id });
+    await call('verification_request', { roomId: room.id, manifestId: manifest.id });
+    await call('review_submit', { roomId: room.id, manifestId: manifest.id, verdict: 'accept', reason: 'Reviewed exact change' });
+    const candidate = await call('integration_prepare', { roomId: room.id, repoId: attempt.repoId, manifestIds: [manifest.id],
+      profileId: attempt.profileId });
+    await call('candidate_review', { roomId: room.id, candidateId: candidate.id, reason: 'Reviewed combined checks' });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ roomId: room.id, candidateId: candidate.id }));
     return;
   }
   if (request.method !== 'POST' || requestUrl.pathname !== '/pair') {

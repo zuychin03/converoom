@@ -65,7 +65,7 @@ The agent expansion adds Antigravity, Kiro, Qoder and Grok Build to FR-01/05/11/
 | FR-55 | Locally implemented with fixture tests; live vendor and release acceptance open | Coding attempts shall record immutable per-turn workspace checkpoints and support rollback to a prior checkpoint within the active attempt. |
 | FR-56 | Locally implemented with fixture tests; live vendor and release acceptance open | Room creation and seat configuration shall support reusable workflow templates and adapter-verified model/reasoning-effort profiles. |
 | FR-57 | Locally implemented with fixture tests; live vendor and release acceptance open | Submission reviews shall support file and line-scoped diff annotations bound to exact content digests and rework turns. |
-| FR-58 | Future phase (V1.2) | Owners shall be able to export a verified integration candidate to a new local Git branch with a redacted Markdown PR brief. |
+| FR-58 | Locally implemented with fixture tests; release acceptance open | Owners shall be able to export a verified integration candidate to a new local Git branch with a redacted Markdown PR brief. |
 | FR-59 | Future phase (V1.3) | An opt-in authenticated private HTTPS owner listener shall allow mobile monitoring, diff/checkpoint inspection and scoped human approvals. |
 | FR-60 | Future phase (V1.3) | Owner-remote mobile sessions shall remain strictly isolated from `/shared` participant routes and local-only machine setup. |
 | FR-61 | Future phase (V1.2) | When a seat exhausts quota, loses authentication or disconnects mid-session, the runtime shall support structured takeover of its open interactions, host role or in-progress coding attempt by another eligible seat. |

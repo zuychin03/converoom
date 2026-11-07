@@ -173,6 +173,8 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     'candidate.prepared': (d) => `Combined candidate prepared (${inline(d.status)}) with result ${code(d.resultDigest)}.`,
     'candidate.accepted': (d) => `Final candidate accepted with result ${code(d.resultDigest)}.`,
     'candidate.applied': (d) => `Candidate applied to the checkout with result ${code(d.resultDigest)}.`,
+    'candidate.exported': (d) => `Candidate exported to the new local branch ${code(d.branch)} at commit ${code(d.commit)}, authored as ${
+      inline(record(d.author).name)}; nothing was pushed.`,
     'attempt.release_requested': (d) => reason(`Release requested for attempt ${code(String(d.attemptId).slice(0, 8))}`, d.reason),
     'attempt.released': (d) => `Attempt ${code(String(d.attemptId).slice(0, 8))} released; its workspace is preserved.`,
     'checkpoint.recorded': (d) => `Checkpoint ${Number(d.checkpoint)} of attempt ${code(String(d.attemptId).slice(0, 8))} recorded after ${turn(d.turnId)}, tree ${

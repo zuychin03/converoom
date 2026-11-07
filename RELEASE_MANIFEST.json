@@ -3,19 +3,19 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "0d4e3f508f2038b99daf54496f1da461224eaadbdce062447e76f6af9c32063b"
+      "sha256": "e1698adfdae21e4aea71a07e8970ea64beb1f48ed1477318af045a3280591ac5"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "fad6348bbbbfd25f7db5978bd5a32af3926a7c9f4f3892c2ad047aaec27266e3"
+      "sha256": "261bfd96e514e04cbb8bb28f85df41d12e0eea8c7c68178b4e375d9252d132cb"
     },
     {
       "path": "dist/server.js",
-      "sha256": "ece987e89cc5a7ee7d69abc36b91631a21c399a01adf7b2ee55a27b64c931cd9"
+      "sha256": "9db10e1f2c29f02e2749ce84bd0829136b116248b3085c001a8bbc6cbf419190"
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "ae9753a3a5e766e621c9dce22a01c1d46b72e3a9593e33718eb525eb43a76a86"
+      "sha256": "6a66b3ff6ad48135a61257941e11b4c660c2458baf3009081330a22d5aa218af"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -30,12 +30,12 @@
       "sha256": "809306f8444febde9c633c98531c6db7d3505735545b2369881e8cce511a31f9"
     },
     {
-      "path": "dist/ui/assets/index-9bMLpjAT.css",
-      "sha256": "45d69fba9233ee26c83f19235d297b0008b2af3c2d4dde19358ef8c396b55288"
+      "path": "dist/ui/assets/index-Bi_8xzcV.css",
+      "sha256": "b43aa5fe858ed8ba1bf209a8908e0c645828a116e77e5d43cd0d0ff93d5dc52c"
     },
     {
-      "path": "dist/ui/assets/index-CyKjC-18.js",
-      "sha256": "8008c52fa7c449e9b5e4eb02a7d9152725603c7f0a5bcaa952cdf05b70860e10"
+      "path": "dist/ui/assets/index-tZlQrE6T.js",
+      "sha256": "d9b8b7ac801aaf8f6665348f3a89f0a2407ee0a1832c9ccc3396deacd4d2933e"
     },
     {
       "path": "dist/ui/assets/martian-mono-cyrillic-ext-wght-normal-DAknEryR.woff2",
@@ -67,7 +67,7 @@
     },
     {
       "path": "dist/ui/index.html",
-      "sha256": "2cd09aa1a469126346a7add14b510aff810cd260df2328e1966a8e7040ca60f6"
+      "sha256": "5fba783d6f5840e81668607aab122bcbd08a4fdbaa75260d712db224c5fe816f"
     },
     {
       "path": "plugins/README.md",
@@ -75,7 +75,7 @@
     },
     {
       "path": "packages/plugin-content/skills/converoom-room/SKILL.md",
-      "sha256": "9ac858e0752f094a7d4d814267bc0b9fbac3e042aa13ca8bffc0bcf08a442876"
+      "sha256": "0cf65d66cfe5e12fdf8562fc93694b338abc77b9468643480d95fca7d5782dd4"
     },
     {
       "path": "native/bin/win32-x64/converoom-supervisor.exe",
@@ -83,7 +83,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "71ceec32bc3ab879092128843c5a07a27d99a6bf8c44d37f49f11a248a8ca166"
+      "sha256": "a5468b980afd244e954942d98af4056da0e9ea3c38d1bb1f2975f7921ffec16f"
     },
     {
       "path": "docs/WINDOWS_SHARED_PILOT.md",
@@ -99,7 +99,7 @@
     },
     {
       "path": "docs/REQUIREMENT_MATRIX.md",
-      "sha256": "76f77e7eda548e4ef51632aa63b5ce61511f3bb5ac97cb7f11d4b309a4db16f3"
+      "sha256": "2dd4e5799e0f2c8d5d07ee51fe7bbf5fe74cca14014f440d24eae104441d742a"
     },
     {
       "path": "docs/WINDOWS_INSTALL.md",

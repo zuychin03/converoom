@@ -87,7 +87,7 @@ Register a Git repository root with a committed foundation. Dirty original files
 
 Checks run in fresh clones against exact content. An optional `local-kv` fixture profile provisions a runtime-owned port and scoped test namespace; checks that ignore a required fixture are blocked. Arbitrary hosted credentials, shared services and interactive previews are disabled.
 
-Accept each exact submission after independent checks, then prepare the combined candidate. Review the final combined evidence before applying. Apply refuses a dirty or changed original target. It creates no commit, push, merge or deployment.
+Accept each exact submission after independent checks, then prepare the combined candidate. Review the final combined evidence before applying. Apply refuses a dirty or changed original target. It creates no commit, push, merge or deployment. Alternatively, Export branch puts the reviewed candidate on a new local branch as one commit, authored as Converoom unless you set Commit author, and gives you a PR brief to paste; it never touches your working tree and never pushes.
 
 Every attempt, combined candidate and check keeps its clone until you clean it up. `converoom cleanup`, or Workspace cleanup in the Work view, previews every clone with its size and either that it can be removed or why it is kept. A clone can be removed once its work is submitted or recorded and the room has been exported since; a released attempt also needs 7 days to pass and no unsubmitted changes. Dirty, unexported and uncertain work is always kept, and an attempt's checkpoints are removed with its clone. `converoom cleanup --confirm CODE` removes only what that preview listed, and nothing if anything changed since.
 

@@ -115,6 +115,7 @@ const SYSTEM_LABELS: Record<string, string> = {
   'candidate.prepared': 'candidate',
   'candidate.accepted': 'candidate accepted',
   'candidate.applied': 'candidate applied',
+  'candidate.exported': 'branch exported',
   'checkpoint.recorded': 'checkpoint',
   'checkpoint.unchanged': 'checkpoint',
   'checkpoint.skipped': 'checkpoint skipped',
@@ -1409,6 +1410,8 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `Final candidate accepted · ${string(d, 'resultDigest').slice(0, 12)}`;
     case 'candidate.applied':
       return `Candidate applied to the checkout · ${string(d, 'resultDigest').slice(0, 12)}`;
+    case 'candidate.exported':
+      return `Candidate exported to new branch ${string(d, 'branch')} · commit ${string(d, 'commit').slice(0, 12)} · not pushed`;
     case 'checkpoint.recorded': {
       const pruned = list(d, 'pruned').length;
       return `Checkpoint ${String(d.checkpoint)} saved · attempt ${string(d, 'attemptId').slice(0, 8)} · tree ${string(d, 'treeDigest').slice(0, 12)}${

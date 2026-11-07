@@ -1506,6 +1506,28 @@ textarea {
 .task-changes pre {
   margin: var(--space-2) 0;
 }
+.candidate-exports,
+.candidate-brief {
+  grid-column: 2 / -1;
+  min-width: 0;
+}
+.candidate-exports ul {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  list-style: none;
+}
+.candidate-exports li {
+  padding: var(--space-1) 0;
+  overflow-wrap: anywhere;
+}
+.candidate-brief pre {
+  max-height: 24rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .checkpoint-list {
   margin: var(--space-2) 0 0;
   padding: 0;
@@ -2110,6 +2132,10 @@ textarea {
   }
   .checkpoint {
     grid-template-columns: 2rem minmax(0, 1fr);
+  }
+  .candidate-exports,
+  .candidate-brief {
+    grid-column: 1;
   }
   .checkpoint-end {
     grid-column: 2;

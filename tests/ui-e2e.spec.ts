@@ -341,6 +341,50 @@ test('comments on submitted and removed lines and sends them with a rework revie
   expect(errors).toEqual([]);
 });
 
+test('sets the export author and exports a reviewed candidate to a new branch with its PR brief at desktop and mobile', async ({ page, request }, info) => {
+  const errors: string[] = [];
+  watch(page, errors);
+  const code = (await (await request.post('http://127.0.0.1:43318/pair')).json()).code;
+  const title = 'Export room ' + info.project.name, branch = 'converoom/export-room-' + info.project.name;
+  expect((await request.post('http://127.0.0.1:43318/export?title=' + encodeURIComponent(title))).ok()).toBe(true);
+  await page.goto('/');
+  await page.getByLabel('Pairing code').fill(code);
+  await page.getByRole('button', { name: 'Connect to Converoom' }).click();
+  await expect(page.getByRole('heading', { name: title })).toBeVisible();
+  await page.getByRole('button', { name: 'Work', exact: true }).click();
+  const section = page.getByRole('region', { name: 'Combined candidates' });
+  await expect(section.getByText('Converoom <converoom@localhost>', { exact: true })).toBeVisible();
+  await section.getByRole('button', { name: 'Commit author' }).click();
+  const author = page.getByRole('dialog', { name: 'Commit author for exported branches' });
+  await author.getByLabel(/^Name/).fill('Duy Fixture');
+  await author.getByLabel(/^Email/).fill('duy@example.invalid');
+  await axe(page);
+  await author.getByRole('button', { name: 'Save author', exact: true }).click();
+  await expect(author).toBeHidden();
+  await expect(section.getByText('Duy Fixture <duy@example.invalid>', { exact: true })).toBeVisible();
+  await section.getByRole('button', { name: 'Export branch', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export to a new branch' });
+  await expect(dialog.getByLabel(/^New branch name/)).toHaveValue(branch);
+  await expect(dialog.getByText(/authored as Duy Fixture <duy@example.invalid>/)).toBeVisible();
+  await dialog.getByLabel(/^Commit message/).fill('Change the readme');
+  expect(await dialog.evaluate((d) => d.scrollWidth <= d.clientWidth)).toBe(true);
+  await axe(page);
+  await dialog.getByRole('button', { name: 'Export branch', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(section.getByText('PR brief for ' + branch, { exact: true })).toBeVisible();
+  await expect(section.locator('.candidate-brief pre')).toContainText('## Verification');
+  await expect(section.getByRole('listitem').filter({ hasText: 'commit' }).getByText(branch, { exact: true })).toBeVisible();
+  expect(await section.evaluate((s) => s.scrollWidth <= s.clientWidth)).toBe(true);
+  await axe(page);
+  await section.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-export.png' });
+  await section.getByRole('button', { name: 'Commit author' }).click();
+  await author.getByLabel(/^Name/).fill('');
+  await author.getByLabel(/^Email/).fill('');
+  await author.getByRole('button', { name: 'Save author', exact: true }).click();
+  await expect(section.getByText('Converoom <converoom@localhost>', { exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('creates rooms from templates and sets seat models and efforts at desktop and mobile', async ({ page, request }, info) => {
   const errors: string[] = [];
   watch(page, errors);
