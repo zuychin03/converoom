@@ -282,6 +282,7 @@ export async function createServer(
     'room_barge_in',
     'turn_amend',
     'directive_clear',
+    'attempt_takeover',
     'session_context_decide',
     'session_context_codex_threads',
     'session_context_import_codex',

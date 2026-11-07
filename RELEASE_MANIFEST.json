@@ -3,19 +3,19 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "9871538c180a152b7740728379620f498b2d528dd9ce87efaabd09ff8e960bbe"
+      "sha256": "968386174d2bb55cc755e2387031997348fac94838cf01b69ac254113dedd334"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "905fd24af6739e73d6ec249c0731835df2fa65cdee5f4b4ca6b7d5b5c4c61e1f"
+      "sha256": "73ce603217c529dd6f962ae34da9aeb8073688bab72dff331d4d7496f4df7914"
     },
     {
       "path": "dist/server.js",
-      "sha256": "70936fed786913a49866bf28745dc616bbb1c562129fe57eeb57b7fe8a72e085"
+      "sha256": "5982fc01507bfc3eceedbee4e55c08f83596e552dca7c0a484ea8372dd8f7d77"
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "110f92e4f2745eb74e573801bedef5a1973b262bb6938c5a73d80c52a5655bb7"
+      "sha256": "13d6b1f6d2310b3ecbb9934a699030678ffff2d0ea72dc0b9f559c3f1d04b201"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -34,8 +34,8 @@
       "sha256": "9f21d51999c5bcf3024afa06fdfb772a157cdaff5d930bed706f84f225294479"
     },
     {
-      "path": "dist/ui/assets/index-CaqHsho7.js",
-      "sha256": "b416a3593f2e7dec0729868ef6af5f28aa25b7c9b0fdd114786dc1e8b6606b0e"
+      "path": "dist/ui/assets/index-CFcNnxYA.js",
+      "sha256": "612b27b06d807c16ff8d31c5c2a85efd6874084aab5f6bc88303f027f0db2fae"
     },
     {
       "path": "dist/ui/assets/martian-mono-cyrillic-ext-wght-normal-DAknEryR.woff2",
@@ -67,7 +67,7 @@
     },
     {
       "path": "dist/ui/index.html",
-      "sha256": "cac0ac7c34fd1651366ad57cdc61deba782b46c5601f1d9209ab4fa4dbad93b8"
+      "sha256": "3198175728b11b4058f3b118b084cc3c144ee8d9439504cd6f7cbc19bf3e13bb"
     },
     {
       "path": "plugins/README.md",
@@ -75,7 +75,7 @@
     },
     {
       "path": "packages/plugin-content/skills/converoom-room/SKILL.md",
-      "sha256": "f6c048e2de21342929521906e25b4fee5e7c0ae0766ec4f66c38f921891dddfc"
+      "sha256": "c9a28a1c161edf6609fcf2159af32df6efaa6b25aa50c2999d53542348eb6b9b"
     },
     {
       "path": "native/bin/win32-x64/converoom-supervisor.exe",
@@ -99,7 +99,7 @@
     },
     {
       "path": "docs/REQUIREMENT_MATRIX.md",
-      "sha256": "4353aec32aac46d0c01f49e9bccad46449757447192292c58934c49713ddea0c"
+      "sha256": "4aa9ea9cb45ae0a744c0931c436b4aa220d6055ebe34767b0aef83e28e216ddf"
     },
     {
       "path": "docs/WINDOWS_INSTALL.md",

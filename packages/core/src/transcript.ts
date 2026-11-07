@@ -133,7 +133,7 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     'policy.changed': (d) => end(`Limits changed to policy version ${Number(d.version)}` +
       (d.previousVersion !== undefined ? ` from ${Number(d.previousVersion)}` : '') +
       (Object.keys(record(d.policy)).length ? ': ' + Object.entries(record(d.policy)).map(([k, v]) => inline(k) + ' ' + inline(v)).join(', ') : '')),
-    'host.transferred': (d) => `Host role transferred to ${seatName(d.seatId)}.`,
+    'host.transferred': (d) => `Host role transferred to ${seatName(d.seatId)}${d.brief ? ', with a handoff brief of the agenda, open requests, active attempts and budget' : ''}.`,
     'interaction.read': (d) => end(mention(d.interactionId, 'Read')),
     'interaction.responded': (d) => end(mention(d.interactionId, 'Answered') + (d.responseId ? ' with ' + ref(d.responseId) : '')),
     'interaction.resolved': (d) => end(mention(d.interactionId, 'Resolved')),
@@ -169,6 +169,8 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     'context.unpinned': () => 'A pin was removed.',
     'directive.issued': (d) => `Owner directive (${({ steer_next: 'for the next turns', inject_mid_turn: 'delivered mid-turn', interrupt_and_amend: 'interrupting a turn' } as Record<string, string>)[String(d.mode)] ?? inline(d.mode)}) to ${items(d.seatIds).map(seatName).join(', ')}: ${inline(d.text)}`,
     'directive.cleared': () => 'An owner directive was cleared.',
+    'interaction.reassigned': (d) => reason(`A request to ${seatName(d.fromSeatId)} was reassigned to ${seatName(d.toSeatId)}`, d.reason),
+    'attempt.taken_over': (d) => reason(`Attempt ${code(String(d.fromAttemptId).slice(0, 8))} for task ${inline(d.taskId)} was handed from ${seatName(d.fromSeatId)} to ${seatName(d.toSeatId)} as attempt ${code(String(d.attemptId).slice(0, 8))}, starting from ${Number(d.checkpoint) ? 'checkpoint ' + Number(d.checkpoint) : 'the starting point'}`, d.reason),
     'directive.delivered': (d) => `An owner directive reached ${seatName(d.seatId)} ${d.state === 'applied' ? 'at the start of ' + turn(d.turnId) : 'on its ' + inline(String(d.via ?? 'room').replaceAll('_', ' ')) + ' call'}.`,
     'turn.amended': (d) => `${capital(turn(d.turnId))} was interrupted and amended; its continuation was queued with the owner's approval.`,
     'context.imported': (d) => `Imported context ${code(d.ref)} "${inline(d.title)}" from ${inline(d.product)}, ${Number(d.bytes)} bytes, digest ${code(d.digest)}.`,

@@ -8,6 +8,7 @@ import {
   type Core,
   type Actor,
   type ToolArgs,
+  type Room,
   type Review,
   type ReviewAnnotation,
   type Seat,
@@ -94,6 +95,10 @@ export interface Attempt {
   treeDigest?: string;
   checkpointSeq?: number;
   rollbackSeq?: number;
+  // FR-61: seats whose earlier attempts this one continues, none of whom may review its submission.
+  coProducerSeatIds?: string[];
+  handoff?: ToolArgs;
+  supersededBy?: string;
 }
 interface Manifest {
   id: string;
@@ -102,6 +107,7 @@ interface Manifest {
   attemptId: string;
   repoId: string;
   implementerSeatId: string;
+  coProducerSeatIds?: string[];
   foundation: string;
   dependencies: string[];
   effectiveBase: string;
@@ -704,6 +710,36 @@ export function mountWorkspace(
     core.requireRoom(a, id);
     return task(id, str(x, 'taskId'));
   });
+  // A clone of the repository holding `seed`, its resource folders and fixture, leaving the attempt ready and the task claimed.
+  const provisionAttempt = async (attempt: Attempt, repo: Repo, seed: Snapshot, base: Snapshot, p: Profile, t: Task) => {
+    const id = attempt.id, roomId = attempt.roomId;
+    attempt.path = await clone(repo, id);
+    await writeSnapshot(attempt.path, seed);
+    attempt.basePath = await save('base-' + id, base);
+    for (const d of ['tmp', 'build', 'logs', 'test-data'])
+      await mkdir(join(dataDir, 'resources', id, d), { recursive: true });
+    const fixture = await provision(id, p);
+    attempt.status = 'ready';
+    attempt.approvalDeadline = Date.now() + 3600000;
+    attempt.leaseExpiresAt = attempt.approvalDeadline;
+    s.put('attempt', id, attempt);
+    putTask({ ...task(roomId, t.id), status: 'claimed' });
+    s.put('resource', id, {
+      id,
+      roomId,
+      status: 'active',
+      scopePaths: t.scopePaths,
+      repoId: repo.id,
+      temp: join(dataDir, 'resources', id, 'tmp'),
+      build: join(dataDir, 'resources', id, 'build'),
+      logs: join(dataDir, 'resources', id, 'logs'),
+      testData: join(dataDir, 'resources', id, 'test-data'),
+      services: fixture
+        ? [{ provider: 'local-kv', url: fixture.url, namespace: id, ownerPid: process.pid, credential: '[redacted]' }]
+        : [],
+      containment: 'trusted-local advisory',
+    });
+  };
   core.register('task_claim', (a, x) =>
     journal(a, 'task_claim', x, async () => {
       const roomId = str(x, 'roomId');
@@ -790,40 +826,7 @@ export function mountWorkspace(
         });
       });
       try {
-        attempt.path = await clone(repo, id);
-        await writeSnapshot(attempt.path, base);
-        attempt.basePath = await save('base-' + id, base);
-        for (const d of ['tmp', 'build', 'logs', 'test-data'])
-          await mkdir(join(dataDir, 'resources', id, d), { recursive: true });
-        const fixture = await provision(id, p);
-        attempt.status = 'ready';
-        attempt.approvalDeadline = Date.now() + 3600000;
-        attempt.leaseExpiresAt = attempt.approvalDeadline;
-        s.put('attempt', id, attempt);
-        putTask({ ...task(roomId, t.id), status: 'claimed' });
-        s.put('resource', id, {
-          id,
-          roomId,
-          status: 'active',
-          scopePaths: t.scopePaths,
-          repoId: repo.id,
-          temp: join(dataDir, 'resources', id, 'tmp'),
-          build: join(dataDir, 'resources', id, 'build'),
-          logs: join(dataDir, 'resources', id, 'logs'),
-          testData: join(dataDir, 'resources', id, 'test-data'),
-          services: fixture
-            ? [
-                {
-                  provider: 'local-kv',
-                  url: fixture.url,
-                  namespace: id,
-                  ownerPid: process.pid,
-                  credential: '[redacted]',
-                },
-              ]
-            : [],
-          containment: 'trusted-local advisory',
-        });
+        await provisionAttempt(attempt, repo, base, base, p, t);
         ev(a, roomId, 'task.claimed', {
           attemptId: id,
           taskId: t.id,
@@ -898,6 +901,7 @@ export function mountWorkspace(
           attemptId: at.id,
           repoId: repo.id,
           implementerSeatId: at.seatId,
+          ...(at.coProducerSeatIds?.length ? { coProducerSeatIds: at.coProducerSeatIds } : {}),
           foundation: repo.foundation,
           dependencies: at.dependencies,
           effectiveBase: before.digest,
@@ -1029,8 +1033,8 @@ export function mountWorkspace(
     workspaceAccess(a, roomId);
     const m = get<Manifest>('manifest', str(x, 'manifestId'));
     if (m.roomId !== roomId) throw new E('forbidden', 'Manifest mismatch');
-    if (a.kind === 'agent' && core.requireSeat(a, roomId).id === m.implementerSeatId)
-      throw new E('self_review', 'Implementer cannot accept own implementation', 403);
+    if (a.kind === 'agent' && [m.implementerSeatId, ...(m.coProducerSeatIds ?? [])].includes(core.requireSeat(a, roomId).id))
+      throw new E('self_review', 'An implementer of this submission cannot review it', 403);
     assertCurrent(m);
     if (!['accept', 'reject'].includes(String(x.verdict)))
       throw new E('review', 'Choose accept/reject');
@@ -1382,7 +1386,7 @@ export function mountWorkspace(
         return digest === m.resultDigest ? remove('Submitted and exported; its manifest keeps the submitted content', { ...info, contentDigest: digest })
           : keep('changed', 'Edited after it was submitted', info);
       }
-      if (at.status === 'released') {
+      if (at.status === 'released' || at.status === 'superseded') {
         const released = Number(s.get<ToolArgs>('resource', at.resourceId)?.releasedAt ?? 0);
         const digest = (await snapshot(path, p.generatedPaths)).digest;
         if (digest !== at.effectiveBase) return keep('dirty', 'Holds changes that were never submitted', info);
@@ -1529,6 +1533,70 @@ export function mountWorkspace(
     ev(a, roomId, 'attempt.released', { attemptId: at.id, reason, workspacePreserved: true });
     return { released: at.id, workspacePreserved: true };
   }));
+  // FR-61: a stalled attempt's task moves to another managed seat in a fresh clone, seeded from a kept checkpoint or the base.
+  core.register('attempt_takeover', (a, x) =>
+    journal(a, 'attempt_takeover', x, async () => {
+      const roomId = str(x, 'roomId');
+      workspaceAccess(a, roomId);
+      core.requireOwner(a, roomId);
+      const prior = get<Attempt>('attempt', str(x, 'attemptId')), reason = redactPublic(str(x, 'reason', 1000)).trim();
+      const takeable = (current: Attempt) => ['ready', 'completed', 'quarantined', 'uncertain'].includes(current.status) &&
+        current.generation === task(roomId, current.taskId).generation;
+      if (prior.roomId !== roomId || !takeable(prior))
+        throw new E('takeover_refused', 'Only the task\'s current attempt can be taken over, before it is submitted or released', 409);
+      if (!workerStopped(prior)) throw new E('active_worker', 'The previous worker must be confirmed stopped first', 409);
+      const t = task(roomId, prior.taskId);
+      if (scopeDigest(dependencies(t).map((m) => m.id)) !== scopeDigest(prior.dependencies))
+        throw new E('dependency_changed', 'Prerequisites changed since this attempt started; claim the task again', 409);
+      const seat = get<Seat>('seat', str(x, 'toSeatId'));
+      if (seat.roomId !== roomId || seat.mode !== 'managed' || seat.status === 'left' || seat.role === 'observer' || !seat.consent)
+        throw new E('admission', 'Hand over to a managed seat whose owner allows turns', 403);
+      if (seat.id === prior.seatId) throw new E('admission', 'Hand over to a different seat', 409);
+      const repo = repoAccess(a, prior.repoId), p = profile(a, prior.profileId), seq = x.checkpoint === undefined ? 0 : checkpointNumber(x, 'checkpoint');
+      const base = await basis(prior), seed = await checkpoints.tree(prior, seq, base), changes = delta(base, seed);
+      const turns = s.list<Turn & { failure?: string }>('turn', { roomId }).filter((v) => v.attemptId === prior.id)
+        .sort((p1, p2) => p1.createdAt - p2.createdAt);
+      const last = turns.at(-1);
+      const handoff = {
+        fromAttemptId: prior.id, fromSeatId: prior.seatId, checkpoint: seq, seedDigest: seed.digest, partialDiffDigest: scopeDigest(changes),
+        changedFiles: changes.map((c) => c.path).slice(0, 50), completedTurns: turns.filter((v) => v.status === 'completed').length,
+        failure: last?.failure ?? last?.status ?? prior.status, ...(last?.error ? { error: redactPublic(String(last.error)).slice(0, 500) } : {}),
+        acceptance: t.acceptance, reason,
+      };
+      const id = randomUUID(), generation = t.generation + 1;
+      const attempt: Attempt = {
+        id, roomId, taskId: t.id, repoId: prior.repoId, seatId: seat.id, path: join(dataDir, 'workspaces', id), status: 'provisioning', generation,
+        effectiveBase: prior.effectiveBase, basePath: '', dependencies: prior.dependencies, profileId: p.id, leaseExpiresAt: 0, wallDeadline: 0,
+        resourceId: id, treeDigest: seed.digest, handoff,
+        coProducerSeatIds: [...new Set([...(prior.coProducerSeatIds ?? []), prior.seatId])].filter((v) => v !== seat.id),
+      };
+      s.transaction(() => {
+        const current = get<Attempt>('attempt', prior.id);
+        if (!takeable(current) || !workerStopped(current)) throw new E('takeover_refused', 'The attempt changed; inspect it again', 409);
+        for (const turn of s.list<Turn>('turn', { roomId }).filter((v) => v.attemptId === prior.id && v.status === 'queued'))
+          cancelTurn(s, a, turn, 'Attempt handed over to another seat before the turn started', 'attempt_taken_over');
+        putTask({ ...task(roomId, t.id), generation, status: 'provisioning' });
+        s.put('attempt', prior.id, { ...current, status: 'superseded', supersededBy: id, leaseExpiresAt: 0 });
+        s.put('resource', prior.resourceId, { ...get<ToolArgs>('resource', prior.resourceId), status: 'released', releasedAt: Date.now(),
+          credentialRevoked: true });
+        s.put('attempt', id, attempt);
+        s.put('resource', id, { id, roomId, status: 'provisioning', scopePaths: t.scopePaths, repoId: repo.id, containment: 'trusted-local advisory' });
+      });
+      await brokers.get(prior.id)?.close();
+      brokers.delete(prior.id);
+      executionEnvironments.delete(prior.id);
+      try {
+        await provisionAttempt(attempt, repo, seed, base, p, t);
+        authority(s, a, get<Room>('room', roomId), 'attempt.taken_over', { fromAttemptId: prior.id, attemptId: id, taskId: t.id,
+          fromSeatId: prior.seatId, toSeatId: seat.id, generation, checkpoint: seq, seedDigest: seed.digest, reason });
+        return get<Attempt>('attempt', id);
+      } catch (e) {
+        s.put('attempt', id, { ...attempt, status: 'quarantined' });
+        s.put('resource', id, { id, roomId, status: 'quarantined' });
+        throw e;
+      }
+    }),
+  );
   const checkpointNumber = (x: ToolArgs, key: string) => {
     const value = x[key];
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 0)

@@ -80,6 +80,7 @@ const RECEIPT: Record<string, [Kind, string]> = {
   read: ['idle', 'Read'],
   responded: ['ok', 'Answered'],
   resolved: ['ok', 'Resolved'],
+  reassigned: ['idle', 'Reassigned'],
 };
 const receipt = (interaction: RecordData): [Kind, string] =>
   RECEIPT[string(interaction, 'status')] ?? ['idle', string(interaction, 'status')];
@@ -126,6 +127,8 @@ const SYSTEM_LABELS: Record<string, string> = {
   'directive.issued': 'directive',
   'directive.cleared': 'directive cleared',
   'directive.delivered': 'directive delivered',
+  'interaction.reassigned': 'reassigned',
+  'attempt.taken_over': 'handed over',
   'turn.amended': 'amended',
   'checkpoint.recorded': 'checkpoint',
   'checkpoint.unchanged': 'checkpoint',
@@ -1433,6 +1436,21 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
                         Request reply
                       </button>
                     )}
+                    {!ctx.shared && ['stored', 'delivered', 'read'].includes(string(i, 'status')) && ctx.room.lifecycle === 'active' && (
+                      <button type="button" className="text-button" onClick={() => ctx.openAction({
+                        title: 'Reassign request', command: 'interaction_reassign', args: { roomId: ctx.room.id, interactionId: i.id },
+                        label: 'Reassign',
+                        description: 'Moves this unanswered request to another seat with a note of why, and any answer the first seat kept but never posted. A late reply from the first seat stays in the room but no longer answers it.',
+                        fields: [
+                          { key: 'toSeatId', label: 'To seat', type: 'select', required: true,
+                            options: state.seats.filter((s) => s.roomId === ctx.room.id && s.role !== 'observer' && s.status !== 'left' &&
+                              s.id !== i.recipientId && s.id !== i.senderId).map((s) => ({ value: string(s, 'id'), label: string(s, 'name') })) },
+                          { key: 'reason', label: 'Reason', type: 'textarea', required: true },
+                        ],
+                      })}>
+                        Reassign
+                      </button>
+                    )}
                   </span>
                 );
               })}
@@ -1795,6 +1813,10 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `Owner directive · ${DIRECTIVE_MODES[string(d, 'mode')] ?? string(d, 'mode')} · ${string(d, 'text')}`;
     case 'directive.cleared':
       return 'Owner directive cleared';
+    case 'interaction.reassigned':
+      return `Request reassigned · ${seat(d.fromSeatId)} → ${seat(d.toSeatId)} · ${string(d, 'reason')}`;
+    case 'attempt.taken_over':
+      return `Task ${string(d, 'taskId')} handed over · ${seat(d.fromSeatId)} → ${seat(d.toSeatId)} · from ${num(d, 'checkpoint') ? 'checkpoint ' + num(d, 'checkpoint') : 'the starting point'}`;
     case 'directive.delivered':
       return `Directive reached ${seat(d.seatId)} · ${d.state === 'applied' ? 'in a turn' : 'on a read'}`;
     case 'turn.amended':

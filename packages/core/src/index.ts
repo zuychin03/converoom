@@ -31,6 +31,7 @@ import { reworkNotes } from './rework.js';
 import { mountContexts, resolveRefs } from './contexts.js';
 import { applyGrantedPin, contextLayers, mountThreads, openThread } from './threads.js';
 import { DIRECTIVE_TOOLS, mountDirectives, withDirectives } from './directives.js';
+import { hostBrief, mountTakeover, reassignedNotes, takeoverNotes } from './takeover.js';
 // Reads rerun on retry, so their results are never stored under a client key.
 export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
   'resource_profile_list', 'adapter_status', 'adapter_discover', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview', 'template_list',
@@ -275,7 +276,7 @@ function queueTurn(store: Store, a: Actor, r: Room, s: Seat | undefined, x: Tool
       interaction.turnId)
   )
     throw new E('causal_wake', 'Interaction already scheduled or target mismatch', 409);
-  let rework: Review | undefined;
+  let rework: Review | undefined, handoff: ToolArgs | undefined;
   if (x.attemptId) {
     const at = store.get<ToolArgs>('attempt', str(x, 'attemptId'));
     if (
@@ -290,6 +291,8 @@ function queueTurn(store: Store, a: Actor, r: Room, s: Seat | undefined, x: Tool
     if (at.reworkReviewId && !store.list<Turn>('turn', { roomId: r.id })
       .some((v) => v.attemptId === at.id && v.reworkReviewId && v.startedAt))
       rework = store.get<Review>('review', String(at.reworkReviewId));
+    if (at.handoff && !store.list<Turn>('turn', { roomId: r.id }).some((v) => v.attemptId === at.id && v.handoffFrom && v.startedAt))
+      handoff = at.handoff as ToolArgs;
   }
   // A turn woken by a message receives the context that message attached.
   const cause = interaction ? store.events(r.id, Number(interaction.messageSeq) - 1, 1)[0]?.data : undefined;
@@ -300,7 +303,8 @@ function queueTurn(store: Store, a: Actor, r: Room, s: Seat | undefined, x: Tool
     id: randomUUID(),
     roomId: r.id,
     seatId: s.id,
-    prompt: str(x, 'prompt') + (rework ? reworkNotes(rework) : ''),
+    prompt: str(x, 'prompt') + (rework ? reworkNotes(rework) : '') + (handoff ? takeoverNotes(store, handoff) : '') +
+      (interaction?.handoff ? reassignedNotes(store, interaction) : ''),
     requestedBy: a.principalId,
     status: 'queued',
     createdAt: Date.now(),
@@ -310,6 +314,7 @@ function queueTurn(store: Store, a: Actor, r: Room, s: Seat | undefined, x: Tool
       membershipGeneration: s.membershipGeneration, maxTurnMs: Math.min(consent!.maxTurnMs, Number(r.policy.maxTurnMs)) } : {}),
     ...(x.attemptId ? { attemptId: String(x.attemptId) } : {}),
     ...(rework ? { reworkReviewId: rework.id } : {}),
+    ...(handoff ? { handoffFrom: String(handoff.fromAttemptId) } : {}),
     ...(refs?.length ? { contextRefs: refs } : {}),
     ...(thread ? { threadId: thread.id } : {}),
     ...(interaction ? { interactionId: interaction.id } : {}),
@@ -562,6 +567,7 @@ export function createCore(store: Store): Core {
         'workspace_cleanup',
         'attempt_release',
         'attempt_rollback',
+        'attempt_takeover',
         'review_submit',
         'repo_register',
         'managed_stop',
@@ -767,7 +773,7 @@ export function createCore(store: Store): Core {
     if (
       store
         .list<I>('interaction')
-        .filter((i) => i.roomId === r.id && !['resolved', 'responded'].includes(i.status)).length +
+        .filter((i) => i.roomId === r.id && !['resolved', 'responded', 'reassigned'].includes(i.status)).length +
         mentions.length >
       Number(r.policy.maxPending)
     )
@@ -811,7 +817,8 @@ export function createCore(store: Store): Core {
       };
       store.put('interaction', i.id, i);
     }
-    if (reply) {
+    // FR-61: a late reply to a reassigned request is kept as a linked message but does not settle it.
+    if (reply && reply.status !== 'reassigned') {
       store.put('interaction', reply.id, {
         ...reply,
         status: 'responded',
@@ -863,7 +870,7 @@ export function createCore(store: Store): Core {
     const interactions = store
       .list<I>('interaction')
       .filter(
-        (i) => i.roomId === r.id && (!s || i.recipientId === s.id) && i.status !== 'resolved',
+        (i) => i.roomId === r.id && (!s || i.recipientId === s.id) && !['resolved', 'reassigned'].includes(i.status),
       );
     if (s)
       for (const i of interactions)
@@ -934,14 +941,16 @@ export function createCore(store: Store): Core {
     const r = room(p.roomId),
       s = store.get<Seat>('seat', String(p.scope.seatId));
     if (!s || s.status === 'left') throw new E('seat', 'Target left');
+    // FR-61: the incoming host inherits the agenda, open requests, active attempts and budget.
+    const brief = hostBrief(store, r);
     if (r.hostSeatId) {
       const old = store.get<Seat>('seat', r.hostSeatId)!;
       store.put('seat', old.id, { ...old, role: 'member' });
     }
     store.put('seat', s.id, { ...s, role: 'host' });
-    store.put('room', r.id, { ...r, hostSeatId: s.id });
+    store.put('room', r.id, { ...r, hostSeatId: s.id, hostBrief: { seatId: s.id, at: Date.now(), ...brief } });
     store.put('permission', p.id, { ...p, status: 'granted' });
-    authority(store, a, room(r.id), 'host.transferred', { requestId: p.id, seatId: s.id, previousSeatId: r.hostSeatId ?? null, scopeDigest: p.scopeDigest });
+    authority(store, a, room(r.id), 'host.transferred', { requestId: p.id, seatId: s.id, previousSeatId: r.hostSeatId ?? null, scopeDigest: p.scopeDigest, brief });
     return room(r.id);
   });
   const cancelStarted = (r: Room) => {
@@ -1229,6 +1238,7 @@ export function createCore(store: Store): Core {
   mountSharedArtefacts(c);
   mountContexts(c);
   mountThreads(c, (a, r, scope, summary) => requestPermission(store, a, r, 'context_pin', scope, summary));
+  mountTakeover(c);
   mountDirectives(c, { queue: (a, r, s, x) => queueTurn(store, a, r, s, x), grant: (a, p) => { grantPermission(store, a, p); } });
   return c;
 }

@@ -488,3 +488,17 @@ it('delivers the room owner\'s directive to a participant\'s agent on its shared
   expect(again.ownerDirectives).toBeUndefined();
   expect(host.core.store.get<ToolArgs>('directive', String(d.id))).toMatchObject({ status: 'done' });
 });
+it('reassigns a request to a participant\'s seat only while that owner consents to the room owner', async () => {
+  const local = await call(host, 'seat_add', { roomId: room.id, product: 'cursor', mode: 'polling', name: 'Local' }) as Seat;
+  const ask = async () => {
+    const message = await call(host, 'room_post', { roomId: room.id, text: 'Can you review?', mentions: [{ seatId: local.id, intent: 'review' }] }) as Event;
+    return host.core.store.list<ToolArgs>('interaction').find((i) => i.messageId === message.id)!;
+  };
+  const first = await ask();
+  const moved = await call(host, 'interaction_reassign', { roomId: room.id, interactionId: first.id, toSeatId: seat.id, reason: 'Local is offline' }) as ToolArgs;
+  expect(moved).toMatchObject({ recipientId: seat.id, reassignedFrom: first.id });
+  await call(host, 'owner_consent_update', { roomId: room.id, seatId: seat.id, allowedSenderOwnerIds: ['someone-else'], maxTurns: 3, maxTurnMs: 60000 }, remoteB);
+  const second = await ask();
+  await expect(call(host, 'interaction_reassign', { roomId: room.id, interactionId: second.id, toSeatId: seat.id, reason: 'Local is offline' }))
+    .rejects.toMatchObject({ code: 'consent' });
+});

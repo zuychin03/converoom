@@ -40,6 +40,8 @@ export interface Room {
   objective: string;
   ownerId: string;
   hostSeatId: string | null;
+  // FR-61: what the current host inherited at its transfer.
+  hostBrief?: ToolArgs;
   lifecycle: RoomLifecycle;
   phase: RoomPhase;
   workflow: 'discussion' | 'coding';
@@ -183,6 +185,8 @@ export interface Turn {
   threadId?: string;
   // FR-65: the owner directive interrupting this turn, whose continuation starts once the stop is confirmed.
   amendDirectiveId?: string;
+  // FR-61: the superseded attempt whose handoff packet this takeover turn received.
+  handoffFrom?: string;
 }
 // FR-57: `side` names the file version the lines belong to; `digest` is that version's content digest.
 export interface ReviewAnnotation {

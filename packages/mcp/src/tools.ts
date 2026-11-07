@@ -70,6 +70,7 @@ const mutationNames = new Set([
   'thread_archive',
   'thread_summarize',
   'context_pin',
+  'interaction_reassign',
 ]);
 const corpus: Record<string, { required: string[]; fields?: Record<string, unknown> }> = {
   room_create: {
@@ -222,6 +223,7 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
     fields: { threadId: small, summary: { ...string, maxLength: 4000 }, fromSeq: line, toSeq: line },
   },
   thread_list: { required: ['roomId'], fields: { threadId: small } },
+  interaction_reassign: { required: ['roomId', 'interactionId', 'toSeatId', 'reason'], fields: { toSeatId: small, reason: { ...string, maxLength: 1000 } } },
   context_pin: { required: ['roomId', 'text'], fields: { text: { ...string, maxLength: 1000 }, threadId: small, sourceSeq: line } },
   session_context_get: { required: ['roomId', 'slug'], fields: { slug: { ...small, maxLength: 128 } } },
   shared_artefact_get: { required: ['roomId', 'artefactId'] },

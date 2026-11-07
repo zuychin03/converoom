@@ -848,6 +848,21 @@ function TaskRow({
         description: `Inspect the preserved clone at ${string(attempt, 'path')}. Release retains its files and fences this generation. Active or uncertain processes must have confirmed stop before release.`,
         fields: [{ key: 'reason', label: 'Inspection and retained-work handoff', type: 'textarea', required: true }],
       })}>Inspect reservation</button>);
+  const stalled = attempt && (['quarantined', 'uncertain'].includes(attemptStatus) || (attemptStatus === 'completed' && !leaseLive));
+  const others = workers.filter((w) => attempt && w.id !== attempt.seatId && w.mode === 'managed');
+  if (attempt && stalled && roomOpen && others.length)
+    actions.push(<button key="handover" type="button" className="button small" onClick={() =>
+      openAction({ title: 'Hand over to another seat', command: 'attempt_takeover', args: { roomId, attemptId: attempt.id }, label: 'Hand over',
+        description: 'Starts a fresh clone for another managed seat from the checkpoint you choose, with a handoff note of what happened. This clone is kept as it is. The new seat\'s first turn needs your approval, and neither seat can review the result.',
+        fields: [
+          { key: 'toSeatId', label: 'To seat', type: 'select', required: true, options: others.map((w) => ({ value: string(w, 'id'), label: string(w, 'name') })) },
+          { key: 'checkpoint', label: 'Start from', type: 'select', required: true, value: '0', options: [{ value: '0', label: 'The starting point' },
+            ...state.checkpoints.filter((c) => c.attemptId === attempt.id && c.status === 'kept')
+              .map((c) => ({ value: String(num(c, 'seq')), label: 'Checkpoint ' + String(num(c, 'seq')) }))] },
+          { key: 'reason', label: 'Reason', type: 'textarea', required: true },
+        ],
+        prepare: ({ checkpoint, ...rest }) => ({ ...rest, checkpoint: Number(checkpoint) }),
+      })}>Hand over</button>);
   const showLease = attempt && ['ready', 'completed'].includes(attemptStatus) && status === 'claimed';
   return (
     <li className="task">

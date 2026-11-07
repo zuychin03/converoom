@@ -534,6 +534,45 @@ test('barges in with a directive, sees it delivered per seat and interrupts a ru
   expect(errors).toEqual([]);
 });
 
+test('reassigns an unanswered request and hands a stalled attempt to another seat from a checkpoint at desktop and mobile', async ({ page, request }, info) => {
+  const errors: string[] = [];
+  watch(page, errors);
+  const code = (await (await request.post('http://127.0.0.1:43318/pair')).json()).code;
+  const title = 'Handover room ' + info.project.name;
+  expect((await request.post('http://127.0.0.1:43318/handover?title=' + encodeURIComponent(title))).ok()).toBe(true);
+  await page.goto('/');
+  await page.getByLabel('Pairing code').fill(code);
+  await page.getByRole('button', { name: 'Connect to Converoom' }).click();
+  await expect(page.getByRole('heading', { name: title })).toBeVisible();
+  const entry = page.getByRole('list', { name: 'Room catalogue' }).getByRole('listitem').filter({ hasText: 'Which index should we add?' });
+  await entry.getByRole('button', { name: 'Reassign' }).click();
+  const reassign = page.getByRole('dialog', { name: 'Reassign request' });
+  await reassign.getByLabel(/^To seat/).selectOption({ label: 'Replacement' });
+  await reassign.getByLabel(/^Reason/).fill('Worker ran out of quota');
+  await axe(page);
+  await reassign.getByRole('button', { name: 'Reassign', exact: true }).click();
+  await expect(reassign).toBeHidden();
+  await expect(entry.getByText('Reassigned', { exact: true })).toBeVisible();
+  await expect(entry.getByText('→ Replacement')).toBeVisible();
+  await page.getByRole('button', { name: 'Work', exact: true }).click();
+  const task = page.getByRole('listitem').filter({ hasText: 'Iterate on the readme' });
+  await task.getByRole('button', { name: 'Hand over' }).click();
+  const handover = page.getByRole('dialog', { name: 'Hand over to another seat' });
+  await handover.getByLabel(/^To seat/).selectOption({ label: 'Replacement' });
+  await handover.getByLabel(/^Start from/).selectOption({ label: 'Checkpoint 1' });
+  await handover.getByLabel(/^Reason/).fill('Worker ran out of quota');
+  expect(await handover.evaluate((d) => d.scrollWidth <= d.clientWidth)).toBe(true);
+  await axe(page);
+  await handover.getByRole('button', { name: 'Hand over', exact: true }).click();
+  await expect(handover).toBeHidden();
+  await expect(task.getByText('Clone ready', { exact: true })).toBeVisible();
+  await expect(task.locator('.task-meta')).toContainText('Replacement');
+  expect(await task.evaluate((row) => row.scrollWidth <= row.clientWidth)).toBe(true);
+  await axe(page);
+  await task.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-handover.png' });
+  expect(errors).toEqual([]);
+});
+
 test('creates rooms from templates and sets seat models and efforts at desktop and mobile', async ({ page, request }, info) => {
   const errors: string[] = [];
   watch(page, errors);

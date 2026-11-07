@@ -228,6 +228,24 @@ const fixtureControl = createHttpServer(async (request, response) => {
     response.end(JSON.stringify(result));
     return;
   }
+  // A stalled coding attempt with one checkpoint, a second managed seat to hand it to, and an unanswered request.
+  if (request.method === 'POST' && requestUrl.pathname === '/handover') {
+    const store = runtime.core.store;
+    const { room, attempt, call } = await claimedAttempt(requestUrl.searchParams.get('title') ?? 'Handover room', { 'README.md': 'Foundation\n' }, []);
+    const replacement = await call('seat_add', { roomId: room.id, name: 'Replacement', product: 'cursor', mode: 'managed' });
+    await call('seat_consent', { roomId: room.id, seatId: replacement.id, consent: true });
+    await writeFile(join(String(attempt.path), 'README.md'), 'Turn one\n');
+    const at = store.get<Attempt>('attempt', String(attempt.id))!, current = await attemptTree(at.path, []);
+    const base = JSON.parse(await readFile(String(attempt.basePath), 'utf8')) as Snapshot;
+    const { record } = await checkpointStore(store, dir).prepare(at, crypto.randomUUID(), current, base);
+    store.put('checkpoint', record.id, record);
+    store.put('attempt', at.id, { ...at, status: 'quarantined', treeDigest: current.digest, checkpointSeq: record.seq, processStoppedAt: Date.now() });
+    const worker = store.list<Seat>('seat', { roomId: String(room.id) }).find((s) => s.name === 'Worker')!;
+    await call('room_post', { roomId: room.id, text: 'Which index should we add?', mentions: [{ seatId: worker.id, intent: 'question' }] });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ roomId: room.id }));
+    return;
+  }
   if (request.method !== 'POST' || requestUrl.pathname !== '/pair') {
     response.writeHead(404).end();
     return;

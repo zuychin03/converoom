@@ -80,6 +80,7 @@ const eventFields: Record<string, string[]> = {
   'directive.issued': ['directiveId', 'mode', 'threadId', 'seatIds'], 'directive.cleared': ['directiveId'],
   'directive.delivered': ['directiveId', 'seatId', 'state'],
   'turn.amended': ['turnId', 'continuationTurnId'],
+  'interaction.reassigned': ['interactionId', 'newInteractionId', 'fromSeatId', 'toSeatId'],
 };
 export const SHARED_BYTES = 524288;
 const jsonBytes = (v: unknown) => Buffer.byteLength(JSON.stringify(v));
