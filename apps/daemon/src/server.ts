@@ -65,6 +65,9 @@ const roomScoped = {
   roundRobins: 'round_robin',
   checkpoints: 'checkpoint',
   contexts: 'session_context',
+  threads: 'thread',
+  pins: 'pin',
+  threadSummaries: 'thread_summary',
 };
 const ACTIVE_TURNS = ['dispatching', 'running', 'cancelling'];
 // The store reads at most 1,000 events per call.
@@ -274,6 +277,7 @@ export async function createServer(
     'candidate_export_branch',
     'export_author_update',
     'session_context_request_get',
+    'context_unpin',
     'session_context_decide',
     'session_context_codex_threads',
     'session_context_import_codex',

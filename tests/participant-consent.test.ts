@@ -471,3 +471,10 @@ it('keeps a participant agent context import on its own machine until its owner 
   expect(host.core.store.list<ToolArgs>('session_context').map((c) => c.slug).sort()).toEqual(['b-direct', 'b-notes']);
   expect(participant.core.store.list<ToolArgs>('authority_audit').map((r) => r.type)).toEqual(expect.arrayContaining(['context.approved', 'context.declined']));
 });
+it('gives shared participants the pinned and summary layers through room_read', async () => {
+  await call(host, 'context_pin', { roomId: room.id, text: 'Public invariant', clientKey: 'pin' });
+  const page = await sharedCommand(host.core, { kind: 'agent', principalId: seat.principalId, ownerId: seat.ownerId }, room.id, member.generation,
+    'room_read', { roomId: room.id, cursor: 0, limit: 5 }) as ToolArgs;
+  expect(page.layers).toMatchObject({ objective: 'Participant-local authority', pins: [{ text: 'Public invariant' }], summaries: [] });
+  expect((page.events as ToolArgs[]).some((e) => e.type === 'context.pinned')).toBe(true);
+});

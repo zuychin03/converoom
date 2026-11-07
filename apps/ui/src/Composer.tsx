@@ -15,6 +15,7 @@ export function Composer({
   disabled,
   reason,
   contexts = [],
+  thread,
 }: {
   roomId: string;
   seats: RecordData[];
@@ -22,6 +23,7 @@ export function Composer({
   disabled: boolean;
   reason?: string;
   contexts?: RecordData[];
+  thread?: { id: string; title: string };
 }) {
   const [text, setText] = useState('');
   const [mentions, setMentions] = useState<Mention[]>([]);
@@ -88,7 +90,8 @@ export function Composer({
     setSending(true);
     setError('');
     try {
-      await run('room_post', { roomId, text, ...(mentions.length ? { mentions } : {}), ...(refs.length ? { contextRefs: refs } : {}) });
+      await run('room_post', { roomId, text, ...(mentions.length ? { mentions } : {}), ...(refs.length ? { contextRefs: refs } : {}),
+        ...(thread ? { threadId: thread.id } : {}) });
       setText('');
       setMentions([]);
       setRefs([]);
@@ -181,7 +184,7 @@ export function Composer({
       )}
       <div className="composer-row">
         <label className="composer-field">
-          <span className="field-label">Public message</span>
+          <span className="field-label">{thread ? `Message in thread ${thread.title}` : 'Public message'}</span>
           <textarea
             ref={area}
             value={text}

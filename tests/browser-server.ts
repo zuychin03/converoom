@@ -192,6 +192,18 @@ const fixtureControl = createHttpServer(async (request, response) => {
     response.end(JSON.stringify({ roomId: room.id }));
     return;
   }
+  // A room whose host has proposed a pin, waiting for the owner.
+  if (request.method === 'POST' && requestUrl.pathname === '/pin-proposal') {
+    const owner = humanIdentity(runtime);
+    const call = (actor: Actor, name: string, args: ToolArgs) => runtime.core.dispatch(actor, name, { ...args, clientKey: crypto.randomUUID() }) as Promise<ToolArgs>;
+    const room = await call(owner, 'room_create', { title: requestUrl.searchParams.get('title') ?? 'Thread room', objective: 'Design the storage layer' });
+    const host = await call(owner, 'seat_add', { roomId: room.id, name: 'Host', product: 'claude', mode: 'polling', role: 'host' });
+    await call({ kind: 'agent', principalId: String(host.principalId), ownerId: owner.ownerId }, 'context_pin',
+      { roomId: room.id, text: 'Keep migrations reversible' });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ roomId: room.id }));
+    return;
+  }
   if (request.method !== 'POST' || requestUrl.pathname !== '/pair') {
     response.writeHead(404).end();
     return;

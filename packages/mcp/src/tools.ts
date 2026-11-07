@@ -34,6 +34,7 @@ const common: Record<string, unknown> = {
   profileId: small,
   requestId: small,
   interactionId: small,
+  threadId: small,
 };
 const mutationNames = new Set([
   'room_create',
@@ -65,6 +66,10 @@ const mutationNames = new Set([
   'integration_prepare',
   'permission_request',
   'session_context_import',
+  'thread_create',
+  'thread_archive',
+  'thread_summarize',
+  'context_pin',
 ]);
 const corpus: Record<string, { required: string[]; fields?: Record<string, unknown> }> = {
   room_create: {
@@ -90,6 +95,7 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
       text: string,
       replyToId: small,
       contextRefs: refs,
+      threadId: small,
       mentions: {
         type: 'array',
         maxItems: 5,
@@ -108,6 +114,7 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
   room_read: {
     required: ['roomId'],
     fields: {
+      threadId: small,
       cursor: { type: 'integer', minimum: 0 },
       limit: { type: 'integer', minimum: 1, maximum: 100 },
     },
@@ -127,7 +134,7 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
   },
   turn_request: {
     required: ['roomId', 'seatId', 'prompt'],
-    fields: { prompt: string, attemptId: small, interactionId: small, contextRefs: refs },
+    fields: { prompt: string, attemptId: small, interactionId: small, contextRefs: refs, threadId: small },
   },
   turn_claim: { required: ['roomId', 'turnId'] },
   turn_complete: { required: ['roomId', 'turnId'], fields: {
@@ -204,6 +211,18 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
       product: { ...small, maxLength: 64 }, sessionRef: small },
   },
   session_context_list: { required: ['roomId'] },
+  thread_create: {
+    required: ['roomId', 'title'],
+    fields: { title: { ...small, maxLength: 120 }, topic: { ...string, maxLength: 1000 }, seatIds: { type: 'array', items: small, maxItems: 5 },
+      taskId: small, contextRefs: refs },
+  },
+  thread_archive: { required: ['roomId', 'threadId'], fields: { summary: { ...string, maxLength: 4000 } } },
+  thread_summarize: {
+    required: ['roomId', 'summary', 'fromSeq', 'toSeq'],
+    fields: { threadId: small, summary: { ...string, maxLength: 4000 }, fromSeq: line, toSeq: line },
+  },
+  thread_list: { required: ['roomId'], fields: { threadId: small } },
+  context_pin: { required: ['roomId', 'text'], fields: { text: { ...string, maxLength: 1000 }, threadId: small, sourceSeq: line } },
   session_context_get: { required: ['roomId', 'slug'], fields: { slug: { ...small, maxLength: 128 } } },
   shared_artefact_get: { required: ['roomId', 'artefactId'] },
   shared_artefact_list: { required: ['roomId'] },

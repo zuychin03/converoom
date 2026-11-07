@@ -7,6 +7,7 @@ import {
 } from '../../shared/src/contracts.js';
 import { artefactMetadata } from './shared-artefacts.js';
 import { authority } from './audit.js';
+import { contextLayers } from './threads.js';
 import { code, inline, time, transcriptMarkdown, TRANSCRIPT_FORMAT } from './transcript.js';
 import { scopeDigest, redactPublic, redactTransport } from '../../store/src/index.js';
 
@@ -56,7 +57,7 @@ export const sharedTurn = (t: Turn) => select(t, ['id', 'roomId', 'seatId', 'pro
   'policyVersion', 'senderOwnerId', 'membershipGeneration', 'requesterMembershipGeneration', 'maxTurnMs', 'ownerConsentDigest', 'interactionId']);
 const sharedInteraction = (i: Interaction) => select(i, ['id', 'roomId', 'senderId', 'recipientId', 'messageId', 'intent', 'status', 'hop', 'createdAt', 'turnId', 'responseId']);
 const eventFields: Record<string, string[]> = {
-  message: ['text', 'senderId', 'mentions', 'replyToId', 'contextRefs'], agenda: ['agenda', 'unresolved'],
+  message: ['text', 'senderId', 'mentions', 'replyToId', 'contextRefs', 'threadId'], agenda: ['agenda', 'unresolved'],
   decision: ['decision', 'positions', 'dissent', 'evidence', 'unresolved'],
   'seat.joined': ['id', 'ownerId', 'name', 'product', 'mode', 'role', 'status'], 'seat.left': ['seatId'],
   'room.paused': ['status'], 'room.open': ['status'], 'room.closed': ['status'], 'room.lifecycle': ['lifecycle', 'previous'],
@@ -72,6 +73,9 @@ const eventFields: Record<string, string[]> = {
   'interaction.read': ['interactionId'],
   'artefact.shared': ['id', 'ownerId', 'name', 'mimeType', 'digest', 'bytes', 'visibility', 'sharedAt', 'provenance'],
   'context.imported': ['contextId', 'ref', 'title', 'digest', 'bytes', 'product', 'via', 'ownerId'],
+  'thread.created': ['threadId', 'title', 'topic', 'seatIds', 'taskId'], 'thread.archived': ['threadId', 'summaryId'],
+  'thread.summarized': ['summaryId', 'threadId', 'fromSeq', 'toSeq', 'agentWritten'],
+  'context.pinned': ['pinId', 'text', 'threadId', 'sourceSeq'], 'context.unpinned': ['pinId'],
 };
 export const SHARED_BYTES = 524288;
 const jsonBytes = (v: unknown) => Buffer.byteLength(JSON.stringify(v));
@@ -145,7 +149,7 @@ export function sharedProjection(c: Core, a: Actor, id: string): ToolArgs {
     artefacts: c.store.list<SharedArtefact>('shared_artefact', { roomId: id }).slice(0, 100).map(artefactMetadata) }), ['events', 'turns', 'interactions', 'artefacts']);
 }
 export const SHARED_READS = new Set(['room_get', 'room_list', 'room_read', 'room_wait', 'room_inbox', 'room_usage', 'room_members', 'shared_artefact_get', 'shared_artefact_list',
-  'session_context_list', 'session_context_get']);
+  'session_context_list', 'session_context_get', 'thread_list']);
 export const SHARED_WRITES = new Set(['room_post', 'room_leave', 'turn_request', 'turn_claim', 'turn_complete', 'turn_cancel',
   'room_set_agenda', 'room_propose_decision', 'interaction_resolve', 'host_transfer_request', 'room_pause', 'room_resume', 'room_close',
   'shared_artefact_publish', 'owner_consent_update', 'session_context_import']);
@@ -178,6 +182,7 @@ export async function sharedCommand(c: Core, a: Actor, roomId: string, generatio
         throw new E('shared_scope', 'Membership changed while waiting', 403);
       page = sharedPage(c, a, roomId, page.cursor, Number(x.limit ?? 100));
     }
+    const layers = contextLayers(c.store, r, null);
     if (a.kind === 'agent') {
       const seat = c.store.list<Seat>('seat', { roomId }).find((s) => s.ownerId === a.ownerId && s.principalId === a.principalId && currentSeat(c.store, r, s));
       const read = new Set(page.events.filter((e) => e.type === 'message' && !(e.data as ToolArgs).omittedForSize).map((e) => e.id));
@@ -187,10 +192,10 @@ export async function sharedCommand(c: Core, a: Actor, roomId: string, generatio
           c.store.append(roomId, 'interaction.read', a.principalId, { interactionId: i.id });
         }
     }
-    return page;
+    return { layers, ...page };
   }
   const result = await c.dispatch(a, name, args);
-  if (name === 'shared_artefact_get' || name === 'shared_artefact_list' || name === 'shared_artefact_publish' || name.startsWith('session_context_')) return result;
+  if (name === 'shared_artefact_get' || name === 'shared_artefact_list' || name === 'shared_artefact_publish' || name.startsWith('session_context_') || name === 'thread_list') return result;
   if (name === 'owner_consent_update') return { seatId: x.seatId, consentUpdated: true };
   if (name === 'room_usage') {
     const usage = result as ToolArgs;

@@ -305,6 +305,14 @@ export const grantAction = (permission: RecordData): Action => {
       label: 'Transfer host',
       confirm: `Make the requested seat this room's host for scope digest ${digest}. Its agent can then set the agenda, propose decisions, request and cancel turns, and pause, resume or close the room. This authorises no local execution: every turn still needs its own grant. The current host becomes a member.`,
     };
+  if (permission.action === 'context_pin')
+    return {
+      title: 'Approve pin',
+      command: 'permission_grant',
+      args,
+      label: 'Approve pin',
+      confirm: `Pin "${string(isRecord(permission.scope) ? permission.scope : {}, 'text')}" as a room invariant. It will come first in every later turn's context until you unpin it.`,
+    };
   if (permission.action === 'round_robin')
     return {
       title: 'Approve round robin',

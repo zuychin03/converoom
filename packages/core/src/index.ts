@@ -29,10 +29,11 @@ import { authority } from './audit.js';
 import { MAX_SAVED_TEMPLATES, findTemplate, seatProfile, templateFromRoom, templatePolicy, templatesFor } from './templates.js';
 import { reworkNotes } from './rework.js';
 import { mountContexts, resolveRefs } from './contexts.js';
+import { applyGrantedPin, contextLayers, mountThreads, openThread } from './threads.js';
 // Reads rerun on retry, so their results are never stored under a client key.
 export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
   'resource_profile_list', 'adapter_status', 'adapter_discover', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview', 'template_list',
-  'checkpoint_list', 'checkpoint_diff', 'artefact_diff', 'session_context_list', 'session_context_get', 'session_context_request_get', 'session_context_codex_threads']);
+  'checkpoint_list', 'checkpoint_diff', 'artefact_diff', 'session_context_list', 'session_context_get', 'session_context_request_get', 'session_context_codex_threads', 'thread_list']);
 const limits = {
   maxActiveTurns: 2,
   maxRounds: 6,
@@ -175,6 +176,7 @@ export function turnExecutionScope(t: Turn, store: Store): ToolArgs {
     interactionId: t.interactionId ?? null,
     ...(t.profile ? { profile: t.profile } : {}),
     ...(t.contextRefs ? { contextRefs: t.contextRefs } : {}),
+    ...(t.threadId ? { threadId: t.threadId } : {}),
     ...(t.roundRobinId ? { roundRobin: { id: t.roundRobinId, index: t.roundRobinIndex,
       digest: store.get<RoundRobinPlan>('round_robin', t.roundRobinId)?.digest } } : {}),
     ...(t.remoteProposalId ? { remoteProposalId: t.remoteProposalId,
@@ -199,7 +201,7 @@ function refuseUsed(store: Store, r: Room, budgets: RoomBudget[]) {
 }
 function requestPermission(store: Store, a: Actor, r: Room, action: string, scope: ToolArgs, summary: string): Permission {
   let ownerId = a.ownerId;
-  if (action === 'host_transfer' || action === 'round_robin') ownerId = r.ownerId;
+  if (action === 'host_transfer' || action === 'round_robin' || action === 'context_pin') ownerId = r.ownerId;
   if (action === 'turn_execute' || action === 'vendor_tool') {
     const turn = store.get<Turn>('turn', String(scope.turnId));
     const target = store.get<Seat>('seat', String(turn?.seatId ?? scope.seatId));
@@ -289,9 +291,10 @@ function queueTurn(store: Store, a: Actor, r: Room, s: Seat | undefined, x: Tool
       rework = store.get<Review>('review', String(at.reworkReviewId));
   }
   // A turn woken by a message receives the context that message attached.
-  const refs = x.contextRefs === undefined && interaction
-    ? (store.events(r.id, Number(interaction.messageSeq) - 1, 1)[0]?.data.contextRefs ?? []) as Turn['contextRefs']
-    : resolveRefs(store, r.id, x.contextRefs);
+  const cause = interaction ? store.events(r.id, Number(interaction.messageSeq) - 1, 1)[0]?.data : undefined;
+  const refs = x.contextRefs === undefined && cause ? (cause.contextRefs ?? []) as Turn['contextRefs'] : resolveRefs(store, r.id, x.contextRefs);
+  const thread = openThread(store, r.id, x.threadId ?? (cause?.threadId && store.get<ToolArgs>('thread', String(cause.threadId))?.status === 'open'
+    ? cause.threadId : undefined));
   const t: Turn = {
     id: randomUUID(),
     roomId: r.id,
@@ -307,6 +310,7 @@ function queueTurn(store: Store, a: Actor, r: Room, s: Seat | undefined, x: Tool
     ...(x.attemptId ? { attemptId: String(x.attemptId) } : {}),
     ...(rework ? { reworkReviewId: rework.id } : {}),
     ...(refs?.length ? { contextRefs: refs } : {}),
+    ...(thread ? { threadId: thread.id } : {}),
     ...(interaction ? { interactionId: interaction.id } : {}),
     ...(s.mode === 'managed' && s.profile ? { profile: s.profile } : {}),
     ...(x.remoteProposalId ? { remoteProposalId: String(x.remoteProposalId),
@@ -778,13 +782,14 @@ export function createCore(store: Store): Core {
         throw new E('recipient', 'Invalid recipient');
       seen.add(m.seatId);
     }
-    const refs = resolveRefs(store, r.id, x.contextRefs);
+    const refs = resolveRefs(store, r.id, x.contextRefs), thread = openThread(store, r.id, x.threadId);
     const e = ev(a, r.id, 'message', {
       text: redactPublic(text),
       senderId: sender,
       mentions,
       replyToId: x.replyToId ?? null,
       ...(refs.length ? { contextRefs: refs } : {}),
+      ...(thread ? { threadId: thread.id } : {}),
     });
     for (const m of mentions) {
       const i: I = {
@@ -834,7 +839,8 @@ export function createCore(store: Store): Core {
             deliveredAt: i.deliveredAt ?? Date.now(),
           });
     }
-    return { events, cursor: events.at(-1)?.seq ?? cursor };
+    // FR-64: polling seats get the pinned and summary layers first, as managed turns do.
+    return { layers: contextLayers(store, r, x.threadId === undefined ? null : str(x, 'threadId')), events, cursor: events.at(-1)?.seq ?? cursor };
   };
   c.register('room_read', read);
   c.register('room_wait', async (a, x) => {
@@ -1081,6 +1087,7 @@ export function createCore(store: Store): Core {
     if (!x.scope || typeof x.scope !== 'object' || Array.isArray(x.scope))
       throw new E('scope', 'Exact scope required');
     if (x.action === 'round_robin') throw new E('round_robin', 'Propose a round robin with round_robin_propose', 409);
+    if (x.action === 'context_pin') throw new E('context_pin', 'Propose a pin with context_pin', 409);
     return permission(
       a,
       r.id,
@@ -1112,6 +1119,11 @@ export function createCore(store: Store): Core {
       scopeDigest(p.scope) !== p.scopeDigest
     )
       throw new E('scope', 'Scope mismatch', 409);
+    if (p.action === 'context_pin') return store.transaction(() => {
+      const g = grantPermission(store, a, p);
+      applyGrantedPin(store, a, p);
+      return g;
+    });
     const g = grantPermission(store, a, p);
     if (plan) {
       approvePlan(a, plan, p.id);
@@ -1212,5 +1224,6 @@ export function createCore(store: Store): Core {
   mountMembership(c);
   mountSharedArtefacts(c);
   mountContexts(c);
+  mountThreads(c, (a, r, scope, summary) => requestPermission(store, a, r, 'context_pin', scope, summary));
   return c;
 }

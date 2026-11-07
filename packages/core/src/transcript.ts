@@ -162,6 +162,11 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     'invitation.revoked': () => 'An invitation was revoked.',
     'owner.consent_changed': (d) => `${seatName(d.seatId)} may take turns requested by ${plural(items(d.allowedSenderOwnerIds).length, 'owner')}, up to ` +
       `${plural(Number(d.maxTurns), 'turn')} of ${duration(d.maxTurnMs)}.`,
+    'thread.created': (d) => `Thread "${inline(d.title)}" opened${items(d.seatIds).length ? ' for ' + items(d.seatIds).map(seatName).join(', ') : ''}${d.taskId ? ', bound to task ' + inline(d.taskId) : ''}.`,
+    'thread.archived': (d) => `A thread was archived${d.summaryId ? ' with a summary' : ''}.`,
+    'thread.summarized': (d) => `Summary of events #${Number(d.fromSeq)} to #${Number(d.toSeq)} recorded${d.agentWritten ? ' by an agent (untrusted)' : ''}.`,
+    'context.pinned': (d) => `Pinned as a room invariant: ${inline(d.text)}${d.requestId ? ' (approved host proposal)' : ''}.`,
+    'context.unpinned': () => 'A pin was removed.',
     'context.imported': (d) => `Imported context ${code(d.ref)} "${inline(d.title)}" from ${inline(d.product)}, ${Number(d.bytes)} bytes, digest ${code(d.digest)}.`,
     'artefact.shared': (d) => `Shared ${inline(d.name)} (${inline(d.mimeType)}, ${Number(d.bytes)} bytes, digest ${code(d.digest)}).`,
     'tasks.planned': (d) => `Tasks planned: ${items(d.taskIds).map(inline).join(', ')}.`,

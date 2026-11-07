@@ -118,6 +118,11 @@ const SYSTEM_LABELS: Record<string, string> = {
   'candidate.applied': 'candidate applied',
   'candidate.exported': 'branch exported',
   'context.imported': 'context imported',
+  'thread.created': 'thread',
+  'thread.archived': 'thread archived',
+  'thread.summarized': 'summary',
+  'context.pinned': 'pinned',
+  'context.unpinned': 'unpinned',
   'checkpoint.recorded': 'checkpoint',
   'checkpoint.unchanged': 'checkpoint',
   'checkpoint.skipped': 'checkpoint skipped',
@@ -297,10 +302,15 @@ export function RoomView({
   const first = num(events[0] ?? {}, 'seq') ?? 1;
   const plan = state.roundRobins.find((p) => p.roomId === id && ['proposed', 'running'].includes(string(p, 'status')));
 
+  const [threadView, setThreadView] = useState('');
+  const threads = state.threads.filter((t) => t.roomId === id);
+  const viewing = threads.find((t) => t.id === threadView);
+  // FR-64: a chosen thread narrows the catalogue to its own messages and records.
   const visible = events.filter(
     (event) =>
       !FOLDED.has(string(event, 'type')) &&
-      !(event.type === 'permission.requested' && data(event).action === 'turn_execute'),
+      !(event.type === 'permission.requested' && data(event).action === 'turn_execute') &&
+      (!viewing || data(event).threadId === viewing.id),
   );
   const blocks: Block[] = [];
   for (const event of visible) {
@@ -469,6 +479,12 @@ export function RoomView({
         )}
         <div className="feed" ref={feed}>
           <h2 className="sr-only">Catalogue</h2>
+          {viewing && (
+            <p className="thread-bar">
+              Showing thread <strong>{string(viewing, 'title')}</strong>
+              <button type="button" className="text-button" onClick={() => setThreadView('')}>Show the whole room</button>
+            </p>
+          )}
           {loadEarlier && first > 1 && (
             <p className="feed-earlier">
               <button type="button" className="text-button" disabled={busy === 'earlier'} onClick={() => void earlierEvents()}>
@@ -526,7 +542,9 @@ export function RoomView({
             </p>
           )}
         </div>
-        <Composer roomId={id} seats={seats} run={run} contexts={contexts} disabled={!open || silenced}
+        <Composer roomId={id} seats={seats} run={run} contexts={contexts}
+          thread={viewing?.status === 'open' ? { id: string(viewing, 'id'), title: string(viewing, 'title') } : undefined}
+          disabled={!open || silenced}
           reason={open ? (silenced ? 'This room’s budget is used up. See the handoff above.' : undefined)
             : INACTIVE[lifecycleState] ?? `This room is ${lifecycleState} and cannot reopen.`} />
       </section>
@@ -584,6 +602,14 @@ export function RoomView({
         {!shared && read && (
           <ContextPanel roomId={id} contexts={contexts} open={!ended} sharedRoom={seats.some((s) => s.ownerId !== room.ownerId) ||
             state.members.some((m) => m.roomId === id && m.status === 'active')} read={read} openAction={openAction} />
+        )}
+        {!shared && (
+          <ThreadsPanel roomId={id} roomSeq={num(room, 'seq') ?? 0} threads={threads} seats={seats} open={!ended} view={threadView}
+            setView={setThreadView} summaries={state.threadSummaries.filter((s) => s.roomId === id)} openAction={openAction} />
+        )}
+        {!shared && (
+          <PinsPanel roomId={id} threads={threads} open={!ended} pins={state.pins.filter((p) => p.roomId === id && p.status === 'active')}
+            openAction={openAction} />
         )}
         {!shared && plan && <RoundRobinPanel plan={plan} state={state} names={names} openAction={openAction} />}
         {!shared && <RoomControls room={room} state={state} seats={seats} names={names} planOpen={!!plan} openAction={openAction} />}
@@ -695,6 +721,145 @@ function SeatRow({
 
 type Names = { seat: (id: unknown) => string; actor: (id: unknown) => string };
 
+const PIN_NOTE = 'A pin comes first in every turn\'s context and newer messages never push it out. Only you can pin or unpin; a host can only propose a pin for your approval.';
+function ThreadsPanel({
+  roomId,
+  roomSeq,
+  threads,
+  seats,
+  summaries,
+  open,
+  view,
+  setView,
+  openAction,
+}: {
+  roomId: string;
+  roomSeq: number;
+  threads: RecordData[];
+  seats: RecordData[];
+  summaries: RecordData[];
+  open: boolean;
+  view: string;
+  setView: (id: string) => void;
+  openAction: (action: Action) => void;
+}) {
+  const title = (id: unknown) => string(threads.find((t) => t.id === id) ?? {}, 'title', 'the room');
+  const latest = [...summaries].sort((a, b) => (num(b, 'createdAt') ?? 0) - (num(a, 'createdAt') ?? 0)).slice(0, 5);
+  return (
+    <section className="panel" aria-labelledby="threads-title">
+      <div className="panel-head">
+        <h2 className="section-label" id="threads-title">Threads</h2>
+        {open && (
+          <div className="row-actions">
+            <button type="button" className="button small" onClick={() => openAction({
+              title: 'New thread', command: 'thread_create', args: { roomId }, label: 'Open thread',
+              description: 'A thread keeps a side discussion apart. A turn requested in it sees the thread\'s recent messages instead of the whole room\'s.',
+              fields: [{ key: 'title', label: 'Title', required: true }, { key: 'topic', label: 'Topic', type: 'textarea' },
+                ...(seats.length ? [{ key: 'seatIds', label: 'Agents involved', type: 'choices' as const,
+                  options: seats.map((s) => ({ value: string(s, 'id'), label: string(s, 'name') })) }] : [])],
+              prepare: ({ topic, seatIds, ...rest }) => ({ ...rest, ...(String(topic ?? '').trim() ? { topic } : {}),
+                ...(Array.isArray(seatIds) && seatIds.length ? { seatIds } : {}) }),
+            })}>New</button>
+            <button type="button" className="button small" onClick={() => openAction({
+              title: 'Summarise events', command: 'thread_summarize', args: { roomId }, label: 'Save summary',
+              description: 'A summary keeps earlier rationale in every later turn\'s context while the events themselves stay readable.',
+              fields: [{ key: 'summary', label: 'Summary', type: 'textarea', required: true },
+                { key: 'fromSeq', label: 'From event', type: 'number', value: '1', required: true, min: 1 },
+                { key: 'toSeq', label: 'To event', type: 'number', value: String(roomSeq), required: true, min: 1 }],
+            })}>Summarise</button>
+          </div>
+        )}
+      </div>
+      {threads.length === 0 ? (
+        <p className="rail-note">Open a thread to keep a side discussion, or the talk about one task, out of the main timeline.</p>
+      ) : (
+        <ul className="context-list">
+          {threads.map((t) => (
+            <li key={string(t, 'id')}>
+              <span className="context-title">{string(t, 'title')}</span>
+              <span className="context-meta">{t.status === 'open' ? 'Open' : 'Archived'}{string(t, 'topic') ? ' · ' + string(t, 'topic') : ''}</span>
+              <span className="row-actions">
+                <button type="button" className="text-button" aria-pressed={view === t.id}
+                  onClick={() => setView(view === t.id ? '' : string(t, 'id'))}>
+                  {view === t.id ? 'Showing' : 'Show'}
+                </button>
+                {open && t.status === 'open' && (
+                  <button type="button" className="text-button" onClick={() => openAction({
+                    title: 'Archive thread', command: 'thread_archive', args: { roomId, threadId: t.id }, label: 'Archive thread',
+                    description: 'Archiving closes the thread to new messages. A summary, if you add one, keeps its outcome in later turns\' context.',
+                    fields: [{ key: 'summary', label: 'Summary', type: 'textarea' }],
+                    prepare: ({ summary, ...rest }) => (String(summary ?? '').trim() ? { ...rest, summary } : rest),
+                  })}>Archive</button>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {latest.length > 0 && (
+        <>
+          <h3 className="section-label panel-subhead">Summaries</h3>
+          <ul className="context-list">
+            {latest.map((s) => (
+              <li key={string(s, 'id')}>
+                <span className="context-meta">
+                  {title(s.threadId)} · events {pad(num(s, 'fromSeq') ?? 0)} to {pad(num(s, 'toSeq') ?? 0)} · {s.agentWritten ? 'agent, untrusted' : 'owner'}
+                </span>
+                <span className="context-title">{string(s, 'text')}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+function PinsPanel({ roomId, threads, pins, open, openAction }: {
+  roomId: string;
+  threads: RecordData[];
+  pins: RecordData[];
+  open: boolean;
+  openAction: (action: Action) => void;
+}) {
+  const live = threads.filter((t) => t.status === 'open');
+  return (
+    <section className="panel" aria-labelledby="pins-title">
+      <div className="panel-head">
+        <h2 className="section-label" id="pins-title">Pins</h2>
+        {open && (
+          <button type="button" className="button small" onClick={() => openAction({
+            title: 'Pin as a room invariant', command: 'context_pin', args: { roomId }, label: 'Pin', description: PIN_NOTE,
+            fields: [{ key: 'text', label: 'Pinned text', type: 'textarea', required: true },
+              ...(live.length ? [{ key: 'threadId', label: 'Only in thread', type: 'select' as const, placeholder: 'Whole room',
+                options: live.map((t) => ({ value: string(t, 'id'), label: string(t, 'title') })) }] : [])],
+            prepare: ({ threadId, ...rest }) => (threadId ? { ...rest, threadId } : rest),
+          })}>Pin</button>
+        )}
+      </div>
+      {pins.length === 0 ? (
+        <p className="rail-note">Pin the constraints every turn must keep. Pins come first in each turn's context.</p>
+      ) : (
+        <ul className="context-list">
+          {pins.map((p) => (
+            <li key={string(p, 'id')}>
+              <span className="context-title">{string(p, 'text')}</span>
+              <span className="context-meta">
+                {p.threadId ? 'Thread ' + string(threads.find((t) => t.id === p.threadId) ?? {}, 'title') : 'Whole room'}
+                {p.requestId ? ' · approved host proposal' : ''}
+              </span>
+              {open && (
+                <button type="button" className="text-button" onClick={() => openAction({
+                  title: 'Remove pin', command: 'context_unpin', args: { roomId, pinId: p.id }, label: 'Remove pin',
+                  confirm: 'Later turns will no longer receive this pin.',
+                })}>Unpin</button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 const VIA: Record<string, string> = { paste: 'pasted', mcp: 'from an agent', codex_thread: 'Codex thread', participant: 'from a participant' };
 function ContextPanel({
   roomId,
@@ -994,6 +1159,7 @@ interface EntryContext {
   requestTurn: (seat: RecordData, interactionId?: string) => void;
   jump: (seq: number | null) => void;
   shared?: boolean;
+  focused?: boolean;
 }
 
 function Entry({
@@ -1011,7 +1177,7 @@ function Entry({
 }) {
   const seq = num(event, 'seq') ?? 0;
   const type = string(event, 'type');
-  const view = describe(event, ctx);
+  const view = describe(event, { ...ctx, focused });
   const own = view.owner;
   return (
     <li
@@ -1143,6 +1309,23 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
       body: (
         <>
           <p className="entry-text">{string(d, 'text')}</p>
+          {(d.threadId || (!ctx.shared && ctx.focused)) && (
+            <p className="entry-refs">
+              {typeof d.threadId === 'string' && (
+                <span>In thread {string(state.threads.find((t) => t.id === d.threadId) ?? {}, 'title', 'a thread')}</span>
+              )}
+              {!ctx.shared && ctx.focused && (
+                <button type="button" className="text-button" onClick={() => ctx.openAction({
+                  title: 'Pin as a room invariant', command: 'context_pin',
+                  args: { roomId: ctx.room.id, sourceSeq: num(event, 'seq'), ...(d.threadId ? { threadId: d.threadId } : {}) },
+                  label: 'Pin', description: PIN_NOTE,
+                  fields: [{ key: 'text', label: 'Pinned text', type: 'textarea', required: true, value: string(d, 'text').slice(0, 1000) }],
+                })}>
+                  Pin
+                </button>
+              )}
+            </p>
+          )}
           {objects(d, 'contextRefs').length > 0 && (
             <p className="entry-refs">
               Attached {objects(d, 'contextRefs').map((r) => <code key={string(r, 'ref')}>{string(r, 'ref')}</code>)}
@@ -1514,6 +1697,16 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `Final candidate accepted · ${string(d, 'resultDigest').slice(0, 12)}`;
     case 'candidate.applied':
       return `Candidate applied to the checkout · ${string(d, 'resultDigest').slice(0, 12)}`;
+    case 'thread.created':
+      return `Thread opened · ${string(d, 'title')}${string(d, 'topic') ? ' · ' + string(d, 'topic') : ''}`;
+    case 'thread.archived':
+      return `Thread archived${d.summaryId ? ' with a summary' : ''}`;
+    case 'thread.summarized':
+      return `Summary of events ${pad(num(d, 'fromSeq') ?? 0)} to ${pad(num(d, 'toSeq') ?? 0)}${d.agentWritten ? ' · written by an agent, untrusted' : ''}`;
+    case 'context.pinned':
+      return `Pinned · ${string(d, 'text')}${d.requestId ? ' · approved host proposal' : ''}`;
+    case 'context.unpinned':
+      return 'Pin removed';
     case 'context.imported':
       return `Imported ${string(d, 'ref')} · ${string(d, 'title')} · ${string(d, 'product')} · ${fmtBytes(num(d, 'bytes') ?? 0)}`;
     case 'candidate.exported':

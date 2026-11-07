@@ -179,6 +179,8 @@ export interface Turn {
   reworkReviewId?: string;
   // FR-63: imported contexts and artefacts this turn receives, bound by digest into its approval.
   contextRefs?: { ref: string; digest: string }[];
+  // FR-64: the sub-thread whose messages form this turn's recent-message layer.
+  threadId?: string;
 }
 // FR-57: `side` names the file version the lines belong to; `digest` is that version's content digest.
 export interface ReviewAnnotation {
