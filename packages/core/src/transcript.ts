@@ -167,7 +167,9 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     'task.claimed': (d) => `Task ${inline(d.taskId)} claimed by attempt ${code(String(d.attemptId).slice(0, 8))}, generation ${Number(d.generation)}.`,
     'task.submitted': (d) => `Submission recorded with result ${code(d.resultDigest)}.`,
     'verification.completed': (d) => `Checks ${d.status === 'passing' ? 'passed' : d.status === 'blocked' ? 'were blocked' : 'failed'} on content ${code(d.contentDigest)}.`,
-    'review.submitted': (d) => reason(d.verdict === 'accept' ? 'Review accepted the work' : 'Review requested rework', d.reason),
+    'review.submitted': (d) => reason(d.verdict === 'accept' ? 'Review accepted the work' : 'Review requested rework', d.reason) +
+      (items(d.annotations).length ? ' ' + capital(plural(items(d.annotations).length, 'line comment')) + ' on ' +
+        [...new Set(items(d.annotations).map((n) => inline(record(n).path)))].join(', ') + '.' : ''),
     'candidate.prepared': (d) => `Combined candidate prepared (${inline(d.status)}) with result ${code(d.resultDigest)}.`,
     'candidate.accepted': (d) => `Final candidate accepted with result ${code(d.resultDigest)}.`,
     'candidate.applied': (d) => `Candidate applied to the checkout with result ${code(d.resultDigest)}.`,

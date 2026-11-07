@@ -1401,7 +1401,8 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
         </>
       );
     case 'review.submitted':
-      return `Review · ${d.verdict === 'accept' ? 'accepted' : 'rework requested'} · ${string(d, 'reason')}`;
+      return `Review · ${d.verdict === 'accept' ? 'accepted' : 'rework requested'} · ${string(d, 'reason')}${
+        objects(d, 'annotations').length ? ` · ${objects(d, 'annotations').length} line ${objects(d, 'annotations').length === 1 ? 'comment' : 'comments'}` : ''}`;
     case 'candidate.prepared':
       return `Combined candidate prepared · ${string(d, 'status')} · ${string(d, 'resultDigest').slice(0, 12)}`;
     case 'candidate.accepted':

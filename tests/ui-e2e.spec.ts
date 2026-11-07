@@ -298,6 +298,49 @@ test('inspects coding checkpoints and rolls an attempt back at desktop and mobil
   expect(errors).toEqual([]);
 });
 
+test('comments on submitted and removed lines and sends them with a rework review at desktop and mobile', async ({ page, request }, info) => {
+  const errors: string[] = [];
+  watch(page, errors);
+  const code = (await (await request.post('http://127.0.0.1:43318/pair')).json()).code;
+  const title = 'Review room ' + info.project.name;
+  expect((await request.post('http://127.0.0.1:43318/review?title=' + encodeURIComponent(title))).ok()).toBe(true);
+  await page.goto('/');
+  await page.getByLabel('Pairing code').fill(code);
+  await page.getByRole('button', { name: 'Connect to Converoom' }).click();
+  await expect(page.getByRole('heading', { name: title })).toBeVisible();
+  await page.getByRole('button', { name: 'Work', exact: true }).click();
+  const task = page.getByRole('listitem').filter({ hasText: 'Iterate on the readme' });
+  await expect(task.getByText('Checks passed', { exact: true })).toBeVisible();
+  await task.getByText(/^Changes · result/).click();
+  const readme = task.getByRole('region', { name: 'README.md' });
+  await readme.getByRole('button', { name: 'Comment on submitted line 2' }).click();
+  await readme.getByRole('button', { name: 'Comment on submitted line 3' }).click({ modifiers: ['Shift'] });
+  await readme.getByLabel('Your comment on submitted lines 2 to 3').fill('Keep the original casing');
+  await readme.getByRole('button', { name: 'Add comment' }).click();
+  await expect(readme.getByText('Draft comment · submitted lines 2 to 3')).toBeVisible();
+  const old = task.getByRole('region', { name: 'old.txt' });
+  await old.getByRole('button', { name: 'Comment on previous line 1' }).click();
+  await old.getByLabel('Your comment on previous line 1').fill('Why was this removed?');
+  await old.getByRole('button', { name: 'Add comment' }).click();
+  await expect(task.getByText(/Changes · result .* · 2 draft comments/)).toBeVisible();
+  expect(await task.evaluate((row) => row.scrollWidth <= row.clientWidth)).toBe(true);
+  await axe(page);
+  await task.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-review-comments.png' });
+  await task.getByRole('button', { name: 'Review', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Review submission' });
+  await expect(dialog.getByText(/Includes your 2 line comments from Changes/)).toBeVisible();
+  await dialog.getByLabel(/^Verdict/).selectOption('reject');
+  await dialog.getByLabel(/^Review evidence/).fill('Two lines need another look');
+  await axe(page);
+  await dialog.getByRole('button', { name: 'Review submission', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(task.getByText('Rework requested', { exact: true })).toBeVisible();
+  await expect(task.getByText(/Changes · result .* · 2 review comments/)).toBeVisible();
+  await expect(readme.getByText('Review comment · submitted lines 2 to 3')).toBeVisible();
+  await expect(old.getByText('Why was this removed?')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('creates rooms from templates and sets seat models and efforts at desktop and mobile', async ({ page, request }, info) => {
   const errors: string[] = [];
   watch(page, errors);

@@ -175,6 +175,29 @@ export interface Turn {
   applied?: AppliedProfile;
   error?: string;
   inspection?: { finding: 'acted' | 'not_acted' | 'unclear'; note: string; at: number; by: string };
+  // FR-57: the review whose notes were added to this rework turn's prompt.
+  reworkReviewId?: string;
+}
+// FR-57: `side` names the file version the lines belong to; `digest` is that version's content digest.
+export interface ReviewAnnotation {
+  path: string;
+  side: 'result' | 'base';
+  startLine: number;
+  endLine: number;
+  comment: string;
+  digest: string;
+  quote: string[];
+}
+export interface Review {
+  id: string;
+  roomId: string;
+  manifestId: string;
+  contentDigest: string;
+  reviewerId: string;
+  verdict: 'accept' | 'reject';
+  reason: string;
+  createdAt: number;
+  annotations?: ReviewAnnotation[];
 }
 export interface RoundRobinPlan {
   id: string;

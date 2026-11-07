@@ -8,9 +8,12 @@ import {
   type Core,
   type Actor,
   type ToolArgs,
+  type Review,
+  type ReviewAnnotation,
   type Seat,
   type Turn,
 } from '../../shared/src/contracts.js';
+import { splitLines } from '../../shared/src/diff.js';
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
 import { cancelTurn, RESULT_EXPIRY_BATCH, RESULT_RETENTION_MS } from '../../core/src/index.js';
 import { authority } from '../../core/src/audit.js';
@@ -85,6 +88,7 @@ export interface Attempt {
   processStoppedAt?: number;
   resourceId: string;
   sessionId?: string;
+  reworkReviewId?: string;
   treeDigest?: string;
   checkpointSeq?: number;
   rollbackSeq?: number;
@@ -704,6 +708,9 @@ export function mountWorkspace(
         p = profile(a, t.profileId),
         seatId = x.seatId ? str(x, 'seatId') : core.requireSeat(a, roomId).id,
         seat = get<Seat>('seat', seatId);
+      // FR-57: a rework attempt carries the review that asked for it, whose notes go into its first turn.
+      const rework = t.status === 'rework' && t.manifestId ? s.list<Review>('review', { roomId })
+        .filter((v) => v.manifestId === t.manifestId).sort((u, v) => v.createdAt - u.createdAt)[0] : undefined;
       if (a.kind === 'agent') {
         const caller = core.requireSeat(a, roomId);
         if (seatId !== caller.id && core.requireRoom(a, roomId).hostSeatId !== caller.id)
@@ -738,6 +745,7 @@ export function mountWorkspace(
         leaseExpiresAt: 0,
         wallDeadline: 0,
         resourceId: id,
+        ...(rework?.verdict === 'reject' ? { reworkReviewId: rework.id } : {}),
       };
       s.transaction(() => {
         if (
@@ -967,7 +975,51 @@ export function mountWorkspace(
       });
     }),
   );
-  core.register('review_submit', (a, x) => {
+  // NFR-19 caps annotations per review; quotes keep the annotated lines so the rework prompt needs no file reads.
+  const ANNOTATIONS = 100, COMMENT_BYTES = 1000, QUOTE_LINES = 20, QUOTE_CHARS = 300;
+  const submissionSides = async (m: Manifest) => {
+    const result = (await manifestData(m)).snapshot, base = await load(get<Attempt>('attempt', m.attemptId).basePath);
+    if (base.digest !== m.effectiveBase) throw new E('digest_mismatch', 'Submission base changed');
+    return { base, result };
+  };
+  const annotate = async (m: Manifest, raw: unknown): Promise<ReviewAnnotation[]> => {
+    if (raw === undefined) return [];
+    if (!Array.isArray(raw) || raw.length > ANNOTATIONS)
+      throw new E('annotation', 'A review takes at most ' + ANNOTATIONS + ' line comments');
+    if (!raw.length) return [];
+    const sides = await submissionSides(m);
+    return raw.map((item: unknown) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw new E('annotation', 'Invalid line comment');
+      const n = item as ToolArgs, path = str(n, 'path', 1024), comment = str(n, 'comment', COMMENT_BYTES), digest = str(n, 'digest', 128);
+      const { side, startLine, endLine } = n;
+      if (side !== 'result' && side !== 'base') throw new E('annotation', 'A line comment\'s side is result or base');
+      if (typeof startLine !== 'number' || typeof endLine !== 'number' || !Number.isInteger(startLine) ||
+        !Number.isInteger(endLine) || startLine < 1 || endLine < startLine)
+        throw new E('annotation', 'A line comment needs a start line and an end line at or after it');
+      const changed = m.files.find((f) => f.path === path), expected = side === 'result' ? changed?.afterDigest : changed?.beforeDigest;
+      if (!expected)
+        throw new E('annotation', `${path} has no ${side === 'result' ? 'submitted' : 'previous'} version in this submission's changes`);
+      if (digest !== expected) throw new E('annotation_stale', `The comment on ${path} was written against different content`, 409);
+      const file = (side === 'result' ? sides.result : sides.base).files.find((f) => f.path === path && f.digest === digest);
+      if (!file) throw new E('digest_mismatch', 'Submission content changed');
+      const bytes = Buffer.from(file.bytes, 'base64');
+      if (bytes.includes(0)) throw new E('annotation', 'Binary files take no line comments');
+      const lines = splitLines(bytes.toString('utf8'));
+      if (endLine > lines.length) throw new E('annotation', `${path} has ${lines.length} lines in that version`);
+      const quote = lines.slice(startLine - 1, Math.min(endLine, startLine - 1 + QUOTE_LINES))
+        .map((line) => redactPublic(line).slice(0, QUOTE_CHARS));
+      return { path, side, startLine, endLine, comment, digest, quote };
+    });
+  };
+  core.register('artefact_diff', async (a, x) => {
+    const roomId = str(x, 'roomId');
+    core.requireRoom(a, roomId);
+    const m = get<Manifest>('manifest', str(x, 'manifestId'));
+    if (m.roomId !== roomId) throw new E('forbidden', 'Artefact room mismatch', 403);
+    const { base, result } = await submissionSides(m);
+    return { manifestId: m.id, effectiveBase: m.effectiveBase, resultDigest: m.resultDigest, ...treeDiff(base, result) };
+  });
+  core.register('review_submit', (a, x) => journal(a, 'review_submit', x, async () => {
     const roomId = str(x, 'roomId');
     workspaceAccess(a, roomId);
     const m = get<Manifest>('manifest', str(x, 'manifestId'));
@@ -977,67 +1029,75 @@ export function mountWorkspace(
     assertCurrent(m);
     if (!['accept', 'reject'].includes(String(x.verdict)))
       throw new E('review', 'Choose accept/reject');
-    if (
-      x.verdict === 'accept' &&
-      !s
-        .list<Verification>('verification')
-        .some(
-          (v) =>
-            v.manifestId === m.id &&
-            v.contentDigest === m.resultDigest &&
-            v.status === 'passing' &&
-            v.profileDigest === get<Profile>('profile', m.profileId).digest,
-        )
-    )
-      throw new E('verification', 'Passing exact verification required');
-    const review = {
-      id: randomUUID(),
-      roomId,
-      manifestId: m.id,
-      contentDigest: m.resultDigest,
-      reviewerId: a.principalId,
-      verdict: x.verdict,
-      reason: str(x, 'reason'),
-      createdAt: Date.now(),
-    };
-    s.put('review', review.id, review);
-    putTask({
-      ...task(roomId, m.taskId),
-      status: x.verdict === 'accept' ? 'accepted' : 'rework',
-      manifestId: m.id,
-    });
-    if (x.verdict === 'reject') {
-      for (const downstream of s
-        .list<Task>('task')
-        .filter((v) => v.roomId === roomId && v.id !== m.taskId)) {
-        const affected =
-          downstream.manifestId &&
-          get<Manifest>('manifest', downstream.manifestId).dependencies.includes(m.id);
-        if (affected) {
-          putTask({ ...downstream, status: 'stale' });
-          for (const v of s.list<Verification>('verification'))
-            if (v.manifestId === downstream.manifestId)
-              s.put('verification', v.id, { ...v, status: 'stale' });
+    const reason = str(x, 'reason'), annotations = await annotate(m, x.annotations);
+    return s.transaction(() => {
+      workspaceAccess(a, roomId);
+      assertCurrent(m);
+      if (
+        x.verdict === 'accept' &&
+        !s
+          .list<Verification>('verification')
+          .some(
+            (v) =>
+              v.manifestId === m.id &&
+              v.contentDigest === m.resultDigest &&
+              v.status === 'passing' &&
+              v.profileDigest === get<Profile>('profile', m.profileId).digest,
+          )
+      )
+        throw new E('verification', 'Passing exact verification required');
+      const review: Review = {
+        id: randomUUID(),
+        roomId,
+        manifestId: m.id,
+        contentDigest: m.resultDigest,
+        reviewerId: a.principalId,
+        verdict: x.verdict as Review['verdict'],
+        reason,
+        createdAt: Date.now(),
+        ...(annotations.length ? { annotations } : {}),
+      };
+      s.put('review', review.id, review);
+      putTask({
+        ...task(roomId, m.taskId),
+        status: x.verdict === 'accept' ? 'accepted' : 'rework',
+        manifestId: m.id,
+      });
+      if (x.verdict === 'reject') {
+        for (const downstream of s
+          .list<Task>('task')
+          .filter((v) => v.roomId === roomId && v.id !== m.taskId)) {
+          const affected =
+            downstream.manifestId &&
+            get<Manifest>('manifest', downstream.manifestId).dependencies.includes(m.id);
+          if (affected) {
+            putTask({ ...downstream, status: 'stale' });
+            for (const v of s.list<Verification>('verification'))
+              if (v.manifestId === downstream.manifestId)
+                s.put('verification', v.id, { ...v, status: 'stale' });
+          }
         }
+        for (const at of s.list<Attempt>('attempt'))
+          if (
+            at.dependencies.includes(m.id) &&
+            ['ready', 'running', 'completed'].includes(at.status)
+          ) {
+            s.put('attempt', at.id, { ...at, status: 'quarantined' });
+            s.put('resource', at.resourceId, {
+              ...(s.get('resource', at.resourceId) as ToolArgs),
+              status: 'quarantined',
+            });
+          }
+        for (const c of s.list<Candidate>('candidate'))
+          if (c.manifestIds.includes(m.id) && c.status !== 'applied')
+            s.put('candidate', c.id, { ...c, status: 'stale' });
       }
-      for (const at of s.list<Attempt>('attempt'))
-        if (
-          at.dependencies.includes(m.id) &&
-          ['ready', 'running', 'completed'].includes(at.status)
-        ) {
-          s.put('attempt', at.id, { ...at, status: 'quarantined' });
-          s.put('resource', at.resourceId, {
-            ...(s.get('resource', at.resourceId) as ToolArgs),
-            status: 'quarantined',
-          });
-        }
-      for (const c of s.list<Candidate>('candidate'))
-        if (c.manifestIds.includes(m.id) && c.status !== 'applied')
-          s.put('candidate', c.id, { ...c, status: 'stale' });
-    }
-    ev(a, roomId, 'review.submitted', review);
-    return review;
-  });
+      // The quoted lines stay in the review record; the event keeps the comments themselves.
+      ev(a, roomId, 'review.submitted', { ...review,
+        ...(annotations.length ? { annotations: annotations.map(({ quote: _quote, ...n }) => n) } : {}) });
+      return review;
+    });
+  }));
   core.register('integration_prepare', (a, x) =>
     journal(a, 'integration_prepare', x, async () => {
       const roomId = str(x, 'roomId');

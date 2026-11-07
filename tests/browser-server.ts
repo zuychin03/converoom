@@ -47,6 +47,26 @@ const participant = await createRuntime(join(dir, 'participant'), { remoteFetch:
     prompt: async () => 'Public browser fixture answer', cancel: async () => {}, close: async () => true }; } });
 const participantServer = await createServer(participant, { port: 43320, pairingCode: 'participant-fixture-pair', controlToken: 'participant-fixture-control',
   onPairingCode: (code) => { participantCode = code; }, uiDir: join(process.cwd(), 'dist', 'ui') });
+// A coding room with one task claimed on a fresh repository holding these files.
+async function claimedAttempt(title: string, files: Record<string, string>, extraScope: string[]) {
+  const owner = humanIdentity(runtime);
+  const call = (name: string, args: ToolArgs) => runtime.core.dispatch(owner, name, { ...args, clientKey: crypto.randomUUID() }) as Promise<ToolArgs>;
+  const donor = join(dir, 'donor-' + crypto.randomUUID()), scopePaths = [...Object.keys(files), ...extraScope];
+  await mkdir(donor);
+  await run('git', ['init'], donor);
+  await run('git', ['config', 'core.autocrlf', 'false'], donor);
+  for (const [path, text] of Object.entries(files)) await writeFile(join(donor, path), text);
+  await run('git', ['add', '.'], donor);
+  await run('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'Fixture'], donor);
+  const room = await call('room_create', { title, objective: 'Iterate on one attempt', workflow: 'coding' });
+  const seat = await call('seat_add', { roomId: room.id, name: 'Worker', product: 'codex', mode: 'managed' });
+  const repo = await call('repo_register', { path: donor });
+  const profile = await call('profile_register', { name: 'Fixture checks', scopePaths, generatedPaths: [],
+    commands: [{ executable: process.execPath, args: ['-e', 'process.exit(0)'], timeoutMs: 5000 }] });
+  await call('task_plan', { roomId: room.id, repoId: repo.id, tasks: [{ id: 'iterate', title: 'Iterate on the readme', acceptance: 'Reviewed',
+    scopePaths, dependsOn: [], profileId: profile.id }] });
+  return { room, call, attempt: await call('task_claim', { roomId: room.id, taskId: 'iterate', seatId: seat.id }) };
+}
 const fixtureControl = createHttpServer(async (request, response) => {
   const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
   if (requestUrl.pathname === '/native-count') { response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ nativeStarts })); return; }
@@ -104,7 +124,7 @@ const fixtureControl = createHttpServer(async (request, response) => {
       title: 'Recover retained work', acceptance: 'Inspect before release', status: 'claimed', generation: 1,
       scopePaths: ['README.md'], dependsOn: [], profileId: 'fixture-profile' });
     runtime.core.store.put('attempt', id, { id, roomId, taskId: 'browser-task', seatId: seat.id,
-      status: 'quarantined', generation: 1, leaseExpiresAt: 0, wallDeadline: 0, resourceId: id, path });
+      status: 'quarantined', generation: 1, leaseExpiresAt: 0, wallDeadline: 0, resourceId: id, path, dependencies: [] });
     runtime.core.store.put('resource', id, { id, roomId, status: 'quarantined' });
     runtime.core.store.append(roomId, 'attempt.quarantined', 'fixture', { attemptId: id });
     const human = runtime.core.store.get<{ principalId: string }>('identity', 'human')!;
@@ -116,23 +136,8 @@ const fixtureControl = createHttpServer(async (request, response) => {
   }
   // This runtime runs no turns, so two checkpoints are recorded on a real claimed attempt the way completed turns record them.
   if (request.method === 'POST' && requestUrl.pathname === '/checkpoints') {
-    const owner = humanIdentity(runtime), store = runtime.core.store;
-    const call = (name: string, args: ToolArgs) => runtime.core.dispatch(owner, name, { ...args, clientKey: crypto.randomUUID() }) as Promise<ToolArgs>;
-    const donor = join(dir, 'donor-' + crypto.randomUUID());
-    await mkdir(donor);
-    await run('git', ['init'], donor);
-    await run('git', ['config', 'core.autocrlf', 'false'], donor);
-    await writeFile(join(donor, 'README.md'), 'Foundation\n');
-    await run('git', ['add', '.'], donor);
-    await run('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'Fixture'], donor);
-    const room = await call('room_create', { title: requestUrl.searchParams.get('title') ?? 'Checkpoint room', objective: 'Iterate on one attempt', workflow: 'coding' });
-    const seat = await call('seat_add', { roomId: room.id, name: 'Worker', product: 'codex', mode: 'managed' });
-    const repo = await call('repo_register', { path: donor });
-    const profile = await call('profile_register', { name: 'Fixture checks', scopePaths: ['README.md', 'notes.txt'], generatedPaths: [],
-      commands: [{ executable: process.execPath, args: ['-e', 'process.exit(0)'], timeoutMs: 5000 }] });
-    await call('task_plan', { roomId: room.id, repoId: repo.id, tasks: [{ id: 'iterate', title: 'Iterate on the readme', acceptance: 'Reviewed',
-      scopePaths: ['README.md', 'notes.txt'], dependsOn: [], profileId: profile.id }] });
-    const attempt = await call('task_claim', { roomId: room.id, taskId: 'iterate', seatId: seat.id });
+    const store = runtime.core.store;
+    const { room, attempt } = await claimedAttempt(requestUrl.searchParams.get('title') ?? 'Checkpoint room', { 'README.md': 'Foundation\n' }, ['notes.txt']);
     const checkpoints = checkpointStore(store, dir), base = JSON.parse(await readFile(String(attempt.basePath), 'utf8')) as Snapshot;
     for (const [file, text] of [['README.md', 'First turn\n'], ['notes.txt', 'Second turn\n']]) {
       await writeFile(join(String(attempt.path), file), text);
@@ -145,6 +150,18 @@ const fixtureControl = createHttpServer(async (request, response) => {
     }
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ roomId: room.id, attemptId: attempt.id }));
+    return;
+  }
+  // A submission with passing checks, ready for the owner's review.
+  if (request.method === 'POST' && requestUrl.pathname === '/review') {
+    const { room, attempt, call } = await claimedAttempt(requestUrl.searchParams.get('title') ?? 'Review room',
+      { 'README.md': 'one\ntwo\nthree\n', 'old.txt': 'gone\n' }, []);
+    await writeFile(join(String(attempt.path), 'README.md'), 'one\nTWO\nthree\nfour\n');
+    await rm(join(String(attempt.path), 'old.txt'));
+    const manifest = await call('task_submit', { roomId: room.id, attemptId: attempt.id });
+    await call('verification_request', { roomId: room.id, manifestId: manifest.id });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ roomId: room.id, manifestId: manifest.id }));
     return;
   }
   if (request.method !== 'POST' || requestUrl.pathname !== '/pair') {

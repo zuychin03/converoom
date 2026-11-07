@@ -12,6 +12,7 @@ import {
   type RoomBudget,
   type RoomLifecycle,
   type RoomPhase,
+  type Review,
   type RoundRobinPlan,
   type Seat,
   type Turn,
@@ -26,10 +27,11 @@ import { scopeDigest, redactPublic } from '../../store/src/index.js';
 import { activeMembership, currentSeat, currentTurnAuthority, mountMembership, requireHumanParticipant, requireSeatOwner, SHARED_READS } from './membership.js';
 import { authority } from './audit.js';
 import { MAX_SAVED_TEMPLATES, findTemplate, seatProfile, templateFromRoom, templatePolicy, templatesFor } from './templates.js';
+import { reworkNotes } from './rework.js';
 // Reads rerun on retry, so their results are never stored under a client key.
 export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
   'resource_profile_list', 'adapter_status', 'adapter_discover', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview', 'template_list',
-  'checkpoint_list', 'checkpoint_diff']);
+  'checkpoint_list', 'checkpoint_diff', 'artefact_diff']);
 const limits = {
   maxActiveTurns: 2,
   maxRounds: 6,
@@ -268,6 +270,7 @@ function queueTurn(store: Store, a: Actor, r: Room, s: Seat | undefined, x: Tool
       interaction.turnId)
   )
     throw new E('causal_wake', 'Interaction already scheduled or target mismatch', 409);
+  let rework: Review | undefined;
   if (x.attemptId) {
     const at = store.get<ToolArgs>('attempt', str(x, 'attemptId'));
     if (
@@ -278,12 +281,16 @@ function queueTurn(store: Store, a: Actor, r: Room, s: Seat | undefined, x: Tool
       Number(at.leaseExpiresAt) < Date.now()
     )
       throw new E('worker_binding', 'Current coding attempt required', 409);
+    // Until a turn carrying the notes has started, the next turn on the rework attempt carries them.
+    if (at.reworkReviewId && !store.list<Turn>('turn', { roomId: r.id })
+      .some((v) => v.attemptId === at.id && v.reworkReviewId && v.startedAt))
+      rework = store.get<Review>('review', String(at.reworkReviewId));
   }
   const t: Turn = {
     id: randomUUID(),
     roomId: r.id,
     seatId: s.id,
-    prompt: str(x, 'prompt'),
+    prompt: str(x, 'prompt') + (rework ? reworkNotes(rework) : ''),
     requestedBy: a.principalId,
     status: 'queued',
     createdAt: Date.now(),
@@ -292,6 +299,7 @@ function queueTurn(store: Store, a: Actor, r: Room, s: Seat | undefined, x: Tool
       requesterMembershipGeneration: activeMembership(store, r.id, a.ownerId)?.generation,
       membershipGeneration: s.membershipGeneration, maxTurnMs: Math.min(consent!.maxTurnMs, Number(r.policy.maxTurnMs)) } : {}),
     ...(x.attemptId ? { attemptId: String(x.attemptId) } : {}),
+    ...(rework ? { reworkReviewId: rework.id } : {}),
     ...(interaction ? { interactionId: interaction.id } : {}),
     ...(s.mode === 'managed' && s.profile ? { profile: s.profile } : {}),
     ...(x.remoteProposalId ? { remoteProposalId: String(x.remoteProposalId),
@@ -538,6 +546,7 @@ export function createCore(store: Store): Core {
         'workspace_cleanup',
         'attempt_release',
         'attempt_rollback',
+        'review_submit',
         'repo_register',
         'managed_stop',
         'backup_request',

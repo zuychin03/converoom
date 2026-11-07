@@ -18,7 +18,8 @@ export interface ToolDefinition {
 const string = { type: 'string', minLength: 1, maxLength: 65536 },
   small = { ...string, maxLength: 256 },
   strings = { type: 'array', items: small, maxItems: 100 },
-  checkpoint = { type: 'integer', minimum: 0, maximum: 1000000 };
+  checkpoint = { type: 'integer', minimum: 0, maximum: 1000000 },
+  line = { type: 'integer', minimum: 1, maximum: 10000000 };
 const common: Record<string, unknown> = {
   roomId: small,
   clientKey: small,
@@ -193,12 +194,17 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
     fields: { checkpoint: checkpoint, reason: string, confirm: { type: 'boolean' } },
   },
   artefact_get: { required: ['roomId', 'manifestId'] },
+  artefact_diff: { required: ['roomId', 'manifestId'] },
   shared_artefact_get: { required: ['roomId', 'artefactId'] },
   shared_artefact_list: { required: ['roomId'] },
   verification_request: { required: ['roomId', 'manifestId'] },
   review_submit: {
     required: ['roomId', 'manifestId', 'verdict', 'reason'],
-    fields: { verdict: { type: 'string', enum: ['accept', 'reject'] }, reason: string },
+    fields: { verdict: { type: 'string', enum: ['accept', 'reject'] }, reason: string, annotations: {
+      type: 'array', maxItems: 100, items: { type: 'object', additionalProperties: false,
+        required: ['path', 'side', 'startLine', 'endLine', 'comment', 'digest'],
+        properties: { path: { ...string, maxLength: 1024 }, side: { type: 'string', enum: ['result', 'base'] }, startLine: line, endLine: line,
+          comment: { ...string, maxLength: 1000 }, digest: small } } } },
   },
   integration_prepare: {
     required: ['roomId', 'repoId', 'manifestIds', 'profileId'],

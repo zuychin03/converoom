@@ -15,7 +15,7 @@ import {
 import { STAGES, acceptedOrder, commandLabel, fmtBytes, interruptedFor, num, readiness, requestDetails, shortId, taskProgress, workerSeat, type Kind } from './model.js';
 import { PRODUCT_PROFILES, type Product } from '../../../packages/shared/src/products.js';
 import { deleteTemplateAction } from './actions.js';
-import { DiffView } from './DiffView.js';
+import { DiffView, type LineComment } from './DiffView.js';
 
 export function WorkspaceView({
   state,
@@ -620,7 +620,11 @@ function TaskRow({
   openAction: (action: Action) => void;
 }) {
   const [error, setError] = useState('');
+  const [drafted, setDrafted] = useState<{ manifestId: string; items: LineComment[] }>({ manifestId: '', items: [] });
   const progress = taskProgress(task, state);
+  const manifestId = progress.manifest ? string(progress.manifest, 'id') : '';
+  const drafts = drafted.manifestId === manifestId ? drafted.items : [];
+  const setDrafts = (items: LineComment[]) => setDrafted({ manifestId, items });
   const status = string(task, 'status');
   const attempt = progress.attempt;
   const attemptStatus = attempt ? string(attempt, 'status') : '';
@@ -755,7 +759,9 @@ function TaskRow({
             openAction({
               title: 'Review submission',
               command: 'review_submit',
-              args: { roomId, manifestId: progress.manifest!.id },
+              args: { roomId, manifestId: progress.manifest!.id, ...(drafts.length ? { annotations: drafts } : {}) },
+              ...(drafts.length ? { description: `Includes your ${drafts.length} line ${drafts.length === 1 ? 'comment' : 'comments'} from Changes. Requesting rework passes them to the first coding turn of the next attempt.` } : {}),
+              onSuccess: () => setDrafts([]),
               fields: [
                 {
                   key: 'verdict',
@@ -863,17 +869,65 @@ function TaskRow({
           read={read} openAction={openAction} />
       )}
       {progress.manifest && (
-        <details className="task-changes">
-          <summary>
-            Changes · result <span className="num">{string(progress.manifest, 'resultDigest').slice(0, 12)}</span>
-          </summary>
-          <pre>{string(progress.manifest, 'diff')}</pre>
-          {progress.verifications.map((v) => (
-            <JsonDetails key={string(v, 'id')} value={v} title={`Verification · ${string(v, 'status')}`} />
-          ))}
-        </details>
+        <SubmissionChanges
+          manifest={progress.manifest}
+          verifications={progress.verifications}
+          review={state.reviews.filter((r) => r.manifestId === manifestId).sort((a, b) => (num(b, 'createdAt') ?? 0) - (num(a, 'createdAt') ?? 0))[0]}
+          drafts={drafts}
+          setDrafts={roomOpen && status === 'submitted' && progress.passing ? setDrafts : undefined}
+          read={read}
+        />
       )}
     </li>
+  );
+}
+
+function SubmissionChanges({
+  manifest,
+  verifications,
+  review,
+  drafts,
+  setDrafts,
+  read,
+}: {
+  manifest: RecordData;
+  verifications: RecordData[];
+  review?: RecordData;
+  drafts: LineComment[];
+  setDrafts?: (items: LineComment[]) => void;
+  read: Run;
+}) {
+  const [diff, setDiff] = useState<RecordData>();
+  const [error, setError] = useState('');
+  const load = () => {
+    if (diff) return;
+    setError('');
+    read('artefact_diff', { roomId: manifest.roomId, manifestId: manifest.id }).then(
+      (result) => setDiff(isRecord(result) ? result : {}),
+      (cause: unknown) => setError(cause instanceof Error ? cause.message : 'The changes did not load. Try again.'),
+    );
+  };
+  const saved = (review ? objects(review, 'annotations') : []) as unknown as LineComment[];
+  return (
+    <details className="task-changes" onToggle={(event) => { if (event.currentTarget.open) load(); }}>
+      <summary>
+        Changes · result <span className="num">{string(manifest, 'resultDigest').slice(0, 12)}</span>
+        {saved.length > 0 && ` · ${saved.length} review ${saved.length === 1 ? 'comment' : 'comments'}`}
+        {drafts.length > 0 && ` · ${drafts.length} draft ${drafts.length === 1 ? 'comment' : 'comments'}`}
+      </summary>
+      {setDrafts && (
+        <p className="diff-note">
+          Select a line number to comment on that line; hold Shift and select another to cover a range. Your comments go with your review.
+        </p>
+      )}
+      {error ? <ErrorNotice dismiss={() => setError('')}>{error}</ErrorNotice> : diff ? (
+        <DiffView files={objects(diff, 'files')} omittedFiles={num(diff, 'omittedFiles') ?? 0} comments={saved} drafts={drafts}
+          onAdd={setDrafts && ((c) => setDrafts([...drafts, c]))} onRemove={setDrafts && ((i) => setDrafts(drafts.filter((_, k) => k !== i)))} />
+      ) : <p className="diff-note">Loading changes…</p>}
+      {verifications.map((v) => (
+        <JsonDetails key={string(v, 'id')} value={v} title={`Verification · ${string(v, 'status')}`} />
+      ))}
+    </details>
   );
 }
 
