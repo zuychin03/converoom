@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { run } from '../packages/adapters/src/process.js';
+import { scopeDigest } from '../packages/store/src/index.js';
 import type { Actor, Runtime, ToolArgs, Turn } from '../packages/shared/src/contracts.js';
 import * as content from '../packages/workspace/src/content.js';
 import { attemptEnvironment } from '../packages/workspace/src/index.js';
@@ -283,6 +284,31 @@ it('releases a known-unsent expired reservation without deleting its work', asyn
     .rejects.toThrow(/fenced|lease/i);
   const replacement = await call('task_claim', { roomId: room.id, taskId: 'change', seatId: seat.id });
   expect(replacement.id).not.toBe(attempt.id);
+});
+
+it('withdraws the pending approval of a queued turn when its attempt is released, keeps a granted one, and records why each turn was cancelled', async () => {
+  const { attempt } = await claim();
+  const ask = (prompt: string) => call('turn_request', { roomId: room.id, seatId: seat.id, attemptId: attempt.id, prompt });
+  const pending = await ask('Not yet approved'), pendingRequest = String(pending.permissionRequestId);
+  const granted = await ask('Approved but not started'), grantedRequest = String(granted.permissionRequestId);
+  const store = runtime.core.store;
+  // Granted without a grant record, so the scheduler leaves the turn queued.
+  store.put('permission', grantedRequest, { ...store.get<ToolArgs>('permission', grantedRequest)!, status: 'granted' });
+  await call('attempt_release', { roomId: room.id, attemptId: attempt.id, confirm: true, reason: 'Set aside before any turn ran' });
+  for (const t of [pending, granted])
+    expect(store.get<Turn>('turn', String(t.id))).toMatchObject({ status: 'cancelled', error: 'Attempt released before the turn started' });
+  expect(store.get<ToolArgs>('permission', pendingRequest)?.status).toBe('cancelled');
+  expect(store.get<ToolArgs>('permission', grantedRequest)?.status).toBe('granted');
+  const events = store.events(String(room.id), 0, 1000);
+  expect(events.filter((e) => e.type === 'turn.cancelled').map((e) => e.data)).toEqual([
+    { turnId: pending.id, reason: 'attempt_released' }, { turnId: granted.id, reason: 'attempt_released' }]);
+  const withdrawn = events.filter((e) => e.type === 'permission.cancelled');
+  expect(withdrawn.map((e) => e.actorId)).toEqual([owner.principalId]);
+  const { actionDigest, policyVersion, ...covered } = withdrawn[0].data as ToolArgs;
+  expect(covered).toEqual({ requestId: pendingRequest, action: 'turn_execute',
+    scopeDigest: store.get<ToolArgs>('permission', pendingRequest)?.scopeDigest });
+  expect(actionDigest).toBe(scopeDigest(covered));
+  expect(policyVersion).toEqual(expect.any(Number));
 });
 
 it('fences a submission already reading files when its reservation is released', async () => {

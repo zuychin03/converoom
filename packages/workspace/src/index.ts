@@ -12,7 +12,7 @@ import {
   type Turn,
 } from '../../shared/src/contracts.js';
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
-import { RESULT_EXPIRY_BATCH, RESULT_RETENTION_MS } from '../../core/src/index.js';
+import { cancelTurn, RESULT_EXPIRY_BATCH, RESULT_RETENTION_MS } from '../../core/src/index.js';
 import { run, canonicalRoot } from '../../adapters/src/process.js';
 import {
   snapshot,
@@ -1331,11 +1331,8 @@ export function mountWorkspace(
     if (!workerStopped(at))
       throw new E('release_refused', 'Uncertain or active worker stop must be confirmed first', 409);
     s.transaction(() => {
-      for (const turn of turns.filter((t) => t.status === 'queued')) {
-        s.put('turn', turn.id, { ...turn, status: 'cancelled' });
-        const permission = s.get<ToolArgs>('permission', turn.permissionRequestId ?? '');
-        if (permission) s.put('permission', String(permission.id), { ...permission, status: 'denied' });
-      }
+      for (const turn of turns.filter((t) => t.status === 'queued'))
+        cancelTurn(s, a, turn, 'Attempt released before the turn started', 'attempt_released');
       const current = task(roomId, at.taskId);
       if (current.generation === at.generation)
         putTask({ ...current, generation: current.generation + 1, status: 'rework' });
