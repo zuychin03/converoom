@@ -67,7 +67,7 @@ function cancelPermission(store: Store, a: Principal, id: string | undefined) {
   store.put('permission', p.id, { ...p, status: 'cancelled' });
   authority(store, a, store.get<Room>('room', p.roomId)!, 'permission.cancelled', { requestId: p.id, action: p.action, scopeDigest: p.scopeDigest });
 }
-function cancelTurn(store: Store, a: Principal, t: Turn, error: string, reason: string) {
+export function cancelTurn(store: Store, a: Principal, t: Turn, error: string, reason: string) {
   store.put('turn', t.id, { ...t, status: 'cancelled', error });
   cancelPermission(store, a, t.permissionRequestId);
   store.append(t.roomId, 'turn.cancelled', 'runtime', { turnId: t.id, reason });

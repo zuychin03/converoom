@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '../apps/daemon/src/runtime.js';
+import { scopeDigest } from '../packages/store/src/index.js';
 import type { Actor, ToolArgs, Turn } from '../packages/shared/src/contracts.js';
 const owner: Actor = { kind: 'human', principalId: 'owner', ownerId: 'owner' };
 it('does not execute a changed prompt under a previous execution grant', async () => {
@@ -90,6 +91,51 @@ it('blocks queued inference from a revoked host principal', async () => {
     await new Promise((r) => setTimeout(r, 150));
     expect(prompts).toBe(0);
     expect(runtime.core.store.get<Turn>('turn', String(turn.id))?.status).toBe('cancelled');
+  } finally {
+    await runtime.stop();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+it('withdraws the pending approval of a queued turn whose requester is revoked, and records why the turn was cancelled', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'converoom-revoked-'));
+  let prompts = 0;
+  const runtime = await createRuntime(dir, {
+    tickMs: 10,
+    startSession: async (product) => ({
+      id: 'fixture',
+      product,
+      capabilities: [],
+      prompt: async () => {
+        prompts++;
+        return 'reply';
+      },
+      cancel: async () => {},
+      close: async () => true,
+    }),
+  });
+  const call = (a: Actor, name: string, args: ToolArgs) => runtime.core.dispatch(a, name, args) as Promise<ToolArgs>;
+  const store = runtime.core.store;
+  try {
+    const host: Actor = { kind: 'agent', principalId: 'host', ownerId: 'owner' };
+    const room = await call(host, 'room_create', { title: 'Revocation', objective: 'Sender check' });
+    const seat = await call(owner, 'seat_add', { roomId: room.id, name: 'Worker', product: 'codex', mode: 'managed' });
+    await call(owner, 'seat_consent', { roomId: room.id, seatId: seat.id, consent: true });
+    const turn = await call(host, 'turn_request', { roomId: room.id, seatId: seat.id, prompt: 'Queued' });
+    const requestId = String(turn.permissionRequestId);
+    store.put('revoked', 'host', { at: Date.now() });
+    await expect.poll(() => store.get<Turn>('turn', String(turn.id))?.status).toBe('cancelled');
+    expect(store.get<Turn>('turn', String(turn.id))?.error).toBe('Requester revoked or unknown');
+    expect(store.get<ToolArgs>('permission', requestId)?.status).toBe('cancelled');
+    const events = store.events(String(room.id), 0, 1000);
+    expect(events.filter((e) => e.type === 'turn.cancelled').map((e) => e.data)).toEqual([{ turnId: turn.id, reason: 'requester_revoked' }]);
+    const withdrawn = events.filter((e) => e.type === 'permission.cancelled');
+    expect(withdrawn.map((e) => e.actorId)).toEqual(['runtime']);
+    const { actionDigest, policyVersion, ...content } = withdrawn[0].data as ToolArgs;
+    expect(content).toEqual({ requestId, action: 'turn_execute', scopeDigest: store.get<ToolArgs>('permission', requestId)?.scopeDigest });
+    expect(actionDigest).toBe(scopeDigest(content));
+    expect(policyVersion).toEqual(expect.any(Number));
+    await expect(call(owner, 'permission_grant', { requestId })).rejects.toThrow(/expired or resolved/);
+    expect(prompts).toBe(0);
   } finally {
     await runtime.stop();
     await rm(dir, { recursive: true, force: true });

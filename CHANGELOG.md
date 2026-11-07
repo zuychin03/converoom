@@ -20,6 +20,8 @@ Denying an approval request that has already been approved, denied, withdrawn or
 
 When an agent's request to use one of its own tools ends unanswered, because it ran out after two minutes or its turn ended first, the room history now records what the request would have allowed and the room policy in force, as it does for every other approval request. Previously it recorded only which request had ended.
 
+A queued turn whose requester can no longer run it, for example because their credential was revoked or their room membership ended, now has its approval request withdrawn along with it, and the room history records both. Previously the turn was cancelled with nothing recorded, and its request stayed in the Approvals queue for up to an hour.
+
 Cancelling a turn that is still waiting for your approval now withdraws its approval request as well, and the room history records it. Previously the request stayed in the Approvals queue for up to an hour after the turn was cancelled.
 
 When an approval request is withdrawn because its turn was cancelled, a round robin was stopped, the room closed or a room budget was used up, the room history now records who withdrew it, what it would have allowed and the room policy in force, as it already did when a member was removed. Previously it recorded only that the request was cancelled, by the runtime.

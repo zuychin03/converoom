@@ -3,11 +3,11 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "72da9917cf11d65f29f09250a7dbc6674e0d45c6729dd08143b949f5df538d51"
+      "sha256": "55924901c9785ee3e2a161ca2a23f8dd2e484c74f0b3a3838c49e7a899d6e674"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "f73f59e92f5b3acc50b55a146ec09d4d6e7bd90b7299935f57d2aa368c35a2bb"
+      "sha256": "43c640981075295d23791042994babf212a0d5d5291e083452b3cf3b08cc3f1a"
     },
     {
       "path": "dist/server.js",
@@ -15,7 +15,7 @@
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "f843ab4bb17b6e1ffffeee98760af79aef0c4dc1b0c03acd837f32df8edb2747"
+      "sha256": "e285f250aca6bd44b182c1f5526a14b2c8d0d64d91bc3d440396a871ea5cfe74"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",

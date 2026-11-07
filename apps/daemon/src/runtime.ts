@@ -13,6 +13,7 @@ import {
 } from '../../../packages/store/src/index.js';
 import {
   advanceTurnPolicies,
+  cancelTurn,
   createCore,
   exhaustBudgets,
   expirePollingTurns,
@@ -440,11 +441,9 @@ export async function createRuntime(
       }
       for (const t of store.list<Turn>('turn', { status: ['queued'] })) {
         if (!currentTurnAuthority(store, t)) {
-          store.put('turn', t.id, {
-            ...t,
-            status: 'cancelled',
-            error: 'Requester revoked or unknown',
-          });
+          store.transaction(() =>
+            cancelTurn(store, { principalId: 'runtime' }, t, 'Requester revoked or unknown', 'requester_revoked'),
+          );
           continue;
         }
         if (exhaustBudgets(store, t.roomId)) continue;
