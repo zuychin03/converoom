@@ -385,6 +385,57 @@ test('sets the export author and exports a reviewed candidate to a new branch wi
   expect(errors).toEqual([]);
 });
 
+test('approves an agent context import, attaches it to a message and imports a pasted excerpt at desktop and mobile', async ({ page, request }, info) => {
+  const errors: string[] = [];
+  watch(page, errors);
+  const code = (await (await request.post('http://127.0.0.1:43318/pair')).json()).code;
+  const title = 'Context room ' + info.project.name;
+  expect((await request.post('http://127.0.0.1:43318/context-request?title=' + encodeURIComponent(title))).ok()).toBe(true);
+  await page.goto('/');
+  await page.getByLabel('Pairing code').fill(code);
+  await page.getByRole('button', { name: 'Connect to Converoom' }).click();
+  await expect(page.getByRole('heading', { name: title })).toBeVisible();
+  await page.getByRole('button', { name: /Approvals/ }).click();
+  const slip = page.getByRole('article', { name: 'Context import request: Agent notes' });
+  await expect(slip.getByText('Planner asks to import “Agent notes” from codex.')).toBeVisible();
+  await slip.getByText('Redacted excerpt').click();
+  await expect(slip.getByLabel('Excerpt of Agent notes')).toContainText('api_key=[REDACTED]');
+  expect(await slip.evaluate((s) => s.scrollWidth <= s.clientWidth)).toBe(true);
+  await axe(page);
+  await slip.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-context-request.png' });
+  await slip.getByRole('button', { name: 'Review and approve' }).click();
+  const approve = page.getByRole('dialog', { name: 'Approve context import' });
+  await approve.getByRole('button', { name: 'Approve import', exact: true }).click();
+  await expect(approve).toBeHidden();
+  await expect(slip).toBeHidden();
+  await page.getByRole('button', { name: 'Room', exact: true }).click();
+  const panel = page.getByRole('region', { name: 'Context', exact: true });
+  await expect(panel.getByText('@context:agent-notes', { exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: 'View' }).click();
+  await expect(panel.getByLabel('Excerpt of @context:agent-notes')).toContainText('use write-through');
+  await panel.getByRole('button', { name: 'Import', exact: true }).click();
+  const imported = page.getByRole('dialog', { name: 'Import context' });
+  await imported.getByLabel(/^Title/).fill('Design notes');
+  await imported.getByLabel(/^Summary for agents/).fill('The agreed module boundaries');
+  await imported.getByLabel(/^Excerpt/).fill('Owner: keep the store behind one interface');
+  await axe(page);
+  await imported.getByRole('button', { name: 'Import context', exact: true }).click();
+  await expect(imported).toBeHidden();
+  await expect(panel.getByText('@context:design-notes', { exact: true })).toBeVisible();
+  const box = page.getByLabel('Public message');
+  await box.fill('See the attached notes @agent');
+  await page.getByRole('option', { name: /@context:agent-notes/ }).click();
+  await expect(page.getByRole('list', { name: 'Attached context' }).getByText('@context:agent-notes')).toBeVisible();
+  await page.getByRole('button', { name: 'Post message' }).click();
+  const catalogue = page.getByRole('list', { name: 'Room catalogue' });
+  await expect(catalogue.getByText('See the attached notes', { exact: true })).toBeVisible();
+  await expect(catalogue.locator('.entry-refs').getByText('@context:agent-notes')).toBeVisible();
+  expect(await panel.evaluate((s) => s.scrollWidth <= s.clientWidth)).toBe(true);
+  await axe(page);
+  await panel.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-context-panel.png' });
+  expect(errors).toEqual([]);
+});
+
 test('creates rooms from templates and sets seat models and efforts at desktop and mobile', async ({ page, request }, info) => {
   const errors: string[] = [];
   watch(page, errors);

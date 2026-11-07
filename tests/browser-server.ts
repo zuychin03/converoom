@@ -6,7 +6,7 @@ import { createServer as createTlsServer, Agent, request as tlsRequest } from 'n
 import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { createServer, humanIdentity } from '../apps/daemon/src/server.js';
 import { createSharedServer } from '../apps/daemon/src/shared-server.js';
-import { ENDED_ROOMS, type Room, type Seat, type ToolArgs, type Turn } from '../packages/shared/src/contracts.js';
+import { ENDED_ROOMS, type Actor, type Room, type Seat, type ToolArgs, type Turn } from '../packages/shared/src/contracts.js';
 import { run } from '../packages/adapters/src/process.js';
 import { attemptTree, checkpointStore } from '../packages/workspace/src/checkpoints.js';
 import type { Snapshot } from '../packages/workspace/src/content.js';
@@ -177,6 +177,19 @@ const fixtureControl = createHttpServer(async (request, response) => {
     await call('candidate_review', { roomId: room.id, candidateId: candidate.id, reason: 'Reviewed combined checks' });
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ roomId: room.id, candidateId: candidate.id }));
+    return;
+  }
+  // A room whose managed agent has asked to import a conversation excerpt, waiting for the owner.
+  if (request.method === 'POST' && requestUrl.pathname === '/context-request') {
+    const owner = humanIdentity(runtime);
+    const call = (actor: Actor, name: string, args: ToolArgs) => runtime.core.dispatch(actor, name, { ...args, clientKey: crypto.randomUUID() }) as Promise<ToolArgs>;
+    const room = await call(owner, 'room_create', { title: requestUrl.searchParams.get('title') ?? 'Context room', objective: 'Use imported context' });
+    const seat = await call(owner, 'seat_add', { roomId: room.id, name: 'Planner', product: 'codex', mode: 'managed' });
+    await call({ kind: 'agent', principalId: String(seat.principalId), ownerId: owner.ownerId }, 'session_context_import', { roomId: room.id,
+      title: 'Agent notes', summary: 'Cache decisions from my chat', product: 'codex',
+      excerpt: 'User: plan the cache\nAgent: use write-through. api_key=sk-fixture-secret-12345' });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ roomId: room.id }));
     return;
   }
   if (request.method !== 'POST' || requestUrl.pathname !== '/pair') {

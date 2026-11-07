@@ -85,6 +85,11 @@ export function ConnectionsView({ state, openAction }: { state: Snapshot; run: R
       {c.status === 'connected' && c.mode === 'polling' && isManagedProduct(string(c, 'product')) && <button className="button" onClick={() => openAction({ title: 'Enable local managed discussion', command: 'remote_connection_enable', args: { connectionId: c.id }, label: 'Enable managed discussion',
         description: 'This enables your local native adapter within these bounds. Incoming proposals still need exact local acceptance and an execution grant.',
         fields: [{ key: 'maxTurns', label: 'Local turn limit', type: 'number', value: '3', required: true }, { key: 'maxTurnMs', label: 'Local turn milliseconds', type: 'number', value: '60000', required: true }] })}>Enable managed discussion</button>}
+      {c.status === 'connected' && <button className="button" onClick={() => openAction({ title: 'Share context with the room', command: 'remote_context_share',
+        args: { connectionId: c.id }, label: 'Share context',
+        description: 'Paste an excerpt of one of your conversations and a short summary. Credentials, private reasoning and script blocks are removed first. Once shared, every owner in the room can read it.',
+        fields: [{ key: 'title', label: 'Title', required: true }, { key: 'summary', label: 'Summary for agents', type: 'textarea', required: true },
+          { key: 'excerpt', label: 'Excerpt', type: 'textarea', required: true }] })}>Share context</button>}
       {['connected', 'disconnected'].includes(string(c, 'status')) && <button className="button" onClick={() => openAction({ title: 'Refresh connection', command: 'remote_refresh', args: { connectionId: c.id }, label: 'Refresh connection' })}>Refresh connection</button>}
       {c.status !== 'revoked' && <button className="button" onClick={() => openAction({ title: 'Disconnect locally', command: 'remote_connection_disconnect', args: { connectionId: c.id }, label: 'Disconnect locally', danger: true,
         confirm: 'Fence local proposals and remove local room credentials. Ask the room owner to remove membership for server-side revocation. This does not confirm external work has stopped.' })}>Disconnect locally</button>}

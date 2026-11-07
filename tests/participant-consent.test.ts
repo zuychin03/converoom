@@ -444,3 +444,30 @@ it('audits the participant owner\'s connection, proposal and revocation decision
   const outside = participant.core.store.list<{ type: string; actorId: string; data: ToolArgs }>('authority_audit').find((r) => r.type === 'remote.connected')!;
   expect(outside).toMatchObject({ actorId: localB.principalId, data: { connectionId: polling.id, mode: 'polling', actionDigest: expect.any(String) } });
 });
+it('keeps a participant agent context import on its own machine until its owner approves, then shares it into the room', async () => {
+  const polling = await call(participant, 'remote_connection_attach', { origin: connection.origin, remoteRoomId: room.id, remoteOwnerId: seat.ownerId,
+    generation: member.generation, remoteSeatId: seat.id, clientId: 'participant-bridge', accessToken: 'fixture', product: 'codex', mode: 'polling',
+    maxTurns: 2, maxTurnMs: 60000 }, localB) as RemoteConnection;
+  const localAgent: Actor = { kind: 'agent', principalId: 'local-agent-b', ownerId: localB.ownerId };
+  const request = (title: string) => call(participant, 'remote_polling_dispatch', { connectionId: polling.id, name: 'session_context_import',
+    args: { roomId: room.id, title, summary: 'From B chat', excerpt: 'Private B conversation', product: 'cursor' } }, localAgent) as Promise<ToolArgs>;
+  const pending = await request('B notes');
+  expect(pending).toMatchObject({ status: 'pending' });
+  expect(host.core.store.list('session_context')).toEqual([]);
+  expect(host.core.store.events(room.id, 0, 1000).some((e) => e.type === 'context.imported')).toBe(false);
+  expect(participant.core.store.get('context_request', String(pending.requestId)))
+    .toMatchObject({ connectionId: polling.id, ownerId: localB.ownerId, shared: true, destination: 'shared room at ' + connection.origin });
+  await expect(call(participant, 'session_context_decide', { requestId: pending.requestId, approve: true }, localB)).rejects.toMatchObject({ code: 'context' });
+  await expect(call(participant, 'remote_context_decide', { requestId: pending.requestId, approve: true }, a)).rejects.toThrow();
+  const approved = await call(participant, 'remote_context_decide', { requestId: pending.requestId, approve: true }, localB) as ToolArgs;
+  expect(approved).toMatchObject({ status: 'approved', context: { slug: 'b-notes', ownerId: seat.ownerId, source: { product: 'cursor', via: 'participant' } } });
+  const [imported] = host.core.store.events(room.id, 0, 1000).filter((e) => e.type === 'context.imported');
+  expect(imported.data).toMatchObject({ ref: '@context:b-notes', ownerId: seat.ownerId, via: 'participant' });
+  expect(await call(participant, 'remote_polling_dispatch', { connectionId: polling.id, name: 'session_context_get',
+    args: { roomId: room.id, slug: 'b-notes' } }, localAgent)).toMatchObject({ excerpt: 'Private B conversation' });
+  const declined = await request('B private');
+  await call(participant, 'remote_context_decide', { requestId: declined.requestId, approve: false }, localB);
+  await call(participant, 'remote_context_share', { connectionId: polling.id, title: 'B direct', summary: 'Shared by B', excerpt: 'B chose this' }, localB);
+  expect(host.core.store.list<ToolArgs>('session_context').map((c) => c.slug).sort()).toEqual(['b-direct', 'b-notes']);
+  expect(participant.core.store.list<ToolArgs>('authority_audit').map((r) => r.type)).toEqual(expect.arrayContaining(['context.approved', 'context.declined']));
+});

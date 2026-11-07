@@ -238,7 +238,11 @@ export const peerWakeAction = (roomId: string, on: boolean): Action => ({
       'Each turn still needs its owner’s grant, and hop limits and budgets apply. This creates a new policy version.',
 });
 
-export const requestTurnAction = (roomId: string, seatId: unknown, interactionId?: string, remote = false): Action => ({
+// FR-63: a reply to a message receives the context that message attached unless other context is chosen here.
+const contextField = (contexts: RecordData[]) => (contexts.length ? [{ key: 'contextRefs', label: 'Attach context', type: 'choices' as const,
+  options: contexts.map((c) => ({ value: string(c, 'ref'), label: `${string(c, 'ref')} · ${string(c, 'title')}` })) }] : []);
+export const requestTurnAction = (roomId: string, seatId: unknown, interactionId?: string, remote = false, contexts: RecordData[] = []): Action => ({
+  prepare: ({ contextRefs, ...rest }) => (Array.isArray(contextRefs) && contextRefs.length ? { ...rest, contextRefs } : rest),
   title: interactionId ? 'Request linked reply' : remote ? 'Request participant turn' : 'Request managed turn',
   command: 'turn_request',
   args: { roomId, seatId, ...(interactionId ? { interactionId } : {}) },
@@ -251,6 +255,7 @@ export const requestTurnAction = (roomId: string, seatId: unknown, interactionId
       type: 'textarea',
       required: true,
     },
+    ...contextField(contexts),
   ],
 });
 

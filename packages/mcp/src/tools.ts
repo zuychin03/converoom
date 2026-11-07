@@ -19,7 +19,8 @@ const string = { type: 'string', minLength: 1, maxLength: 65536 },
   small = { ...string, maxLength: 256 },
   strings = { type: 'array', items: small, maxItems: 100 },
   checkpoint = { type: 'integer', minimum: 0, maximum: 1000000 },
-  line = { type: 'integer', minimum: 1, maximum: 10000000 };
+  line = { type: 'integer', minimum: 1, maximum: 10000000 },
+  refs = { type: 'array', items: { ...small, maxLength: 300 }, maxItems: 10 };
 const common: Record<string, unknown> = {
   roomId: small,
   clientKey: small,
@@ -63,6 +64,7 @@ const mutationNames = new Set([
   'review_submit',
   'integration_prepare',
   'permission_request',
+  'session_context_import',
 ]);
 const corpus: Record<string, { required: string[]; fields?: Record<string, unknown> }> = {
   room_create: {
@@ -87,6 +89,7 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
     fields: {
       text: string,
       replyToId: small,
+      contextRefs: refs,
       mentions: {
         type: 'array',
         maxItems: 5,
@@ -124,7 +127,7 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
   },
   turn_request: {
     required: ['roomId', 'seatId', 'prompt'],
-    fields: { prompt: string, attemptId: small, interactionId: small },
+    fields: { prompt: string, attemptId: small, interactionId: small, contextRefs: refs },
   },
   turn_claim: { required: ['roomId', 'turnId'] },
   turn_complete: { required: ['roomId', 'turnId'], fields: {
@@ -195,6 +198,13 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
   },
   artefact_get: { required: ['roomId', 'manifestId'] },
   artefact_diff: { required: ['roomId', 'manifestId'] },
+  session_context_import: {
+    required: ['roomId', 'title', 'summary', 'excerpt'],
+    fields: { title: { ...small, maxLength: 120 }, summary: { ...string, maxLength: 4096 }, excerpt: { ...string, maxLength: 2097152 },
+      product: { ...small, maxLength: 64 }, sessionRef: small },
+  },
+  session_context_list: { required: ['roomId'] },
+  session_context_get: { required: ['roomId', 'slug'], fields: { slug: { ...small, maxLength: 128 } } },
   shared_artefact_get: { required: ['roomId', 'artefactId'] },
   shared_artefact_list: { required: ['roomId'] },
   verification_request: { required: ['roomId', 'manifestId'] },

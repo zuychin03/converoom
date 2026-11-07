@@ -12,6 +12,7 @@ import { ConveroomError as E, requiredString as str, type Actor, type Core, type
 import { privateOrigin } from '../../mcp/src/shared-auth.js';
 import { pinnedFetch, RoomOAuthClient, type RoomOAuthState } from '../../mcp/src/remote.js';
 import { SHARED_READS, SHARED_WRITES } from '../../core/src/membership.js';
+import { CONTEXT_LIMIT, closeRequest, createRequest, prepareImport, requestContent, type ContextImport } from '../../core/src/contexts.js';
 import { authority, installationAuthority } from '../../core/src/audit.js';
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
 import { OAUTH_SECRETS, REMOTE_SECRETS, readCredential, removeCredential, writeCredential } from '../../../apps/cli/src/credentials.js';
@@ -374,6 +375,42 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
     audit(a, c, 'remote.disconnected', { connectionId: c.id, remoteRoomId: c.remoteRoomId, remoteRevocationConfirmed: false });
     return { connectionId: c.id, status: 'revoked', remoteRevocationConfirmed: false };
   });
+  // FR-63: an agent's import into a shared room waits here for its own owner, so nothing reaches the room unapproved.
+  const contextRequest = (c: RemoteConnection, a: Actor, args: ToolArgs) => {
+    if (store.count('context_request', { status: ['pending'] }) >= CONTEXT_LIMIT)
+      throw new E('context_limit', 'Too many context imports are waiting for approval', 409);
+    return createRequest(store, { ownerId: c.localOwnerId, connectionId: c.id, remoteRoomId: c.remoteRoomId,
+      destination: 'shared room at ' + c.origin, requestedBy: a.principalId, ...(c.localSeatId ? { seatId: c.localSeatId } : {}), shared: true },
+    prepareImport(args));
+  };
+  const shareContext = async (c: RemoteConnection, p: ContextImport) => {
+    if (c.status !== 'connected') throw new E('remote_scope', 'Reconnect to the shared room first', 409);
+    const remote = await client(c), room = await remote.command('room_get', { roomId: c.remoteRoomId }) as { policyVersion: number };
+    return remote.command('session_context_import', { roomId: c.remoteRoomId, title: p.title, summary: p.summary, excerpt: p.excerpt,
+      product: p.product, ...(p.sessionRef ? { sessionRef: p.sessionRef } : {}), expectedGeneration: c.generation,
+      expectedPolicyVersion: room.policyVersion, clientKey: randomUUID() });
+  };
+  core.register('remote_context_decide', async (a, x) => {
+    human(a);
+    const { request, excerpt } = requestContent(store, a, str(x, 'requestId', 256));
+    if (!request.connectionId) throw new E('context', 'Decide a local room request from the Approvals queue', 409);
+    if (typeof x.approve !== 'boolean') throw new E('invalid_argument', 'Approve or decline the request');
+    const reason = x.reason === undefined ? undefined : str(x, 'reason', 1000);
+    if (!x.approve) {
+      closeRequest(store, a, request, 'declined', reason);
+      return { requestId: request.id, status: 'declined' };
+    }
+    const context = await shareContext(connection(request.connectionId), { title: request.title, summary: request.summary, excerpt,
+      digest: request.digest, bytes: request.bytes, product: request.product, ...(request.sessionRef ? { sessionRef: request.sessionRef } : {}) });
+    closeRequest(store, a, request, 'approved', reason);
+    return { requestId: request.id, status: 'approved', context };
+  });
+  core.register('remote_context_share', async (a, x) => {
+    human(a);
+    const c = connection(str(x, 'connectionId', 256));
+    if (c.localOwnerId !== a.ownerId) throw new E('remote_scope', 'Own connection required', 403);
+    return shareContext(c, prepareImport(x));
+  });
   core.register('remote_agent_dispatch', async (a, x) => {
     const c = connection(str(x, 'connectionId', 256)), turn = store.get<Turn>('turn', str(x, 'localTurnId', 256));
     const seat = store.get<{ principalId: string }>('seat', c.localSeatId ?? ''), p = turn?.remoteProposalId ? store.get<RemoteProposal>('remote_proposal', turn.remoteProposalId) : undefined;
@@ -383,6 +420,7 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
     const name = str(x, 'name', 256), args = x.args as ToolArgs;
     if (!args || typeof args !== 'object' || Array.isArray(args) || (args.roomId && args.roomId !== c.localRoomId))
       throw new E('remote_managed_scope', 'Own discussion room required', 403);
+    if (name === 'session_context_import') return contextRequest(c, a, args);
     const value = await (await client(c)).command(name, { ...args, ...(name === 'runtime_capabilities' ? {} : { roomId: c.remoteRoomId }),
       ...(SHARED_WRITES.has(name) ? versioned(c, p) : {}) });
     const remap = (item: unknown): unknown => {
@@ -400,6 +438,7 @@ export function mountParticipant(core: Core, dataDir: string, factory: RemoteTra
     if ((!SHARED_READS.has(name) && !SHARED_WRITES.has(name) && name !== 'runtime_capabilities') ||
       !args || typeof args !== 'object' || Array.isArray(args) || (args.roomId && args.roomId !== c.remoteRoomId))
       throw new E('remote_scope', 'One shared discussion room required', 403);
+    if (name === 'session_context_import') return contextRequest(c, a, args);
     const remote = await client(c);
     const room = SHARED_WRITES.has(name) ? await remote.command('room_get', { roomId: c.remoteRoomId }) as { policyVersion: number } : undefined;
     return remote.command(name, { ...args, ...(name === 'runtime_capabilities' ? {} : { roomId: c.remoteRoomId }),

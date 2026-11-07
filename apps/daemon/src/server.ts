@@ -45,6 +45,7 @@ const installation = {
   repos: 'repo',
   resources: 'resource',
   settings: 'setting',
+  contextRequests: 'context_request',
   remoteConnections: 'remote_connection',
   remoteProposals: 'remote_proposal',
 };
@@ -63,6 +64,7 @@ const roomScoped = {
   ownerConsents: 'owner_consent',
   roundRobins: 'round_robin',
   checkpoints: 'checkpoint',
+  contexts: 'session_context',
 };
 const ACTIVE_TURNS = ['dispatching', 'running', 'cancelling'];
 // The store reads at most 1,000 events per call.
@@ -271,6 +273,12 @@ export async function createServer(
     'candidate_apply',
     'candidate_export_branch',
     'export_author_update',
+    'session_context_request_get',
+    'session_context_decide',
+    'session_context_codex_threads',
+    'session_context_import_codex',
+    'remote_context_decide',
+    'remote_context_share',
     'workspace_cleanup',
     'workspace_cleanup_preview',
     'attempt_release',

@@ -28,10 +28,11 @@ import { activeMembership, currentSeat, currentTurnAuthority, mountMembership, r
 import { authority } from './audit.js';
 import { MAX_SAVED_TEMPLATES, findTemplate, seatProfile, templateFromRoom, templatePolicy, templatesFor } from './templates.js';
 import { reworkNotes } from './rework.js';
+import { mountContexts, resolveRefs } from './contexts.js';
 // Reads rerun on retry, so their results are never stored under a client key.
 export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
   'resource_profile_list', 'adapter_status', 'adapter_discover', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview', 'template_list',
-  'checkpoint_list', 'checkpoint_diff', 'artefact_diff']);
+  'checkpoint_list', 'checkpoint_diff', 'artefact_diff', 'session_context_list', 'session_context_get', 'session_context_request_get', 'session_context_codex_threads']);
 const limits = {
   maxActiveTurns: 2,
   maxRounds: 6,
@@ -173,6 +174,7 @@ export function turnExecutionScope(t: Turn, store: Store): ToolArgs {
     policyVersion: t.policyVersion,
     interactionId: t.interactionId ?? null,
     ...(t.profile ? { profile: t.profile } : {}),
+    ...(t.contextRefs ? { contextRefs: t.contextRefs } : {}),
     ...(t.roundRobinId ? { roundRobin: { id: t.roundRobinId, index: t.roundRobinIndex,
       digest: store.get<RoundRobinPlan>('round_robin', t.roundRobinId)?.digest } } : {}),
     ...(t.remoteProposalId ? { remoteProposalId: t.remoteProposalId,
@@ -286,6 +288,10 @@ function queueTurn(store: Store, a: Actor, r: Room, s: Seat | undefined, x: Tool
       .some((v) => v.attemptId === at.id && v.reworkReviewId && v.startedAt))
       rework = store.get<Review>('review', String(at.reworkReviewId));
   }
+  // A turn woken by a message receives the context that message attached.
+  const refs = x.contextRefs === undefined && interaction
+    ? (store.events(r.id, Number(interaction.messageSeq) - 1, 1)[0]?.data.contextRefs ?? []) as Turn['contextRefs']
+    : resolveRefs(store, r.id, x.contextRefs);
   const t: Turn = {
     id: randomUUID(),
     roomId: r.id,
@@ -300,6 +306,7 @@ function queueTurn(store: Store, a: Actor, r: Room, s: Seat | undefined, x: Tool
       membershipGeneration: s.membershipGeneration, maxTurnMs: Math.min(consent!.maxTurnMs, Number(r.policy.maxTurnMs)) } : {}),
     ...(x.attemptId ? { attemptId: String(x.attemptId) } : {}),
     ...(rework ? { reworkReviewId: rework.id } : {}),
+    ...(refs?.length ? { contextRefs: refs } : {}),
     ...(interaction ? { interactionId: interaction.id } : {}),
     ...(s.mode === 'managed' && s.profile ? { profile: s.profile } : {}),
     ...(x.remoteProposalId ? { remoteProposalId: String(x.remoteProposalId),
@@ -544,6 +551,9 @@ export function createCore(store: Store): Core {
         'integration_prepare',
         'candidate_apply',
         'candidate_export_branch',
+        'session_context_import_codex',
+        'remote_context_decide',
+        'remote_context_share',
         'workspace_cleanup',
         'attempt_release',
         'attempt_rollback',
@@ -768,11 +778,13 @@ export function createCore(store: Store): Core {
         throw new E('recipient', 'Invalid recipient');
       seen.add(m.seatId);
     }
+    const refs = resolveRefs(store, r.id, x.contextRefs);
     const e = ev(a, r.id, 'message', {
       text: redactPublic(text),
       senderId: sender,
       mentions,
       replyToId: x.replyToId ?? null,
+      ...(refs.length ? { contextRefs: refs } : {}),
     });
     for (const m of mentions) {
       const i: I = {
@@ -1199,5 +1211,6 @@ export function createCore(store: Store): Core {
   store.expireResults(Date.now() - RESULT_RETENTION_MS, RESULT_EXPIRY_BATCH);
   mountMembership(c);
   mountSharedArtefacts(c);
+  mountContexts(c);
   return c;
 }

@@ -177,6 +177,8 @@ export interface Turn {
   inspection?: { finding: 'acted' | 'not_acted' | 'unclear'; note: string; at: number; by: string };
   // FR-57: the review whose notes were added to this rework turn's prompt.
   reworkReviewId?: string;
+  // FR-63: imported contexts and artefacts this turn receives, bound by digest into its approval.
+  contextRefs?: { ref: string; digest: string }[];
 }
 // FR-57: `side` names the file version the lines belong to; `digest` is that version's content digest.
 export interface ReviewAnnotation {

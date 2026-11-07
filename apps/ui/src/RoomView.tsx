@@ -10,6 +10,7 @@ import {
   peerWakeAction,
   phaseAction,
   requestTurnAction,
+  PRODUCTS,
   roundRobinAction,
   saveTemplateAction,
   seatProfileAction,
@@ -116,6 +117,7 @@ const SYSTEM_LABELS: Record<string, string> = {
   'candidate.accepted': 'candidate accepted',
   'candidate.applied': 'candidate applied',
   'candidate.exported': 'branch exported',
+  'context.imported': 'context imported',
   'checkpoint.recorded': 'checkpoint',
   'checkpoint.unchanged': 'checkpoint',
   'checkpoint.skipped': 'checkpoint skipped',
@@ -251,6 +253,7 @@ export function RoomView({
   onAllRooms,
   loadEarlier,
   shared = false,
+  read,
 }: {
   room: RecordData;
   state: Snapshot;
@@ -262,6 +265,7 @@ export function RoomView({
   onAllRooms: () => void;
   loadEarlier?: () => Promise<void>;
   shared?: boolean;
+  read?: Run;
 }) {
   const now = useNow(5000);
   const id = string(room, 'id');
@@ -345,8 +349,9 @@ export function RoomView({
       setBusy('');
     }
   }
+  const contexts = state.contexts.filter((c) => c.roomId === id).map((c) => ({ ...c, ref: '@context:' + string(c, 'slug') }));
   const requestTurn = (seat: RecordData, interactionId?: string) =>
-    openAction(requestTurnAction(id, seat.id, interactionId, shared || seat.ownerId !== room.ownerId));
+    openAction(requestTurnAction(id, seat.id, interactionId, shared || seat.ownerId !== room.ownerId, contexts));
   const names = {
     seat: (seatId: unknown) =>
       seatId === humanId
@@ -521,7 +526,7 @@ export function RoomView({
             </p>
           )}
         </div>
-        <Composer roomId={id} seats={seats} run={run} disabled={!open || silenced}
+        <Composer roomId={id} seats={seats} run={run} contexts={contexts} disabled={!open || silenced}
           reason={open ? (silenced ? 'This room’s budget is used up. See the handoff above.' : undefined)
             : INACTIVE[lifecycleState] ?? `This room is ${lifecycleState} and cannot reopen.`} />
       </section>
@@ -576,6 +581,10 @@ export function RoomView({
             ))}
           </ul>
         </section>
+        {!shared && read && (
+          <ContextPanel roomId={id} contexts={contexts} open={!ended} sharedRoom={seats.some((s) => s.ownerId !== room.ownerId) ||
+            state.members.some((m) => m.roomId === id && m.status === 'active')} read={read} openAction={openAction} />
+        )}
         {!shared && plan && <RoundRobinPanel plan={plan} state={state} names={names} openAction={openAction} />}
         {!shared && <RoomControls room={room} state={state} seats={seats} names={names} planOpen={!!plan} openAction={openAction} />}
       </aside>
@@ -685,6 +694,96 @@ function SeatRow({
 }
 
 type Names = { seat: (id: unknown) => string; actor: (id: unknown) => string };
+
+const VIA: Record<string, string> = { paste: 'pasted', mcp: 'from an agent', codex_thread: 'Codex thread', participant: 'from a participant' };
+function ContextPanel({
+  roomId,
+  contexts,
+  open,
+  sharedRoom,
+  read,
+  openAction,
+}: {
+  roomId: string;
+  contexts: RecordData[];
+  open: boolean;
+  sharedRoom: boolean;
+  read: Run;
+  openAction: (action: Action) => void;
+}) {
+  const [view, setView] = useState<RecordData>();
+  const [error, setError] = useState('');
+  const fail = (cause: unknown) => setError(cause instanceof Error ? cause.message : 'That did not load. Try again.');
+  const reach = sharedRoom ? ' This room is shared, so the other owners can read it once it is imported.' : '';
+  const paste = () => openAction({
+    title: 'Import context', command: 'session_context_import', args: { roomId }, label: 'Import context',
+    description: 'Paste an excerpt of a conversation and a short summary. Credentials, private reasoning and script blocks are removed before it is stored. ' +
+      'A turn that references it gets the summary and can fetch the excerpt.' + reach,
+    fields: [
+      { key: 'title', label: 'Title', required: true },
+      { key: 'product', label: 'From', type: 'select', value: 'other',
+        options: [...PRODUCTS, { value: 'other', label: 'Something else' }] },
+      { key: 'summary', label: 'Summary for agents', type: 'textarea', required: true },
+      { key: 'excerpt', label: 'Excerpt', type: 'textarea', required: true },
+    ],
+  });
+  const codex = () => {
+    setError('');
+    read('session_context_codex_threads', {}).then((result) => {
+      const threads = isRecord(result) ? objects(result, 'threads') : [];
+      if (!threads.length) return setError('Codex has no recent threads to import.');
+      openAction({
+        title: 'Import a Codex thread', command: 'session_context_import_codex', args: { roomId }, label: 'Import thread',
+        description: 'Reads the thread\'s user and Codex messages through Codex\'s history calls without resuming it; reasoning and tool output are left out.' + reach,
+        fields: [
+          { key: 'threadId', label: 'Thread', type: 'select', required: true,
+            options: threads.map((t) => ({ value: string(t, 'id'), label: string(t, 'preview') || string(t, 'id') })) },
+          { key: 'summary', label: 'Summary for agents', type: 'textarea', required: true },
+        ],
+      });
+    }, fail);
+  };
+  return (
+    <section className="panel" aria-labelledby="context-title">
+      <div className="panel-head">
+        <h2 className="section-label" id="context-title">Context</h2>
+        {open && (
+          <div className="row-actions">
+            <button type="button" className="button small" onClick={paste}>Import</button>
+            <button type="button" className="button small" onClick={codex}>From Codex</button>
+          </div>
+        )}
+      </div>
+      {error && <ErrorNotice dismiss={() => setError('')}>{error}</ErrorNotice>}
+      {contexts.length === 0 ? (
+        <p className="rail-note">Import a conversation excerpt to give agents its summary when a message or turn attaches it with @.</p>
+      ) : (
+        <ul className="context-list">
+          {contexts.map((c) => (
+            <li key={string(c, 'id')}>
+              <code>{string(c, 'ref')}</code>
+              <span className="context-title">{string(c, 'title')}</span>
+              <span className="context-meta">
+                {VIA[string(isRecord(c.source) ? c.source : {}, 'via')] ?? 'imported'} · {fmtBytes(num(c, 'bytes') ?? 0)}
+              </span>
+              <button type="button" className="text-button" aria-pressed={view?.id === c.id}
+                onClick={() => (view?.id === c.id ? setView(undefined)
+                  : read('session_context_get', { roomId, slug: string(c, 'slug') }).then((r) => setView(isRecord(r) ? r : undefined), fail))}>
+                {view?.id === c.id ? 'Hide' : 'View'}
+              </button>
+              {view && view.id === c.id && (
+                <div className="context-view">
+                  <p>{string(view, 'summary')}</p>
+                  <pre tabIndex={0} aria-label={'Excerpt of ' + string(c, 'ref')}>{string(view, 'excerpt')}</pre>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 function RoundRobinPanel({
   plan,
@@ -1044,6 +1143,11 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
       body: (
         <>
           <p className="entry-text">{string(d, 'text')}</p>
+          {objects(d, 'contextRefs').length > 0 && (
+            <p className="entry-refs">
+              Attached {objects(d, 'contextRefs').map((r) => <code key={string(r, 'ref')}>{string(r, 'ref')}</code>)}
+            </p>
+          )}
           {(interactions.length > 0 || replySeq !== undefined) && (
             <div className="entry-foot">
               {replySeq !== undefined && (
@@ -1410,6 +1514,8 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `Final candidate accepted · ${string(d, 'resultDigest').slice(0, 12)}`;
     case 'candidate.applied':
       return `Candidate applied to the checkout · ${string(d, 'resultDigest').slice(0, 12)}`;
+    case 'context.imported':
+      return `Imported ${string(d, 'ref')} · ${string(d, 'title')} · ${string(d, 'product')} · ${fmtBytes(num(d, 'bytes') ?? 0)}`;
     case 'candidate.exported':
       return `Candidate exported to new branch ${string(d, 'branch')} · commit ${string(d, 'commit').slice(0, 12)} · not pushed`;
     case 'checkpoint.recorded': {

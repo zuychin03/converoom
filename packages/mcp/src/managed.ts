@@ -6,6 +6,7 @@ import type { Core, Seat, Turn } from '../../shared/src/contracts.js';
 export const MANAGED_TOOLS = new Set([
   'room_get', 'room_read', 'room_wait', 'room_inbox', 'room_post', 'room_usage',
   'task_get', 'task_heartbeat', 'artefact_get', 'checkpoint_list', 'checkpoint_diff', 'permission_request', 'runtime_capabilities',
+  'session_context_import', 'session_context_list', 'session_context_get',
   'shared_artefact_get', 'shared_artefact_list',
 ]);
 export interface ManagedScope {

@@ -162,6 +162,7 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     'invitation.revoked': () => 'An invitation was revoked.',
     'owner.consent_changed': (d) => `${seatName(d.seatId)} may take turns requested by ${plural(items(d.allowedSenderOwnerIds).length, 'owner')}, up to ` +
       `${plural(Number(d.maxTurns), 'turn')} of ${duration(d.maxTurnMs)}.`,
+    'context.imported': (d) => `Imported context ${code(d.ref)} "${inline(d.title)}" from ${inline(d.product)}, ${Number(d.bytes)} bytes, digest ${code(d.digest)}.`,
     'artefact.shared': (d) => `Shared ${inline(d.name)} (${inline(d.mimeType)}, ${Number(d.bytes)} bytes, digest ${code(d.digest)}).`,
     'tasks.planned': (d) => `Tasks planned: ${items(d.taskIds).map(inline).join(', ')}.`,
     'task.claimed': (d) => `Task ${inline(d.taskId)} claimed by attempt ${code(String(d.attemptId).slice(0, 8))}, generation ${Number(d.generation)}.`,
@@ -201,7 +202,8 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     if (e.type === 'message') {
       const reply = interaction(d.replyToId), mentions = items(d.mentions).map(record);
       return { title: seatName(d.senderId) + (reply ? ' · reply to ' + ref(reply.messageId) : ''), body: [fenced(d.text),
-        ...(mentions.length ? ['Mentions ' + mentions.map((m) => `${seatName(m.seatId)} (${inline(m.intent)})`).join(', ') + '.'] : [])] };
+        ...(mentions.length ? ['Mentions ' + mentions.map((m) => `${seatName(m.seatId)} (${inline(m.intent)})`).join(', ') + '.'] : []),
+        ...(items(d.contextRefs).length ? ['Attached ' + items(d.contextRefs).map((r) => code(record(r).ref)).join(', ') + '.'] : [])] };
     }
     if (e.type === 'agenda') return { title: actor + ' · agenda', body: [fenced(d.agenda), ...obligations(d)] };
     if (e.type === 'decision') return { title: actor + ' · decision proposed', body: [fenced(d.decision),

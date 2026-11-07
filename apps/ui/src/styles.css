@@ -1028,6 +1028,15 @@ textarea {
   color: var(--muted);
   font-size: var(--text-xs);
 }
+.entry-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: baseline;
+  margin-top: var(--space-1);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
 .entry-text {
   max-width: 72ch;
   margin-top: 3px;
@@ -1270,6 +1279,50 @@ textarea {
   margin-top: var(--space-2);
   color: var(--muted);
   font-size: var(--text-2xs);
+}
+.context-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.context-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--hairline);
+  font-size: var(--text-xs);
+}
+.context-list code {
+  overflow-wrap: anywhere;
+}
+.context-title {
+  grid-column: 1;
+  color: var(--ink);
+}
+.context-meta {
+  grid-column: 1;
+  color: var(--muted);
+}
+.context-list .text-button {
+  grid-column: 2;
+  grid-row: 1;
+}
+.context-view {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.context-view p {
+  margin: var(--space-1) 0;
+  color: var(--ink-2);
+}
+.context-view pre {
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .seat-list {
   margin: var(--space-2) 0 0;

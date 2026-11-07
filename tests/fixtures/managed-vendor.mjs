@@ -78,6 +78,25 @@ async function request(message) {
   } else if (message.method === 'model/list') {
     send({ id: message.id, result: { data: [{ id: 'gpt-fixture', model: 'gpt-fixture', displayName: 'GPT fixture', hidden: false, isDefault: true,
       supportedReasoningEfforts: efforts, defaultReasoningEffort: 'medium' }], nextCursor: null } });
+  } else if (message.method === 'thread/list') {
+    send({ id: message.id, result: { data: [{ id: 'thread-fixture', preview: 'Plan the cache layer', createdAt: 1, updatedAt: 2, name: null }],
+      nextCursor: null, backwardsCursor: null } });
+  } else if (message.method === 'thread/read') {
+    if (message.params.threadId !== 'thread-fixture') throw new Error('Unknown thread');
+    send({ id: message.id, result: { thread: { id: 'thread-fixture', preview: 'Plan the cache layer', createdAt: 1, updatedAt: 2 } } });
+  } else if (message.method === 'thread/items/list') {
+    const items = [
+      { turnId: 't1', item: { type: 'userMessage', id: 'u1', content: [{ type: 'text', text: 'Plan the cache layer', text_elements: [] }] } },
+      { turnId: 't1', item: { type: 'reasoning', id: 'r1', summary: ['private'] } },
+      { turnId: 't1', item: { type: 'agentMessage', id: 'a1', text: 'Use a write-through cache. token=sk-fixture-secret-123' } },
+      { turnId: 't2', item: { type: 'commandExecution', id: 'c1', command: 'ls' } },
+      { turnId: 't2', item: { type: 'userMessage', id: 'u2', content: [{ type: 'text', text: 'And eviction?', text_elements: [] }] } },
+      { turnId: 't2', item: { type: 'agentMessage', id: 'a2', text: 'LRU with a 10 minute ceiling.' } },
+    ];
+    const ordered = message.params.sortDirection === 'desc' ? [...items].reverse() : items;
+    const page = message.params.cursor === 'next' ? ordered.slice(3) : ordered.slice(0, 3);
+    send({ id: message.id, result: { data: page.map((entry) => ({ ...entry, startedAtMs: null })),
+      nextCursor: message.params.cursor === 'next' ? null : 'next', backwardsCursor: null } });
   } else if (message.method === 'thread/start') {
     const config = {};
     for (let i = 3; i < process.argv.length; i++) {

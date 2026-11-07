@@ -204,6 +204,8 @@ export function App() {
   const room = snapshot?.rooms.find((item) => item.id === roomId);
   const opening = !!room && loadedRoom !== roomId;
   const pending = snapshot ? pendingPermissions(snapshot, now) : [];
+  const contextRequests = snapshot ? snapshot.contextRequests.filter((r) => r.status === 'pending' && Number(r.expiresAt) > now) : [];
+  const waiting = pending.length + contextRequests.length;
   const running = snapshot ? snapshot.turns.filter((t) => ACTIVE_TURN.includes(string(t, 'status'))).length : 0;
   const items = useMemo<IndexItem[]>(() => {
     if (!snapshot) return [];
@@ -222,7 +224,7 @@ export function App() {
     list.push(
       { id: 'go-room', group: 'Actions', label: 'Go to Room', run: go('room') },
       { id: 'go-work', group: 'Actions', label: 'Go to Work', run: go('work') },
-      { id: 'go-approvals', group: 'Actions', label: 'Go to Approvals', hint: `${pending.length} waiting`, run: go('approvals') },
+      { id: 'go-approvals', group: 'Actions', label: 'Go to Approvals', hint: `${waiting} waiting`, run: go('approvals') },
       { id: 'create-room', group: 'Actions', label: 'Create room…', run: createRoom },
     );
     for (const t of snapshot.templates)
@@ -365,9 +367,9 @@ export function App() {
               onClick={() => setView(key)}
             >
               {label}
-              {key === 'approvals' && pending.length > 0 && (
-                <span className="count" aria-label={`, ${pending.length} pending`}>
-                  {pending.length}
+              {key === 'approvals' && waiting > 0 && (
+                <span className="count" aria-label={`, ${waiting} pending`}>
+                  {waiting}
                 </span>
               )}
             </button>
@@ -444,6 +446,7 @@ export function App() {
                 setFocusSeq={setFocusSeq}
                 onAllRooms={() => selectRoom('')}
                 loadEarlier={loadEarlier}
+                read={(name, args) => client.command(name, args)}
               />
             ) : (
               <NoRoom hasRooms={snapshot.rooms.length > 0} createRoom={createRoom} />
@@ -467,7 +470,8 @@ export function App() {
             onTemplate={fromTemplate}
           />
         ) : (
-          <ApprovalQueue permissions={pending} rooms={snapshot.rooms} openAction={setAction} />
+          <ApprovalQueue permissions={pending} rooms={snapshot.rooms} openAction={setAction} contextRequests={contextRequests}
+            seats={snapshot.seats} read={(name, args) => client.command(name, args)} />
         )}
       </main>
       <CommandIndex open={indexOpen} onClose={() => setIndexOpen(false)} items={items} />

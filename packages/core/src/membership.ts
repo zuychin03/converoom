@@ -56,7 +56,7 @@ export const sharedTurn = (t: Turn) => select(t, ['id', 'roomId', 'seatId', 'pro
   'policyVersion', 'senderOwnerId', 'membershipGeneration', 'requesterMembershipGeneration', 'maxTurnMs', 'ownerConsentDigest', 'interactionId']);
 const sharedInteraction = (i: Interaction) => select(i, ['id', 'roomId', 'senderId', 'recipientId', 'messageId', 'intent', 'status', 'hop', 'createdAt', 'turnId', 'responseId']);
 const eventFields: Record<string, string[]> = {
-  message: ['text', 'senderId', 'mentions', 'replyToId'], agenda: ['agenda', 'unresolved'],
+  message: ['text', 'senderId', 'mentions', 'replyToId', 'contextRefs'], agenda: ['agenda', 'unresolved'],
   decision: ['decision', 'positions', 'dissent', 'evidence', 'unresolved'],
   'seat.joined': ['id', 'ownerId', 'name', 'product', 'mode', 'role', 'status'], 'seat.left': ['seatId'],
   'room.paused': ['status'], 'room.open': ['status'], 'room.closed': ['status'], 'room.lifecycle': ['lifecycle', 'previous'],
@@ -71,6 +71,7 @@ const eventFields: Record<string, string[]> = {
   'interaction.responded': ['interactionId', 'responseId'], 'interaction.resolved': ['interactionId'],
   'interaction.read': ['interactionId'],
   'artefact.shared': ['id', 'ownerId', 'name', 'mimeType', 'digest', 'bytes', 'visibility', 'sharedAt', 'provenance'],
+  'context.imported': ['contextId', 'ref', 'title', 'digest', 'bytes', 'product', 'via', 'ownerId'],
 };
 export const SHARED_BYTES = 524288;
 const jsonBytes = (v: unknown) => Buffer.byteLength(JSON.stringify(v));
@@ -143,10 +144,11 @@ export function sharedProjection(c: Core, a: Actor, id: string): ToolArgs {
       .filter((t) => own.has(t.seatId)).slice(0, 100).map(sharedTurn),
     artefacts: c.store.list<SharedArtefact>('shared_artefact', { roomId: id }).slice(0, 100).map(artefactMetadata) }), ['events', 'turns', 'interactions', 'artefacts']);
 }
-export const SHARED_READS = new Set(['room_get', 'room_list', 'room_read', 'room_wait', 'room_inbox', 'room_usage', 'room_members', 'shared_artefact_get', 'shared_artefact_list']);
+export const SHARED_READS = new Set(['room_get', 'room_list', 'room_read', 'room_wait', 'room_inbox', 'room_usage', 'room_members', 'shared_artefact_get', 'shared_artefact_list',
+  'session_context_list', 'session_context_get']);
 export const SHARED_WRITES = new Set(['room_post', 'room_leave', 'turn_request', 'turn_claim', 'turn_complete', 'turn_cancel',
   'room_set_agenda', 'room_propose_decision', 'interaction_resolve', 'host_transfer_request', 'room_pause', 'room_resume', 'room_close',
-  'shared_artefact_publish', 'owner_consent_update']);
+  'shared_artefact_publish', 'owner_consent_update', 'session_context_import']);
 export async function sharedCommand(c: Core, a: Actor, roomId: string, generation: number, name: string, x: ToolArgs) {
   const r = sharedAccess(c, a, roomId), m = activeMembership(c.store, roomId, a.ownerId, a.kind === 'human' ? a.principalId : undefined);
   if (!m || m.generation !== generation || (x.roomId && x.roomId !== roomId)) throw new E('shared_scope', 'Current room credential scope required', 403);
@@ -188,7 +190,7 @@ export async function sharedCommand(c: Core, a: Actor, roomId: string, generatio
     return page;
   }
   const result = await c.dispatch(a, name, args);
-  if (name === 'shared_artefact_get' || name === 'shared_artefact_list' || name === 'shared_artefact_publish') return result;
+  if (name === 'shared_artefact_get' || name === 'shared_artefact_list' || name === 'shared_artefact_publish' || name.startsWith('session_context_')) return result;
   if (name === 'owner_consent_update') return { seatId: x.seatId, consentUpdated: true };
   if (name === 'room_usage') {
     const usage = result as ToolArgs;
