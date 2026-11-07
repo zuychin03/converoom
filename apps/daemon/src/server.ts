@@ -68,6 +68,7 @@ const roomScoped = {
   threads: 'thread',
   pins: 'pin',
   threadSummaries: 'thread_summary',
+  directives: 'directive',
 };
 const ACTIVE_TURNS = ['dispatching', 'running', 'cancelling'];
 // The store reads at most 1,000 events per call.
@@ -278,6 +279,9 @@ export async function createServer(
     'export_author_update',
     'session_context_request_get',
     'context_unpin',
+    'room_barge_in',
+    'turn_amend',
+    'directive_clear',
     'session_context_decide',
     'session_context_codex_threads',
     'session_context_import_codex',

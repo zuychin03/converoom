@@ -204,6 +204,30 @@ const fixtureControl = createHttpServer(async (request, response) => {
     response.end(JSON.stringify({ roomId: room.id }));
     return;
   }
+  // A room with a polling host and a managed worker whose turn is running, recorded directly since this runtime runs no turns.
+  if (request.method === 'POST' && requestUrl.pathname === '/barge') {
+    const owner = humanIdentity(runtime), store = runtime.core.store;
+    const call = (name: string, args: ToolArgs) => runtime.core.dispatch(owner, name, { ...args, clientKey: crypto.randomUUID() }) as Promise<ToolArgs>;
+    const room = await call('room_create', { title: requestUrl.searchParams.get('title') ?? 'Barge room', objective: 'Steer the work' });
+    const host = await call('seat_add', { roomId: room.id, name: 'Host', product: 'claude', mode: 'polling', role: 'host' });
+    const worker = await call('seat_add', { roomId: room.id, name: 'Worker', product: 'codex', mode: 'managed' });
+    await call('seat_consent', { roomId: room.id, seatId: worker.id, consent: true });
+    const turn = { id: crypto.randomUUID(), roomId: String(room.id), seatId: String(worker.id), prompt: 'Build the store', requestedBy: owner.principalId,
+      status: 'running', createdAt: Date.now(), startedAt: Date.now(), sessionId: 'browser-native-fixture',
+      policyVersion: Number(store.get<Room>('room', String(room.id))!.policyVersion) };
+    store.put('turn', turn.id, turn);
+    store.append(String(room.id), 'turn.queued', owner.principalId, { ...turn, status: 'queued' });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ roomId: room.id, hostPrincipal: host.principalId }));
+    return;
+  }
+  if (request.method === 'POST' && requestUrl.pathname === '/inbox') {
+    const roomId = requestUrl.searchParams.get('roomId') ?? '', principalId = requestUrl.searchParams.get('principal') ?? '';
+    const result = await runtime.core.dispatch({ kind: 'agent', principalId, ownerId: humanIdentity(runtime).ownerId }, 'room_inbox', { roomId });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(result));
+    return;
+  }
   if (request.method !== 'POST' || requestUrl.pathname !== '/pair') {
     response.writeHead(404).end();
     return;

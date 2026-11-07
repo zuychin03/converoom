@@ -30,6 +30,7 @@ import { MAX_SAVED_TEMPLATES, findTemplate, seatProfile, templateFromRoom, templ
 import { reworkNotes } from './rework.js';
 import { mountContexts, resolveRefs } from './contexts.js';
 import { applyGrantedPin, contextLayers, mountThreads, openThread } from './threads.js';
+import { DIRECTIVE_TOOLS, mountDirectives, withDirectives } from './directives.js';
 // Reads rerun on retry, so their results are never stored under a client key.
 export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
   'resource_profile_list', 'adapter_status', 'adapter_discover', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview', 'template_list',
@@ -584,6 +585,9 @@ export function createCore(store: Store): Core {
           settlePause(store, roomId);
           advanceTurnPolicies(store, roomId);
         }
+        // FR-65: an owner directive reaches an agent on its next Converoom read in a separate field.
+        if (a.kind === 'agent' && roomId && DIRECTIVE_TOOLS.has(n) && result && typeof result === 'object' && !Array.isArray(result))
+          return withDirectives(store, a, roomId, n, result as ToolArgs);
         return result;
       } catch (e) {
         // The refusal rolled back its own transaction, so the budget is recorded separately.
@@ -1225,5 +1229,6 @@ export function createCore(store: Store): Core {
   mountSharedArtefacts(c);
   mountContexts(c);
   mountThreads(c, (a, r, scope, summary) => requestPermission(store, a, r, 'context_pin', scope, summary));
+  mountDirectives(c, { queue: (a, r, s, x) => queueTurn(store, a, r, s, x), grant: (a, p) => { grantPermission(store, a, p); } });
   return c;
 }

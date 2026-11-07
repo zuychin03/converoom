@@ -1280,6 +1280,15 @@ textarea {
   color: var(--muted);
   font-size: var(--text-2xs);
 }
+.directive-delivery {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+.directive-note {
+  grid-column: 1 / -1;
+}
 .panel-subhead {
   margin: var(--space-4) 0 0;
 }

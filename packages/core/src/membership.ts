@@ -8,6 +8,7 @@ import {
 import { artefactMetadata } from './shared-artefacts.js';
 import { authority } from './audit.js';
 import { contextLayers } from './threads.js';
+import { withDirectives } from './directives.js';
 import { code, inline, time, transcriptMarkdown, TRANSCRIPT_FORMAT } from './transcript.js';
 import { scopeDigest, redactPublic, redactTransport } from '../../store/src/index.js';
 
@@ -76,6 +77,9 @@ const eventFields: Record<string, string[]> = {
   'thread.created': ['threadId', 'title', 'topic', 'seatIds', 'taskId'], 'thread.archived': ['threadId', 'summaryId'],
   'thread.summarized': ['summaryId', 'threadId', 'fromSeq', 'toSeq', 'agentWritten'],
   'context.pinned': ['pinId', 'text', 'threadId', 'sourceSeq'], 'context.unpinned': ['pinId'],
+  'directive.issued': ['directiveId', 'mode', 'threadId', 'seatIds'], 'directive.cleared': ['directiveId'],
+  'directive.delivered': ['directiveId', 'seatId', 'state'],
+  'turn.amended': ['turnId', 'continuationTurnId'],
 };
 export const SHARED_BYTES = 524288;
 const jsonBytes = (v: unknown) => Buffer.byteLength(JSON.stringify(v));
@@ -171,7 +175,8 @@ export async function sharedCommand(c: Core, a: Actor, roomId: string, generatio
     return bounded(redactTransport({ interactions: raw.interactions.filter((i) => own.has(String(i.recipientId))).slice(0, 100)
       .map((i) => select(i, ['id', 'roomId', 'senderId', 'recipientId', 'messageId', 'intent', 'status', 'hop', 'createdAt', 'turnId'])),
       turns: raw.turns.filter((t) => own.has(t.seatId)).slice(0, 100).map(sharedTurn),
-      room: sharedProjection(c, a, roomId).room, generation }), ['interactions', 'turns']);
+      room: sharedProjection(c, a, roomId).room, generation, ...((raw as ToolArgs).ownerDirectives ? { ownerDirectives: (raw as ToolArgs).ownerDirectives } : {}) }),
+    ['interactions', 'turns']);
   }
   if (name === 'room_read' || name === 'room_wait') {
     const until = Date.now() + (name === 'room_wait' ? Math.max(0, Math.min(30000, Number(x.timeoutMs ?? 20000))) : 0);
@@ -192,7 +197,7 @@ export async function sharedCommand(c: Core, a: Actor, roomId: string, generatio
           c.store.append(roomId, 'interaction.read', a.principalId, { interactionId: i.id });
         }
     }
-    return { layers, ...page };
+    return a.kind === 'agent' ? withDirectives(c.store, a, roomId, name, { layers, ...page }) : { layers, ...page };
   }
   const result = await c.dispatch(a, name, args);
   if (name === 'shared_artefact_get' || name === 'shared_artefact_list' || name === 'shared_artefact_publish' || name.startsWith('session_context_') || name === 'thread_list') return result;

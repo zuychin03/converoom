@@ -123,6 +123,10 @@ const SYSTEM_LABELS: Record<string, string> = {
   'thread.summarized': 'summary',
   'context.pinned': 'pinned',
   'context.unpinned': 'unpinned',
+  'directive.issued': 'directive',
+  'directive.cleared': 'directive cleared',
+  'directive.delivered': 'directive delivered',
+  'turn.amended': 'amended',
   'checkpoint.recorded': 'checkpoint',
   'checkpoint.unchanged': 'checkpoint',
   'checkpoint.skipped': 'checkpoint skipped',
@@ -608,6 +612,10 @@ export function RoomView({
             setView={setThreadView} summaries={state.threadSummaries.filter((s) => s.roomId === id)} openAction={openAction} />
         )}
         {!shared && (
+          <DirectivesPanel roomId={id} open={!ended} seats={seats} threads={threads}
+            directives={state.directives.filter((d) => d.roomId === id)} openAction={openAction} />
+        )}
+        {!shared && (
           <PinsPanel roomId={id} threads={threads} open={!ended} pins={state.pins.filter((p) => p.roomId === id && p.status === 'active')}
             openAction={openAction} />
         )}
@@ -810,6 +818,71 @@ function ThreadsPanel({
             ))}
           </ul>
         </>
+      )}
+    </section>
+  );
+}
+const DIRECTIVE_MODES: Record<string, string> = { steer_next: 'next turns', inject_mid_turn: 'mid-turn', interrupt_and_amend: 'interrupt and amend' };
+const DELIVERY: Record<string, [Kind, string]> = { queued: ['idle', 'Waiting'], delivered: ['ok', 'Delivered on a read'], applied: ['ok', 'In a turn'] };
+function DirectivesPanel({ roomId, open, seats, threads, directives, openAction }: {
+  roomId: string;
+  open: boolean;
+  seats: RecordData[];
+  threads: RecordData[];
+  directives: RecordData[];
+  openAction: (action: Action) => void;
+}) {
+  const recent = [...directives].sort((a, b) => (num(b, 'createdAt') ?? 0) - (num(a, 'createdAt') ?? 0)).slice(0, 5);
+  const live = threads.filter((t) => t.status === 'open');
+  const named = (id: string) => string(seats.find((s) => s.id === id) ?? {}, 'name', 'A seat');
+  return (
+    <section className="panel" aria-labelledby="directives-title">
+      <div className="panel-head">
+        <h2 className="section-label" id="directives-title">Directives</h2>
+        {open && seats.length > 0 && (
+          <button type="button" className="button small" onClick={() => openAction({
+            title: 'Barge in', command: 'room_barge_in', args: { roomId }, label: 'Send directive',
+            description: 'Each chosen seat receives your directive once: managed seats at the top of their next turn, and any seat on its next room read if you choose mid-turn delivery. Use Interrupt and amend on a running turn to stop it now.',
+            fields: [
+              { key: 'text', label: 'Directive', type: 'textarea', required: true },
+              { key: 'mode', label: 'Delivery', type: 'select', value: 'steer_next', required: true,
+                options: [{ value: 'steer_next', label: 'Before each seat\'s next turn' }, { value: 'inject_mid_turn', label: 'Mid-turn, on its next room read' }] },
+              ...(live.length ? [{ key: 'threadId', label: 'Only in thread', type: 'select' as const, placeholder: 'Whole room',
+                options: live.map((t) => ({ value: string(t, 'id'), label: string(t, 'title') })) }] : []),
+              { key: 'seatIds', label: 'Seats (all when none are chosen)', type: 'choices',
+                options: seats.filter((s) => s.role !== 'observer').map((s) => ({ value: string(s, 'id'), label: string(s, 'name') })) },
+            ],
+            prepare: ({ threadId, seatIds, ...rest }) => ({ ...rest, ...(threadId ? { threadId } : {}),
+              ...(Array.isArray(seatIds) && seatIds.length ? { seatIds } : {}) }),
+          })}>Barge in</button>
+        )}
+      </div>
+      {recent.length === 0 ? (
+        <p className="rail-note">Barge in to steer agents mid-session. You see here when each seat received your directive.</p>
+      ) : (
+        <ul className="context-list">
+          {recent.map((d) => (
+            <li key={string(d, 'id')}>
+              <span className="context-title">{string(d, 'text')}</span>
+              <span className="context-meta">
+                {DIRECTIVE_MODES[string(d, 'mode')] ?? string(d, 'mode')} · {d.status === 'active' ? 'active' : d.status === 'done' ? 'delivered to every seat' : 'cleared'}
+              </span>
+              {open && d.status === 'active' && (d.mode !== 'interrupt_and_amend' || typeof d.note === 'string') && (
+                <button type="button" className="text-button" onClick={() => openAction({
+                  title: 'Clear directive', command: 'directive_clear', args: { roomId, directiveId: d.id }, label: 'Clear directive',
+                  confirm: 'Seats that have not received it yet will not get it.',
+                })}>Clear</button>
+              )}
+              {typeof d.note === 'string' && <span className="context-meta directive-note">{d.note}</span>}
+              <span className="directive-delivery">
+                {Object.entries(isRecord(d.delivery) ? d.delivery : {}).map(([seatId, v]) => {
+                  const [kind, label] = DELIVERY[string(isRecord(v) ? v : {}, 'state')] ?? ['idle', 'Waiting'];
+                  return <Status key={seatId} kind={kind}>{named(seatId)} · {label}</Status>;
+                })}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );
@@ -1505,6 +1578,17 @@ function describe(event: RecordData, ctx: EntryContext): EntryView {
                 Cancel turn
               </button>
             )}
+            {current && !ctx.shared && seat?.mode === 'managed' && !turn.remoteProposalId && ['dispatching', 'running'].includes(statusText) && (
+              <button type="button" className="text-button" onClick={() => ctx.openAction({
+                title: 'Interrupt and amend', command: 'turn_amend', args: { roomId: ctx.room.id, turnId: turn.id }, label: 'Interrupt and amend',
+                description: 'Asks the agent to stop this turn. Once it confirms the stop, a continuation runs with your instruction at the top and the earlier task below it; confirming here approves that continuation. If the stop is not confirmed, nothing runs and your instruction waits for the seat\'s next turn.',
+                fields: [{ key: 'text', label: 'Instruction', type: 'textarea', required: true },
+                  ...(turn.attemptId ? [{ key: 'rollback', label: 'Roll the clone back to its last checkpoint first', type: 'checkbox' as const }] : [])],
+                prepare: ({ rollback, ...rest }) => (rollback === true ? { ...rest, rollback } : rest),
+              })}>
+                Interrupt and amend
+              </button>
+            )}
             {current && statusText === 'cancelling' && seat?.mode === 'managed' && (
               <button
                 type="button"
@@ -1707,6 +1791,14 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `Pinned · ${string(d, 'text')}${d.requestId ? ' · approved host proposal' : ''}`;
     case 'context.unpinned':
       return 'Pin removed';
+    case 'directive.issued':
+      return `Owner directive · ${DIRECTIVE_MODES[string(d, 'mode')] ?? string(d, 'mode')} · ${string(d, 'text')}`;
+    case 'directive.cleared':
+      return 'Owner directive cleared';
+    case 'directive.delivered':
+      return `Directive reached ${seat(d.seatId)} · ${d.state === 'applied' ? 'in a turn' : 'on a read'}`;
+    case 'turn.amended':
+      return 'Turn interrupted and amended · continuation queued with your approval';
     case 'context.imported':
       return `Imported ${string(d, 'ref')} · ${string(d, 'title')} · ${string(d, 'product')} · ${fmtBytes(num(d, 'bytes') ?? 0)}`;
     case 'candidate.exported':

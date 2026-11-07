@@ -181,6 +181,8 @@ export interface Turn {
   contextRefs?: { ref: string; digest: string }[];
   // FR-64: the sub-thread whose messages form this turn's recent-message layer.
   threadId?: string;
+  // FR-65: the owner directive interrupting this turn, whose continuation starts once the stop is confirmed.
+  amendDirectiveId?: string;
 }
 // FR-57: `side` names the file version the lines belong to; `digest` is that version's content digest.
 export interface ReviewAnnotation {

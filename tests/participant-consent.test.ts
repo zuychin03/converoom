@@ -478,3 +478,13 @@ it('gives shared participants the pinned and summary layers through room_read', 
   expect(page.layers).toMatchObject({ objective: 'Participant-local authority', pins: [{ text: 'Public invariant' }], summaries: [] });
   expect((page.events as ToolArgs[]).some((e) => e.type === 'context.pinned')).toBe(true);
 });
+it('delivers the room owner\'s directive to a participant\'s agent on its shared room read', async () => {
+  const d = await call(host, 'room_barge_in', { roomId: room.id, text: 'Summarise before you answer', mode: 'inject_mid_turn', seatIds: [seat.id] }) as ToolArgs;
+  await expect(call(host, 'room_barge_in', { roomId: room.id, text: 'Mine' }, remoteB)).rejects.toThrow();
+  const agent: Actor = { kind: 'agent', principalId: seat.principalId, ownerId: seat.ownerId };
+  const page = await sharedCommand(host.core, agent, room.id, member.generation, 'room_read', { roomId: room.id, cursor: 0, limit: 5 }) as ToolArgs;
+  expect(page.ownerDirectives).toMatchObject([{ id: d.id, text: 'Summarise before you answer', from: 'room owner' }]);
+  const again = await sharedCommand(host.core, agent, room.id, member.generation, 'room_read', { roomId: room.id, cursor: 0, limit: 5 }) as ToolArgs;
+  expect(again.ownerDirectives).toBeUndefined();
+  expect(host.core.store.get<ToolArgs>('directive', String(d.id))).toMatchObject({ status: 'done' });
+});

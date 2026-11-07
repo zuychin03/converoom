@@ -496,6 +496,44 @@ test('approves a host pin, runs a thread, pins a message and archives the thread
   expect(errors).toEqual([]);
 });
 
+test('barges in with a directive, sees it delivered per seat and interrupts a running turn with an amendment at desktop and mobile', async ({ page, request }, info) => {
+  const errors: string[] = [];
+  watch(page, errors);
+  const code = (await (await request.post('http://127.0.0.1:43318/pair')).json()).code;
+  const title = 'Barge room ' + info.project.name;
+  const fixture = await (await request.post('http://127.0.0.1:43318/barge?title=' + encodeURIComponent(title))).json();
+  await page.goto('/');
+  await page.getByLabel('Pairing code').fill(code);
+  await page.getByRole('button', { name: 'Connect to Converoom' }).click();
+  await expect(page.getByRole('heading', { name: title })).toBeVisible();
+  const panel = page.getByRole('region', { name: 'Directives', exact: true });
+  await panel.getByRole('button', { name: 'Barge in' }).click();
+  const barge = page.getByRole('dialog', { name: 'Barge in' });
+  await barge.getByLabel(/^Directive/).fill('Use Postgres, not SQLite');
+  await axe(page);
+  await barge.getByRole('button', { name: 'Send directive', exact: true }).click();
+  await expect(barge).toBeHidden();
+  await expect(panel.getByText('Use Postgres, not SQLite')).toBeVisible();
+  await expect(panel.getByText('Host · Waiting')).toBeVisible();
+  await expect(panel.getByText('Worker · Waiting')).toBeVisible();
+  const inbox = await (await request.post(`http://127.0.0.1:43318/inbox?roomId=${fixture.roomId}&principal=${fixture.hostPrincipal}`)).json();
+  expect(inbox.ownerDirectives).toMatchObject([{ text: 'Use Postgres, not SQLite', from: 'room owner' }]);
+  await expect(panel.getByText('Host · Delivered on a read')).toBeVisible();
+  const entry = page.getByRole('list', { name: 'Room catalogue' }).getByRole('listitem').filter({ hasText: 'Build the store' });
+  await entry.getByRole('button', { name: 'Interrupt and amend' }).click();
+  const amend = page.getByRole('dialog', { name: 'Interrupt and amend' });
+  await amend.getByLabel(/^Instruction/).fill('Write the tests first');
+  await axe(page);
+  await amend.getByRole('button', { name: 'Interrupt and amend', exact: true }).click();
+  await expect(amend).toBeHidden();
+  await expect(panel.getByText('Write the tests first')).toBeVisible();
+  await expect(panel.getByText(/interrupt and amend · active/)).toBeVisible();
+  expect(await panel.evaluate((s) => s.scrollWidth <= s.clientWidth)).toBe(true);
+  await axe(page);
+  await panel.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-directives.png' });
+  expect(errors).toEqual([]);
+});
+
 test('creates rooms from templates and sets seat models and efforts at desktop and mobile', async ({ page, request }, info) => {
   const errors: string[] = [];
   watch(page, errors);

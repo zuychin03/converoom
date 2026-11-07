@@ -33,6 +33,7 @@ import {
 import { attemptTree } from '../../../packages/workspace/src/checkpoints.js';
 import { prepareImport, storeContext } from '../../../packages/core/src/contexts.js';
 import { contextPacket } from '../../../packages/core/src/threads.js';
+import { applyDirectives, holdAmendment, turnDirectives, type Directive } from '../../../packages/core/src/directives.js';
 import { CODEX_THREAD_READ_VERIFIED, codexThreadExcerpt, codexThreads } from '../../../packages/adapters/src/codex-read.js';
 import {
   startManaged,
@@ -259,7 +260,9 @@ export async function createRuntime(
       });
       const room = store.get<Room>('room', t.roomId)!;
       // A remote proposal already carries the shared room's objective and context; the local proxy room has neither.
-      const prompt = t.remoteProposalId ? t.prompt : contextPacket(store, room, t);
+      const directives = t.remoteProposalId ? [] : turnDirectives(store, t);
+      const prompt = t.remoteProposalId ? t.prompt : contextPacket(store, room, t, directives);
+      applyDirectives(store, t, directives);
       const frozen = store.get<{ policy: ToolArgs }>(
         'policy',
         room.id + ':' + t.policyVersion,
@@ -341,7 +344,8 @@ export async function createRuntime(
         ...(unpublished ? { retainedAnswer: retainAnswer(unpublished) } : {}),
       });
       emit(t, 'turn.' + status, { turnId: t.id, error: message, failure, ...(unpublished ? { answerRetained: true } : {}) });
-      if (attempt) {
+      // An amended coding turn whose cancel was confirmed keeps its attempt for the continuation.
+      if (attempt && !(status === 'cancelled' && current.amendDirectiveId)) {
         store.put('attempt', attempt.id, {
           ...store.get<Attempt>('attempt', attempt.id)!,
           status: 'quarantined',
@@ -357,7 +361,8 @@ export async function createRuntime(
       store.put('seat', s.id, { ...seat, status: seat.status === 'left' ? 'left' : confirmed ? 'idle' : 'degraded' });
       if (attempt && confirmed) {
         const current = store.get<Attempt>('attempt', attempt.id)!;
-        const completed = store.get<Turn>('turn', t.id)?.status === 'completed';
+        const ended = store.get<Turn>('turn', t.id);
+        const completed = ended?.status === 'completed' || (ended?.status === 'cancelled' && !!ended.amendDirectiveId);
         const submissionDeadline = Date.now() + 1800000;
         store.put('attempt', attempt.id, { ...current, processStoppedAt: Date.now(),
           ...(completed ? { status: 'checkpointing', submissionDeadline,
@@ -381,7 +386,24 @@ export async function createRuntime(
       }
       if (credentialCleanupFailed)
         emit(t, 'bridge.cleanup_needed', { turnId: t.id, repair: 'Inspect the inactive bridge credential file' });
+      const amended = store.get<Turn>('turn', t.id)!;
+      if (amended.amendDirectiveId) await continueAmendment(amended, confirmed && amended.status === 'cancelled');
       active.delete(t.id);
+    }
+  };
+  // FR-65: an amendment rolls back and continues only after the vendor confirmed the cancel and the worker stop was recorded.
+  const continueAmendment = async (t: Turn, confirmedStop: boolean) => {
+    const d = store.get<Directive>('directive', t.amendDirectiveId!);
+    if (!d || d.status !== 'active' || d.mode !== 'interrupt_and_amend') return;
+    if (!confirmedStop) return holdAmendment(store, d.id, 'The interrupted turn did not confirm its stop; inspect it before anything runs');
+    const owner: Actor = { kind: 'human', principalId: d.createdBy, ownerId: d.ownerId };
+    try {
+      if (d.rollback !== undefined && t.attemptId)
+        await core.dispatch(owner, 'attempt_rollback', { roomId: t.roomId, attemptId: t.attemptId, checkpoint: d.rollback, confirm: true,
+          reason: 'The owner amended the interrupted turn and rolled back what it changed', clientKey: 'amend-rollback:' + d.id });
+      await core.dispatch(owner, 'turn_amend_continue', { directiveId: d.id, clientKey: 'amend:' + d.id });
+    } catch (e) {
+      holdAmendment(store, d.id, 'The continuation could not start: ' + redactPublic(e instanceof Error ? e.message : 'unknown error'));
     }
   };
   const tick = async () => {
