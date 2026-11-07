@@ -1567,12 +1567,14 @@ export function mountWorkspace(
         return;
       }
       const { record, pruned } = await checkpoints.prepare(at, turnId, current, base);
-      settle({ treeDigest: current.digest, checkpointSeq: record.seq },
+      // The attempt stays checkpointing until pruned files are gone, so completed means its storage is settled.
+      settle({ treeDigest: current.digest, checkpointSeq: record.seq, status: 'checkpointing' },
         record.status === 'kept' ? 'checkpoint.recorded' : 'checkpoint.skipped',
         { checkpoint: record.seq, treeDigest: current.digest,
           ...(record.status === 'kept' ? { newBytes: record.newBytes, pruned: pruned.map((c) => c.seq) } : { reason: record.reason }) },
         [record, ...pruned.map((c) => ({ ...c, status: 'pruned' as const, prunedAt: Date.now(), reason: 'limit' }))]);
       await checkpoints.collect(at, base).catch(() => undefined);
+      s.put('attempt', at.id, { ...get<Attempt>('attempt', at.id), status: 'completed' });
     } catch (error) {
       const seq = (checkpoints.list(at.roomId, at.id).at(-1)?.seq ?? 0) + 1;
       const reason = error instanceof E ? error.code : 'checkpoint_failed';

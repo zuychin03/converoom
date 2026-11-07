@@ -3,11 +3,11 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "e1698adfdae21e4aea71a07e8970ea64beb1f48ed1477318af045a3280591ac5"
+      "sha256": "e4e38b3872ae5cd00bb06a8d346a1b57a7ebb35466287ac30ae596878fce3f1b"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "261bfd96e514e04cbb8bb28f85df41d12e0eea8c7c68178b4e375d9252d132cb"
+      "sha256": "0fc92e30eff11b34c31ac22c07ae1ec28aa7071a0a92d7ef0fd5046f59cd4d91"
     },
     {
       "path": "dist/server.js",
