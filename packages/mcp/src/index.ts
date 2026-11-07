@@ -17,7 +17,7 @@ export async function serveMcp(
   const credential = await readCredential<{ token: string; principalId: string; scope?: ManagedScope; remoteConnectionId?: string }>(
     credentialFile ?? join(dataDir, 'clients', client + '.json'));
   const server = new Server(
-    { name: 'converoom', version: '0.2.0' },
+    { name: 'converoom', version: '0.3.0' },
     { capabilities: { tools: {}, resources: {}, prompts: {} } },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({

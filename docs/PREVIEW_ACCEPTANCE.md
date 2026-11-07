@@ -1,6 +1,14 @@
 # Windows preview acceptance
 
-10/10/2026. Converoom 0.2.0 is the Windows V1.1 preview. It is not full V1/V1.1 certification. The public [requirement matrix](REQUIREMENT_MATRIX.md) preserves all 80 requirements and the remaining gates. The full implementation specification is local-only.
+08/11/2026. Converoom 0.3.0 is the Windows V1.2 preview. It is not full V1, V1.1 or V1.2 certification. The public [requirement matrix](REQUIREMENT_MATRIX.md) preserves all 97 requirements and the remaining gates. The full implementation specification is local-only. Sections from earlier previews are kept below as history.
+
+## V1.2 local evidence
+
+The V1.2 requirements (FR-55 to FR-58, FR-61 to FR-66 and NFR-19) are locally implemented, each with red/green fixture tests in which vendor sessions are protocol fixtures. Exact-commit Windows CI run 42390392139 on 94de264, the last feature commit, passed typecheck, lint, build, 533 tests in 55 files, twenty desktop and 360 px browser flows with axe and overflow checks, the package check, the release manifest and the Windows bundle smoke.
+
+Live vendor evidence for V1.2 comes from two checks. On 29/10/2026 discovery ran once against the agents installed on the reference machine, without inference or sign-in. On 07/11/2026 a read-only Codex check (codex-cli 0.164.0) confirmed that thread/read and thread/items/list return history without loading the thread or starting a turn, so Codex history import is on. No managed coding turn, cancellation, quota failure, amendment or takeover has run against a live vendor.
+
+Packed checks on 08/11/2026 used Node 24.21.0 and npm 11.8.0 with an empty npm cache and temporary prefixes and data folders. A plain `npm install --global` of the 0.3.0 tarball, without `--ignore-scripts`, installed 163 packages and ran. The npx path ran `converoom setup`. A 0.2.0 package built from 94de264 set up a data folder, connected a fixture Cursor configuration and stored a room message. `converoom upgrade` from the 0.3.0 package made a pre-upgrade backup, switched to 0.3.0 and pointed Cursor at the new runtime while keeping the file's other settings. The 0.3.0 runtime read the 0.2.0 message, returned the V1.2 context layers and listed threads. `converoom recover --rollback` returned to 0.2.0 without `--confirm`, since the store format is unchanged, and 0.2.0 read the messages from both versions. The tarball holds 37 files and no private paths. This was not a fresh-machine or fresh-user run.
 
 ## Agent and installation expansion evidence
 
@@ -86,11 +94,11 @@ Both desktop and 360 px mobile browser lifecycle cases pass, including retained-
 
 Actual Claude Code and OpenCode MCP acceptance remains unverified. As directed on 09/10/2026, Windows x64 is the only current verification/release target. ARM64 macOS and Linux acceptance are deferred until hardware is available, and their support is not advertised. The current CLI refuses unsupported preview platforms. Full managed permission, cooperative cancellation, provider/session recovery and quota exhaustion still require Windows live evidence.
 
-The Windows bundle provides one-run prerequisite installation and guided local onboarding, with native login remaining in the vendor clients. A fully interactive account/setup wizard and three fresh-user onboarding timings remain open. Installer fixtures, local npm/npx, upgrade/downgrade and partial-install results are recorded separately from fresh-machine acceptance. npm registry publication has not been requested.
+The Windows bundle provides one-run prerequisite installation and guided local onboarding, with native login remaining in the vendor clients. A fully interactive account/setup wizard and three fresh-user onboarding timings remain open. Installer fixtures, local npm/npx, upgrade/downgrade and partial-install results are recorded separately from fresh-machine acceptance. From 0.3.0, publishing a GitHub release runs the publish workflow. It checks that the release tag matches the package version and that the tagged commit passed the Windows preview checks, attaches the Windows bundle to the release and publishes to npm with provenance under the `preview` tag.
 
 Capacity admission and disk/memory/CPU pressure remain open. The reference-load acknowledgement and update latency targets were met on the Windows reference machine. The combined resident-memory target is accepted on the Windows reference machine; headed browsers and other hardware are unmeasured. Source executable-mode behaviour on Windows, path-transition races, read-only private-backup restoration and adversarial resource-exhaustion acceptance need broader tests. Authority audit records now have fixture coverage for every permission, consent, policy, host, membership, connection and credential change, including pairing; release acceptance of that audit remains open.
 
-Quarantined or uncertain work is retained for inspection. Automatic resource recycling and complete rework/reassignment recovery are not yet accepted. Private shared human memberships are implemented behind explicit setup; real multi-machine acceptance is pending. Hosted services, cloud connectors, distributed coding workers and interactive previews remain deferred.
+Quarantined or uncertain work is retained for inspection. Automatic resource recycling is not yet accepted, and request reassignment and coding takeover have fixture evidence only. Private shared human memberships are implemented behind explicit setup; real multi-machine acceptance is pending. Hosted services, cloud connectors, distributed coding workers and interactive previews remain deferred.
 
 ## Reproduce local checks
 

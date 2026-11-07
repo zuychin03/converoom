@@ -19,7 +19,7 @@ import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { createServer, humanIdentity, issueBridgeCredential } from '../apps/daemon/src/server.js';
 import { main } from '../apps/cli/src/index.js';
 import { autoConnectable, discoveryFile } from '../apps/cli/src/discovery.js';
-import { editConfig, mcpArgs, privateJson, registeredEntry } from '../apps/cli/src/support.js';
+import { editConfig, mcpArgs, privateJson, registeredEntry, VERSION } from '../apps/cli/src/support.js';
 import { TOOL_DEFINITIONS } from '../packages/mcp/src/tools.js';
 
 let dir: string;
@@ -100,7 +100,7 @@ it('connects installed agents that are not yet connected, keeping existing conne
     expect(result).toMatchObject({ connected: ['cursor', 'claude'], alreadyConnected: ['codex'], failed: [] });
     expect((result as { notInstalled: string[] }).notInstalled.sort()).toEqual(['antigravity', 'grok', 'kiro', 'opencode', 'qoder']);
     expect(JSON.parse(await readFile(cursorConfig, 'utf8'))).toMatchObject({ setting: 'preserve', mcpServers: { other: { command: 'other' } } });
-    expect((await registeredEntry('cursor', cursorConfig))?.args).toEqual(mcpArgs(join(dataDir, 'runtime', '0.2.0', 'dist', 'cli.js'), 'cursor', dataDir, false));
+    expect((await registeredEntry('cursor', cursorConfig))?.args).toEqual(mcpArgs(join(dataDir, 'runtime', VERSION, 'dist', 'cli.js'), 'cursor', dataDir, false));
     expect(existsSync(join(home, '.claude', 'skills', 'converoom-room', 'SKILL.md'))).toBe(true);
     expect(JSON.parse(await readFile(join(dataDir, 'clients', 'codex.json'), 'utf8'))).toMatchObject({ principalId: existing.principalId });
     const latest = JSON.parse(await readFile(discoveryFile(dataDir), 'utf8')) as Discovery;

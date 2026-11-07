@@ -41,7 +41,7 @@ const proposalAuthority = (t: Turn, c: RemoteConnection) => scopeDigest({ sender
   membershipGeneration: t.membershipGeneration ?? null, requesterMembershipGeneration: t.requesterMembershipGeneration ?? null,
   maxTurnMs: t.maxTurnMs ?? null, ownerConsentDigest: t.ownerConsentDigest ?? '' });
 export async function connectRoom(connection: RemoteConnection, credentials: RemoteCredentials, fetchImpl: FetchLike = fetch): Promise<RemoteTransport> {
-  const fetcher = pinnedFetch(connection.origin, fetchImpl), sdk = new Client({ name: 'converoom-participant', version: '0.2.0' });
+  const fetcher = pinnedFetch(connection.origin, fetchImpl), sdk = new Client({ name: 'converoom-participant', version: '0.3.0' });
   await sdk.connect(new StreamableHTTPClientTransport(new URL(connection.origin + '/mcp'), {
     fetch: fetcher, requestInit: { headers: { authorization: 'Bearer ' + credentials.accessToken } },
     reconnectionOptions: { maxRetries: 0, maxReconnectionDelay: 30000, initialReconnectionDelay: 1000, reconnectionDelayGrowFactor: 1.5 },

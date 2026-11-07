@@ -6,7 +6,7 @@ Converoom runs a loopback daemon and browser UI on your computer. Existing Claud
 
 ## Current status
 
-The 0.2.0 Windows V1.1 preview adds private shared discussion and review. Safety prerequisites, membership, private transport, participant-local consent, scoped artefacts and the complete browser workflow are locally implemented (P0 through P5). P6 has local package evidence; the real two-Windows pilot, live-client acceptance, fresh-user onboarding and manual accessibility remain pending. This is a preview, not full V1/V1.1 acceptance.
+The 0.3.0 Windows V1.2 preview adds iterative coding and workflow presets to the V1.1 private shared rooms: finding and connecting installed agents, opt-in auto-start from an agent's chat, room templates, each seat's model and effort, coding attempts over several turns with checkpoints and rollback, line comments in reviews, export to a local branch with a PR brief, imported conversation context, threads and pins, owner barge-in, and handing stalled work to another seat. These have fixture tests and pass Windows CI. Live vendor acceptance for them (apart from Codex history reads), the real two-Windows pilot, fresh-user onboarding and manual accessibility remain pending. This is a preview, not full V1, V1.1 or V1.2 acceptance.
 
 Shared access is disabled by default and requires explicit private HTTPS setup. Windows 11 x64 and Node 24 are the only verification and release target. macOS and Linux support is deferred until those platforms can be tested. See the [architecture](docs/ARCHITECTURE.md), [preview evidence](docs/PREVIEW_ACCEPTANCE.md), [requirement matrix](docs/REQUIREMENT_MATRIX.md) and [Windows pilot guide](docs/WINDOWS_SHARED_PILOT.md).
 
@@ -48,16 +48,15 @@ Sign in through your native vendor client beforehand. Doctor starts no model inf
 
 For a fresh Windows machine, use the [one-run Windows bundle](docs/WINDOWS_INSTALL.md). It includes the pinned Node runtime and production dependencies. The installer installs missing Git, Tailscale and the selected supported native agents, creates launchers, registers MCP/skills and opens the local room UI. Account sign-in remains in Tailscale and the vendor clients. Shared HTTPS activation is explicit.
 
-Registry publication is a separate release action. Until published, install the packed artefact:
+The preview is published to npm under the `preview` tag:
 
 ```sh
-npm pack
-npm install --global --ignore-scripts ./converoom-cli-0.2.0.tgz
+npm install --global --ignore-scripts @converoom/cli@preview
 converoom setup
 converoom start
 ```
 
-Or use `npx --ignore-scripts --package ./converoom-cli-0.2.0.tgz converoom setup`. Setup copies the compiled runtime and production dependencies into the stable application-data directory. MCP registrations point there, not at an npm cache. No pnpm or compiler is needed to run a supported packed release; the Windows supervisor prebuild is included. npm scope ownership must be confirmed before registry publication.
+Or use `npx --ignore-scripts --package @converoom/cli@preview converoom setup`. Setup copies the compiled runtime and production dependencies into the stable application-data directory. MCP registrations point there, not at an npm cache. No pnpm or compiler is needed to run a supported packed release; the Windows supervisor prebuild is included. Releases are published from GitHub Actions with npm provenance, which `npm audit signatures` checks. To install from a checkout instead, run `npm pack` and install `./converoom-cli-0.3.0.tgz` the same way.
 
 ### Upgrade, recover and uninstall
 

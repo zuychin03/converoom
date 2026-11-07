@@ -3,19 +3,19 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "968386174d2bb55cc755e2387031997348fac94838cf01b69ac254113dedd334"
+      "sha256": "6aa63155b3608cf143587985346f78fbef7f991e74928e0cb57cc562e91dd266"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "73ce603217c529dd6f962ae34da9aeb8073688bab72dff331d4d7496f4df7914"
+      "sha256": "b9f626bf22d31496549e69f4669b55ef1601217756a4601d3f06cecbe4ddf20f"
     },
     {
       "path": "dist/server.js",
-      "sha256": "5982fc01507bfc3eceedbee4e55c08f83596e552dca7c0a484ea8372dd8f7d77"
+      "sha256": "7b40f64d68bb31a744a5cb6cec74590669ec3ecbdbb104ef502747fd03bf3d82"
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "13d6b1f6d2310b3ecbb9934a699030678ffff2d0ea72dc0b9f559c3f1d04b201"
+      "sha256": "e340bd97cb97d47a78a86998957ca7e548c77489fa6e330f9dd63015f7634150"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -83,15 +83,15 @@
     },
     {
       "path": "README.md",
-      "sha256": "a5468b980afd244e954942d98af4056da0e9ea3c38d1bb1f2975f7921ffec16f"
+      "sha256": "c48d5bb226a0c10ce33cf22ebe391628ffcb4aed9479aee20755a260fb565275"
     },
     {
       "path": "docs/WINDOWS_SHARED_PILOT.md",
-      "sha256": "d691f9949f5add1f78b8724cd6ded3fcccb151a7bddf756959391ebea99c6963"
+      "sha256": "254f00a7b16bd81ddca91c59fc61d7918a9cfec07c852078ca04e54e0b2cf4b9"
     },
     {
       "path": "docs/PREVIEW_ACCEPTANCE.md",
-      "sha256": "f77ad39caf321f8027b3b1156f28ef31de2f2ff3909e4f8ad5d25a6376c64a64"
+      "sha256": "21e8d2d3a0e3760a4546fb43c9b3a8cc6c1525415431f83c7d4219c8879577b3"
     },
     {
       "path": "docs/AGENT_SUPPORT.md",
@@ -99,11 +99,11 @@
     },
     {
       "path": "docs/REQUIREMENT_MATRIX.md",
-      "sha256": "4aa9ea9cb45ae0a744c0931c436b4aa220d6055ebe34767b0aef83e28e216ddf"
+      "sha256": "75fad13223a4dae513c01c11cf080e2a3ffa082237772b1da67e77a10cdc3167"
     },
     {
       "path": "docs/WINDOWS_INSTALL.md",
-      "sha256": "258bcb2e6d0f7540fbbc86055a3b92e99e0fdf2fbc58e20e4321112cb6c65c67"
+      "sha256": "0fd5cdb35c44f6905e0c3d8f1a3bc51c60103cd446705eb818b4efe7a49e4377"
     },
     {
       "path": "scripts/install-windows.ps1",
@@ -114,7 +114,7 @@
       "sha256": "2e136654be34a48cd8893801e744349b45314381eaf8685311972bd931c48334"
     }
   ],
-  "version": "0.2.0",
+  "version": "0.3.0",
   "date": "10/10/2026",
   "status": "Windows V1.1 preview; real shared-room pilot and mandatory acceptance gates remain open",
   "supportedPreview": {
@@ -123,7 +123,7 @@
     "node": "24.21.0"
   },
   "lockfile": "npm-shrinkwrap.json",
-  "lockfileSha256": "dfac11faff2f6f3c831eb438b209b0f4679ef51a507784303418aa422b630ed0",
+  "lockfileSha256": "c52c41c5fff9efa42c8702e23c7ac54b9ec9f9ac08fbb7224ff12df4bb07ff0f",
   "native": [
     {
       "path": "native/bin/win32-x64/converoom-supervisor.exe",

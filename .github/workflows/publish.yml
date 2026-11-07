@@ -1,0 +1,46 @@
+name: Publish release
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.21.0
+          cache: npm
+          cache-dependency-path: npm-shrinkwrap.json
+          registry-url: https://registry.npmjs.org
+      - name: Require the tag to match the version and its commit to have passed the preview checks
+        shell: bash
+        run: |
+          test "$TAG" = "v$(node -p "require('./package.json').version")"
+          passed=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow windows-preview.yml --commit "$(git rev-parse HEAD)" --event push --status success --json databaseId --jq length)
+          test "$passed" -gt 0
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: npm run pack:check
+      - run: npm run release:manifest
+      - run: npm run bundle:windows
+      - run: npm run bundle:smoke
+      - name: Attach the Windows bundle
+        shell: bash
+        run: gh release upload "$TAG" .artifacts/windows-bundle/build-*/converoom-*-windows-x64.zip --repo "$GITHUB_REPOSITORY" --clobber
+      # NPM_TOKEN is only needed until the package's trusted publisher is set up on npmjs.com.
+      - run: npm publish --provenance --access public --tag preview
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

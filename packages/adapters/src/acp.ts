@@ -116,7 +116,7 @@ export async function startAcp(
   try {
     const initParams: acp.InitializeRequest = {
       protocolVersion: acp.PROTOCOL_VERSION,
-      clientInfo: { name: 'converoom', version: '0.2.0' }, clientCapabilities: workspace.capabilities,
+      clientInfo: { name: 'converoom', version: '0.3.0' }, clientCapabilities: workspace.capabilities,
     };
     const init = await bounded(connection.agent.request(acp.methods.agent.initialize, initParams), 60000);
     if (init.protocolVersion !== acp.PROTOCOL_VERSION)

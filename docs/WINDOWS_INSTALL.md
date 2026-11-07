@@ -1,10 +1,10 @@
 # Windows installation bundle
 
-10/10/2026. Windows 11 x64 preview. Use 64-bit Windows PowerShell 5.1 or PowerShell 7. The default installer installs Converoom, a private Node 24.21.0 runtime, missing Git and Tailscale, and Codex when missing. No existing Node, npm, repository checkout, native compiler or application build is needed.
+08/11/2026. Windows 11 x64 preview, package 0.3.0. Use 64-bit Windows PowerShell 5.1 or PowerShell 7. The default installer installs Converoom, a private Node 24.21.0 runtime, missing Git and Tailscale, and Codex when missing. No existing Node, npm, repository checkout, native compiler or application build is needed.
 
 ## Install in one run
 
-Download the `converoom-windows-x64` artefact from a successful [Windows preview workflow](https://github.com/zuychin03/converoom/actions/workflows/windows-preview.yml). Check its source commit matches the version you want. Extract the artefact and its contained `converoom-0.2.0-windows-x64.zip` into a local folder. Review this guide and `install.ps1`, then open PowerShell in the extracted bundle directory:
+Download `converoom-0.3.0-windows-x64.zip` from the [0.3.0 release](https://github.com/zuychin03/converoom/releases/tag/v0.3.0) and extract it into a local folder. For a development build, download the `converoom-windows-x64` artefact from a successful [Windows preview workflow](https://github.com/zuychin03/converoom/actions/workflows/windows-preview.yml) instead, check its source commit matches the version you want, and extract the artefact and the bundle zip inside it. Review this guide and `install.ps1`, then open PowerShell in the extracted bundle directory:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1

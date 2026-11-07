@@ -2,7 +2,7 @@
 
 25/10/2026. All 97 requirements are retained (including V1.2 FR-55–58, FR-61–66, NFR-19, V1.3 FR-59–60, NFR-20 and V1.4 FR-40, FR-67–68, IF-09). Automated fixtures, available live vendor checks and package tests provide bounded evidence, not blanket acceptance. The full V1 gates stay open for the Windows preview. Update this matrix requirement by requirement when each full acceptance condition has evidence. The complete implementation specification is local-only.
 
-Current release scope is Windows x64 only, as directed on 09/10/2026. macOS/Linux requirements are retained for future verification, but do not block the Windows-only preview. V1.1 private shared discussion is locally implemented in the 0.2.0 preview. Membership/owner isolation, PKCE, participant-local approvals, scoped state/streams, reviewed artefacts and recovery have fixture evidence. The real two-Windows pilot and applicable V1 gates remain open; implementation does not imply full acceptance.
+Current release scope is Windows x64 only, as directed on 09/10/2026. macOS/Linux requirements are retained for future verification, but do not block the Windows-only preview. V1.1 private shared discussion is locally implemented in the 0.2.0 preview, and the V1.2 requirements in the 0.3.0 preview. Membership/owner isolation, PKCE, participant-local approvals, scoped state/streams, reviewed artefacts and recovery have fixture evidence. The real two-Windows pilot and applicable V1 gates remain open; implementation does not imply full acceptance.
 
 The agent expansion adds Antigravity, Kiro, Qoder and Grok Build to FR-01/05/11/28/29/30/32/33. All eight MCP identities and the six managed wire profiles have local fixture coverage. This retains the existing roster/authority limits and does not close those requirements' vendor acceptance gates. See [agent support](AGENT_SUPPORT.md) for the implemented routes and pending live checks.
 
@@ -57,7 +57,7 @@ The agent expansion adds Antigravity, Kiro, Qoder and Grok Build to FR-01/05/11/
 | FR-47 | Open V1 acceptance | Final candidate checks shall use a fresh workspace/resource bundle with evidence bound to exact content, profile and environment manifest. |
 | FR-48 | Conditional, previews disabled | Preview services shall have owned lifetimes, bounded retention and tested separation from human approval credentials. |
 | FR-49 | Open V1 acceptance | Every execution profile shall distinguish verified configuration from enforced containment. |
-| FR-50 | Open V1 acceptance | A public open-source release shall support local npm and npx installation from versioned compiled packages. |
+| FR-50 | Release workflow publishes to npm with provenance from 0.3.0; local packed npm and npx installs pass; clean-machine acceptance open | A public open-source release shall support local npm and npx installation from versioned compiled packages. |
 | FR-51 | Windows bundle locally implemented; fresh-user acceptance open | Guided setup shall detect prerequisites, select subscription profiles, register vendor tools/skills and verify a first room. |
 | FR-52 | Open V1 acceptance | Runtime, plugin assets and persistent room data shall survive npm/npx bootstrap cache loss and version changes. |
 | FR-53 | Open V1 acceptance | Managed V1 profiles shall use supported native subscription access, leaving vendor sign-in/credentials with their owning client. |
