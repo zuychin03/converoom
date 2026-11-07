@@ -30,7 +30,7 @@ import {
   attemptEnvironment,
   type Attempt,
 } from '../../../packages/workspace/src/index.js';
-import { snapshot } from '../../../packages/workspace/src/content.js';
+import { attemptTree } from '../../../packages/workspace/src/checkpoints.js';
 import {
   startManaged,
   probeProduct,
@@ -69,6 +69,7 @@ export interface RuntimeOptions {
   remoteTickMs?: number;
   remoteTransport?: RemoteTransportFactory;
   remoteFetch?: FetchLike;
+  checkpointBudget?: number;
 }
 export async function createRuntime(
   dataDir: string,
@@ -77,7 +78,7 @@ export async function createRuntime(
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   const store = createStore(join(dataDir, 'converoom.sqlite')),
     core = createCore(store),
-    workspace = mountWorkspace(core, dataDir),
+    workspace = mountWorkspace(core, dataDir, { checkpointBudget: options.checkpointBudget }),
     participant = mountParticipant(core, dataDir, options.remoteTransport, options.remoteFetch);
   const active = new Map<string, { session?: ManagedSession; turn: Turn; cancelAt?: number }>(),
     executions = new Set<Promise<void>>();
@@ -162,7 +163,7 @@ export async function createRuntime(
           !attempt ||
           attempt.roomId !== t.roomId ||
           attempt.seatId !== s.id ||
-          attempt.status !== 'ready' ||
+          !['ready', 'completed'].includes(attempt.status) ||
           attempt.leaseExpiresAt < Date.now() ||
           store.get<ToolArgs>('task', attempt.roomId + ':' + attempt.taskId)?.generation !==
             attempt.generation ||
@@ -171,13 +172,13 @@ export async function createRuntime(
         )
           throw new ConveroomError('worker_binding', 'Managed worker attempt binding is invalid');
         const p = store.get<{ generatedPaths: string[] }>('profile', attempt.profileId)!;
-        if ((await snapshot(attempt.path, p.generatedPaths)).digest !== attempt.effectiveBase)
-          throw new ConveroomError('worker_binding', 'Workspace base changed before admission');
+        if ((await attemptTree(attempt.path, p.generatedPaths)).digest !== (attempt.treeDigest ?? attempt.effectiveBase))
+          throw new ConveroomError('worker_binding', 'Workspace changed since its last checkpoint');
         cwd = attempt.path;
         const attemptId = attempt.id;
         store.transaction(() => {
           const current = store.get<Attempt>('attempt', attemptId);
-          if (!current || current.status !== 'ready' || current.leaseExpiresAt < Date.now() ||
+          if (!current || !['ready', 'completed'].includes(current.status) || current.leaseExpiresAt < Date.now() ||
             current.generation !== attempt!.generation ||
             store.get<ToolArgs>('task', current.roomId + ':' + current.taskId)?.generation !== current.generation)
             throw new ConveroomError('worker_binding', 'Attempt changed while checking its source');
@@ -213,7 +214,7 @@ export async function createRuntime(
         store.get<Room>('room', t.roomId)?.lifecycle !== 'active' ||
         !store.get<Seat>('seat', s.id)?.consent ||
         store.get<Turn>('turn', t.id)?.status !== 'dispatching' ||
-        (attempt && (!admittedAttempt || admittedAttempt.status !== 'ready' ||
+        (attempt && (!admittedAttempt || !['ready', 'completed'].includes(admittedAttempt.status) ||
           admittedAttempt.leaseExpiresAt < Date.now() ||
           admittedAttempt.generation !== attempt.generation ||
           store.get<ToolArgs>('task', attempt.roomId + ':' + attempt.taskId)?.generation !== attempt.generation))
@@ -363,8 +364,9 @@ export async function createRuntime(
         const completed = store.get<Turn>('turn', t.id)?.status === 'completed';
         const submissionDeadline = Date.now() + 1800000;
         store.put('attempt', attempt.id, { ...current, processStoppedAt: Date.now(),
-          ...(completed ? { status: 'completed', submissionDeadline,
+          ...(completed ? { status: 'checkpointing', submissionDeadline,
             leaseExpiresAt: submissionDeadline } : {}) });
+        if (completed) await workspace.checkpoint(attempt.id, t.id);
       }
       if (!confirmed) {
         const current = store.get<Turn>('turn', t.id)!;
@@ -461,7 +463,7 @@ export async function createRuntime(
           continue;
         if (t.attemptId) {
           const attempt = store.get<Attempt>('attempt', t.attemptId);
-          if (!attempt || attempt.status !== 'ready' || attempt.leaseExpiresAt < Date.now() ||
+          if (!attempt || !['ready', 'completed'].includes(attempt.status) || attempt.leaseExpiresAt < Date.now() ||
             store.get<ToolArgs>('task', t.roomId + ':' + attempt.taskId)?.generation !== attempt.generation)
             continue;
         }

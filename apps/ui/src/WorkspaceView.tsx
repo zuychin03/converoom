@@ -15,6 +15,7 @@ import {
 import { STAGES, acceptedOrder, commandLabel, fmtBytes, interruptedFor, num, readiness, requestDetails, shortId, taskProgress, workerSeat, type Kind } from './model.js';
 import { PRODUCT_PROFILES, type Product } from '../../../packages/shared/src/products.js';
 import { deleteTemplateAction } from './actions.js';
+import { DiffView } from './DiffView.js';
 
 export function WorkspaceView({
   state,
@@ -130,6 +131,7 @@ export function WorkspaceView({
                     workers={workers}
                     roomOpen={room.lifecycle === 'active'}
                     run={run}
+                    read={read}
                     openAction={openAction}
                   />
                 ))}
@@ -605,6 +607,7 @@ function TaskRow({
   workers,
   roomOpen,
   run,
+  read,
   openAction,
 }: {
   task: RecordData;
@@ -613,6 +616,7 @@ function TaskRow({
   workers: RecordData[];
   roomOpen: boolean;
   run: Run;
+  read: Run;
   openAction: (action: Action) => void;
 }) {
   const [error, setError] = useState('');
@@ -691,8 +695,30 @@ function TaskRow({
       const turn = state.turns.find((t) => t.attemptId === attempt.id && t.status === 'running');
       const since = turn ? num(turn, 'startedAt') : undefined;
       phase = ['live', since ? <>Coding <Elapsed since={since} /></> : 'Coding'];
-    } else if (attemptStatus === 'completed') {
+    } else if (attemptStatus === 'checkpointing') phase = ['live', 'Saving checkpoint'];
+    else if (attemptStatus === 'rolling_back') phase = ['live', 'Rolling back'];
+    else if (attemptStatus === 'completed') {
       phase = ['needs', 'Submit before the lease ends'];
+      const at = num(attempt, 'checkpointSeq') ?? 0;
+      actions.push(
+        <button
+          key="continue"
+          type="button"
+          className="button small"
+          disabled={!roomOpen || !leaseLive}
+          onClick={() =>
+            openAction({
+              title: 'Continue coding',
+              command: 'turn_request',
+              args: { roomId, seatId: attempt.seatId, attemptId: attempt.id },
+              description: `The next managed session starts from ${at ? 'checkpoint ' + at : 'the starting point'} in this clone. Review and grant the request before the lease ends.`,
+              fields: [{ key: 'prompt', label: 'Coding instructions', type: 'textarea', required: true }],
+            })
+          }
+        >
+          Continue coding
+        </button>,
+      );
       actions.push(
         <button
           key="submit"
@@ -832,6 +858,10 @@ function TaskRow({
         <div className="row-actions">{actions}</div>
         {error && <ErrorNotice dismiss={() => setError('')}>{error}</ErrorNotice>}
       </div>
+      {attempt && status === 'claimed' && (
+        <Checkpoints attempt={attempt} state={state} canRollBack={roomOpen && leaseLive && attemptStatus === 'completed'}
+          read={read} openAction={openAction} />
+      )}
       {progress.manifest && (
         <details className="task-changes">
           <summary>
@@ -844,6 +874,110 @@ function TaskRow({
         </details>
       )}
     </li>
+  );
+}
+
+const CHECKPOINT_STATES: Record<string, (c: RecordData) => [Kind, string]> = {
+  kept: (c) => ['idle', c.superseded === true ? 'Superseded' : 'Kept'],
+  pruned: (c) => ['idle', c.reason === 'workspace_removed' ? 'Removed with its workspace' : 'Pruned at the storage limit'],
+  skipped: (c) => ['warn', c.reason === 'budget' ? 'Not saved: storage limit' : 'Not saved: clone unreadable'],
+};
+const counted = (n: number, what: string) => `${n} ${what}`;
+function Checkpoints({
+  attempt,
+  state,
+  canRollBack,
+  read,
+  openAction,
+}: {
+  attempt: RecordData;
+  state: Snapshot;
+  canRollBack: boolean;
+  read: Run;
+  openAction: (action: Action) => void;
+}) {
+  const [view, setView] = useState<{ seq: number; result?: RecordData; error?: string }>();
+  const roomId = string(attempt, 'roomId'), attemptId = string(attempt, 'id');
+  const current = num(attempt, 'checkpointSeq') ?? 0;
+  const items = state.checkpoints.filter((c) => c.attemptId === attemptId).sort((a, b) => (num(a, 'seq') ?? 0) - (num(b, 'seq') ?? 0));
+  if (!items.length) return null;
+  const show = (seq: number) => {
+    setView({ seq });
+    read('checkpoint_diff', { roomId, attemptId, checkpoint: seq }).then(
+      (result) => setView({ seq, result: isRecord(result) ? result : {} }),
+      (cause: unknown) => setView({ seq, error: cause instanceof Error ? cause.message : 'The changes did not load. Try again.' }),
+    );
+  };
+  const rollBack = (seq: number) =>
+    openAction({
+      title: seq ? `Roll back to checkpoint ${seq}` : 'Roll back to the starting point',
+      command: 'attempt_rollback',
+      args: { roomId, attemptId, checkpoint: seq, confirm: true },
+      label: 'Roll back',
+      description: 'Restores the clone to exactly these files. Git-ignored and generated files stay, later checkpoints are kept for inspection, and any queued coding turn on this attempt is withdrawn.',
+      fields: [{ key: 'reason', label: 'Why roll back', type: 'textarea', required: true }],
+      onSuccess: () => setView(undefined),
+    });
+  const rows: { seq: number; title: string; changes: string; tree: string; state: [Kind, string]; kept: boolean }[] = [
+    { seq: 0, title: 'Starting point', changes: '', tree: string(attempt, 'effectiveBase'), state: ['idle', 'Base'], kept: true },
+    ...items.map((c) => {
+      const turns = list(c, 'turnIds'), changed = isRecord(c.changed) ? c.changed : undefined;
+      return {
+        seq: num(c, 'seq') ?? 0,
+        title: `After turn ${shortId(turns[0] ?? '')}${turns.length > 1 ? ` and ${turns.length - 1} more` : ''}`,
+        changes: changed ? ['added', 'modified', 'deleted'].filter((k) => num(changed, k)).map((k) => counted(num(changed, k)!, k)).join(', ') ||
+          'No file changes' : '',
+        tree: string(c, 'treeDigest'),
+        state: (CHECKPOINT_STATES[string(c, 'status')] ?? (() => ['idle', string(c, 'status')]))(c),
+        kept: c.status === 'kept',
+      };
+    }),
+  ];
+  return (
+    <details className="task-changes checkpoints">
+      <summary>
+        Checkpoints · {counted(items.filter((c) => c.status === 'kept').length, 'kept')} · at {current ? 'checkpoint ' + current : 'the starting point'}
+      </summary>
+      <ol className="checkpoint-list" aria-label="Checkpoints">
+        {rows.map((row) => (
+          <li key={row.seq} className="checkpoint">
+            <span className="num">{row.seq}</span>
+            <span className="checkpoint-title">{row.title}</span>
+            <span className="checkpoint-meta">
+              {row.changes}
+              {row.changes && row.tree ? ' · ' : ''}
+              {row.tree && <>tree <code>{row.tree.slice(0, 12)}</code></>}
+            </span>
+            <span className="checkpoint-end">
+              <Status kind={row.seq === current ? 'ok' : row.state[0]}>{row.seq === current ? 'Current' : row.state[1]}</Status>
+              {row.kept && row.seq > 0 && (
+                <button type="button" className="button small" aria-pressed={view?.seq === row.seq} onClick={() => show(row.seq)}>
+                  View changes
+                </button>
+              )}
+              {row.kept && canRollBack && row.seq !== current && (
+                <button type="button" className="button small" onClick={() => rollBack(row.seq)}>
+                  Roll back here
+                </button>
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
+      {view && (
+        <div className="checkpoint-diff" aria-busy={!view.result && !view.error}>
+          {view.error ? <p className="diff-note">{view.error}</p> : view.result ? (
+            <>
+              <p className="diff-note">
+                Checkpoint {view.seq} against{' '}
+                {isRecord(view.result.from) && num(view.result.from, 'checkpoint') ? 'checkpoint ' + num(view.result.from, 'checkpoint') : 'the starting point'}
+              </p>
+              <DiffView files={objects(view.result, 'files')} omittedFiles={num(view.result, 'omittedFiles') ?? 0} />
+            </>
+          ) : <p className="diff-note">Loading changes…</p>}
+        </div>
+      )}
+    </details>
   );
 }
 

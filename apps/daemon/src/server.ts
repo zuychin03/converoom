@@ -61,6 +61,7 @@ const roomScoped = {
   members: 'human_membership',
   ownerConsents: 'owner_consent',
   roundRobins: 'round_robin',
+  checkpoints: 'checkpoint',
 };
 const ACTIVE_TURNS = ['dispatching', 'running', 'cancelling'];
 // The store reads at most 1,000 events per call.

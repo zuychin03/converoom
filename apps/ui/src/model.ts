@@ -258,7 +258,7 @@ export function taskProgress(task: RecordData, state: Snapshot) {
   const status = string(task, 'status');
   let stage = 0;
   if (status === 'provisioning' || status === 'claimed')
-    stage = attempt && ['running', 'completed'].includes(string(attempt, 'status')) ? 2 : 1;
+    stage = attempt && ['running', 'checkpointing', 'rolling_back', 'completed'].includes(string(attempt, 'status')) ? 2 : 1;
   if (status === 'submitted') stage = passing ? 4 : 3;
   if (status === 'accepted')
     stage = candidate ? (candidate.status === 'applied' ? 7 : 6) : 5;

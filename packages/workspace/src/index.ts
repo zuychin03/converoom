@@ -13,6 +13,7 @@ import {
 } from '../../shared/src/contracts.js';
 import { scopeDigest, redactPublic } from '../../store/src/index.js';
 import { cancelTurn, RESULT_EXPIRY_BATCH, RESULT_RETENTION_MS } from '../../core/src/index.js';
+import { authority } from '../../core/src/audit.js';
 import { run, canonicalRoot } from '../../adapters/src/process.js';
 import {
   snapshot,
@@ -25,6 +26,8 @@ import {
   type DeltaFile,
 } from './content.js';
 import { provisionFixture, type FixtureBroker, type FixtureProfile } from './broker.js';
+import { attemptTree, checkpointStore, ignoredPaths, CHECKPOINT_LIMIT, type Checkpoint } from './checkpoints.js';
+import { treeDiff } from './diff.js';
 const executionEnvironments = new Map<string, NodeJS.ProcessEnv>();
 export const attemptEnvironment = (id: string) => executionEnvironments.get(id) ?? {};
 interface Repo {
@@ -82,6 +85,9 @@ export interface Attempt {
   processStoppedAt?: number;
   resourceId: string;
   sessionId?: string;
+  treeDigest?: string;
+  checkpointSeq?: number;
+  rollbackSeq?: number;
 }
 interface Manifest {
   id: string;
@@ -152,14 +158,21 @@ export interface CleanupEntry {
 }
 // SPEC retention proposal: temporary cancelled workspaces stay for 7 days.
 const RELEASE_RETENTION_MS = 7 * 86400000;
-const ACTIVE_ATTEMPT = ['provisioning', 'ready', 'running', 'submitting', 'completed', 'draining'];
+const ACTIVE_ATTEMPT = ['provisioning', 'ready', 'running', 'checkpointing', 'rolling_back', 'submitting', 'completed', 'draining'];
 const ACTIVE_CANDIDATE = ['prepared', 'verified', 'accepted', 'applying'];
 const RESUMED = 'An earlier removal did not finish';
 export function mountWorkspace(
   core: Core,
   dataDir: string,
-): { close(): Promise<void>; revoke(id: string): Promise<void>; expireJournal(before: number, limit: number): number } {
+  options: { checkpointBudget?: number } = {},
+): {
+  close(): Promise<void>;
+  revoke(id: string): Promise<void>;
+  expireJournal(before: number, limit: number): number;
+  checkpoint(attemptId: string, turnId: string): Promise<void>;
+} {
   const s = core.store;
+  const checkpoints = checkpointStore(s, dataDir, options.checkpointBudget);
   const workspaceAccess = (a: Actor, id: string) => {
     const room = core.requireRoom(a, id);
     if (a.kind === 'agent' && core.requireSeat(a, id).role === 'observer')
@@ -1260,7 +1273,8 @@ export function mountWorkspace(
     const entries: CleanupEntry[] = [];
     for (const name of names) {
       const e = await classify(name);
-      entries.push({ ...e, bytes: (await sizeOf(e.path)) + (e.resourceId ? await sizeOf(join(dataDir, 'resources', e.resourceId)) : 0) });
+      entries.push({ ...e, bytes: (await sizeOf(e.path)) + (e.resourceId ? await sizeOf(join(dataDir, 'resources', e.resourceId)) : 0) +
+        (e.kind === 'attempt' && e.id ? await sizeOf(checkpoints.dir(e.id)) : 0) });
     }
     const removable = entries.filter((e) => e.removable);
     const digest = scopeDigest(removable.map((e) => ({ name: e.name, kind: e.kind, id: e.id ?? null, contentDigest: e.contentDigest ?? null })));
@@ -1270,7 +1284,11 @@ export function mountWorkspace(
     s.put('cleanup', e.name, { name: e.name, kind: e.kind, id: e.id ?? null, startedAt: Date.now() });
     await rm(e.path, { recursive: true, force: true, maxRetries: 3 });
     if (e.resourceId) await rm(join(dataDir, 'resources', e.resourceId), { recursive: true, force: true, maxRetries: 3 });
+    if (e.kind === 'attempt' && e.id) await rm(checkpoints.dir(e.id), { recursive: true, force: true, maxRetries: 3 });
     s.transaction(() => {
+      if (e.kind === 'attempt' && e.id && e.roomId)
+        for (const c of checkpoints.list(e.roomId, e.id).filter((v) => v.status === 'kept'))
+          s.put('checkpoint', c.id, { ...c, status: 'pruned', prunedAt: Date.now(), reason: 'workspace_removed' });
       const kind = ['attempt', 'candidate', 'verification'].includes(e.kind) ? e.kind : undefined;
       const record = kind && e.id ? s.get<ToolArgs>(kind, e.id) : undefined;
       if (kind && record) s.put(kind, e.id!, kind === 'attempt' ? { ...record, status: 'removed' } : { ...record, workspaceRemovedAt: Date.now() });
@@ -1349,10 +1367,122 @@ export function mountWorkspace(
     ev(a, roomId, 'attempt.released', { attemptId: at.id, reason, workspacePreserved: true });
     return { released: at.id, workspacePreserved: true };
   }));
+  const checkpointNumber = (x: ToolArgs, key: string) => {
+    const value = x[key];
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0)
+      throw new E('invalid_argument', 'Invalid ' + key);
+    return value;
+  };
+  const basis = async (at: Attempt) => {
+    const base = await load(at.basePath);
+    if (base.digest !== at.effectiveBase) throw new E('digest_mismatch', 'Attempt base changed');
+    return base;
+  };
+  const checkpointReader = (a: Actor, x: ToolArgs) => {
+    const roomId = str(x, 'roomId');
+    if (a.kind === 'human') core.requireOwner(a, roomId);
+    else core.requireRoom(a, roomId);
+    const at = get<Attempt>('attempt', str(x, 'attemptId'));
+    if (at.roomId !== roomId || !attemptAccess(a, roomId, at))
+      throw new E('forbidden', 'Only the owner, the attempt\'s worker or the host can read its checkpoints', 403);
+    return at;
+  };
+  // FR-55: runs once a completed coding turn's process stop is confirmed, so nothing else writes to the clone.
+  const checkpoint = async (attemptId: string, turnId: string) => {
+    const at = get<Attempt>('attempt', attemptId);
+    if (at.status !== 'checkpointing') return;
+    const settle = (fields: Partial<Attempt>, event: string, data: ToolArgs, records: Checkpoint[] = []) => s.transaction(() => {
+      for (const c of records) s.put('checkpoint', c.id, c);
+      s.put('attempt', at.id, { ...get<Attempt>('attempt', at.id), status: 'completed', ...fields });
+      s.append(at.roomId, event, 'runtime', { attemptId, turnId, ...data });
+    });
+    try {
+      const base = await basis(at), current = await attemptTree(at.path, get<Profile>('profile', at.profileId).generatedPaths);
+      if (current.digest === (at.treeDigest ?? at.effectiveBase)) {
+        const c = at.checkpointSeq ? s.get<Checkpoint>('checkpoint', at.id + ':' + at.checkpointSeq) : undefined;
+        settle({}, 'checkpoint.unchanged', { checkpoint: at.checkpointSeq ?? 0, treeDigest: current.digest },
+          c ? [{ ...c, turnIds: [...c.turnIds, turnId] }] : []);
+        return;
+      }
+      const { record, pruned } = await checkpoints.prepare(at, turnId, current, base);
+      settle({ treeDigest: current.digest, checkpointSeq: record.seq },
+        record.status === 'kept' ? 'checkpoint.recorded' : 'checkpoint.skipped',
+        { checkpoint: record.seq, treeDigest: current.digest,
+          ...(record.status === 'kept' ? { newBytes: record.newBytes, pruned: pruned.map((c) => c.seq) } : { reason: record.reason }) },
+        [record, ...pruned.map((c) => ({ ...c, status: 'pruned' as const, prunedAt: Date.now(), reason: 'limit' }))]);
+      await checkpoints.collect(at, base).catch(() => undefined);
+    } catch (error) {
+      const seq = (checkpoints.list(at.roomId, at.id).at(-1)?.seq ?? 0) + 1;
+      const reason = error instanceof E ? error.code : 'checkpoint_failed';
+      // An empty tree digest matches no clone, so the attempt takes no further turns until it is submitted or released.
+      settle({ treeDigest: '', checkpointSeq: seq }, 'checkpoint.skipped', { checkpoint: seq, reason }, [{
+        id: at.id + ':' + seq, roomId: at.roomId, attemptId: at.id, taskId: at.taskId, seq, parentSeq: at.checkpointSeq ?? 0,
+        turnIds: [turnId], treeDigest: '', status: 'skipped', files: 0, changed: null, newBytes: 0, createdAt: Date.now(), reason,
+      }]);
+    }
+  };
+  core.register('checkpoint_list', async (a, x) => {
+    const at = checkpointReader(a, x);
+    return {
+      attemptId: at.id, treeDigest: at.treeDigest ?? at.effectiveBase, checkpoint: at.checkpointSeq ?? 0,
+      rollback: at.rollbackSeq ?? null, limit: CHECKPOINT_LIMIT, budgetBytes: checkpoints.budget,
+      usedBytes: await checkpoints.usedBytes(at.id), checkpoints: checkpoints.list(at.roomId, at.id),
+    };
+  });
+  core.register('checkpoint_diff', async (a, x) => {
+    const at = checkpointReader(a, x), seq = checkpointNumber(x, 'checkpoint');
+    const parent = seq ? s.get<Checkpoint>('checkpoint', at.id + ':' + seq)?.parentSeq ?? 0 : 0;
+    const against = x.against === undefined
+      ? parent && s.get<Checkpoint>('checkpoint', at.id + ':' + parent)?.status === 'kept' ? parent : 0
+      : checkpointNumber(x, 'against');
+    const base = await basis(at), from = await checkpoints.tree(at, against, base), to = await checkpoints.tree(at, seq, base);
+    return { attemptId: at.id, from: { checkpoint: against, treeDigest: from.digest },
+      to: { checkpoint: seq, treeDigest: to.digest }, ...treeDiff(from, to) };
+  });
+  core.register('attempt_rollback', (a, x) => journal(a, 'attempt_rollback', x, async () => {
+    const roomId = str(x, 'roomId'), room = workspaceAccess(a, roomId);
+    if (a.kind === 'human') core.requireOwner(a, roomId);
+    const at = get<Attempt>('attempt', str(x, 'attemptId')), seq = checkpointNumber(x, 'checkpoint'), reason = str(x, 'reason');
+    if (at.roomId !== roomId || !attemptAccess(a, roomId, at))
+      throw new E('forbidden', 'Only the owner, the attempt\'s worker or the host can roll it back', 403);
+    const idle = (current: Attempt) => current.status === 'completed' && current.leaseExpiresAt >= Date.now() &&
+      current.generation === task(roomId, current.taskId).generation && workerStopped(current);
+    if (x.confirm !== true || !idle(at))
+      throw new E('rollback_refused', 'Confirm a rollback of a completed attempt with no turn in flight', 409);
+    const generated = get<Profile>('profile', at.profileId).generatedPaths, base = await basis(at);
+    const target = await checkpoints.tree(at, seq, base), before = await attemptTree(at.path, generated);
+    if (before.digest !== (at.treeDigest ?? at.effectiveBase))
+      throw new E('workspace_changed', 'The clone changed outside a turn; submit or release it instead', 409);
+    s.transaction(() => {
+      const current = get<Attempt>('attempt', at.id);
+      if (!idle(current)) throw new E('rollback_refused', 'The attempt changed; inspect it again', 409);
+      for (const turn of s.list<Turn>('turn', { roomId }).filter((t) => t.attemptId === at.id && t.status === 'queued'))
+        cancelTurn(s, a, turn, 'Attempt rolled back before the turn started', 'attempt_rolled_back');
+      s.put('attempt', at.id, { ...current, status: 'rolling_back' });
+    });
+    try {
+      await writeSnapshot(at.path, target, [...generated, ...(await ignoredPaths(at.path))]);
+      if ((await attemptTree(at.path, generated)).digest !== target.digest)
+        throw new E('rollback_mismatch', 'Restored content mismatch');
+    } catch (error) {
+      s.put('attempt', at.id, { ...get<Attempt>('attempt', at.id), status: 'quarantined' });
+      s.put('resource', at.resourceId, { ...get<ToolArgs>('resource', at.resourceId), status: 'quarantined' });
+      throw error;
+    }
+    s.transaction(() => {
+      s.put('attempt', at.id, { ...get<Attempt>('attempt', at.id), status: 'completed', treeDigest: target.digest,
+        checkpointSeq: seq, rollbackSeq: seq });
+      for (const c of checkpoints.list(roomId, at.id))
+        if (c.seq > seq && c.status === 'kept' && !c.superseded) s.put('checkpoint', c.id, { ...c, superseded: true });
+      authority(s, a, room, 'attempt.rolled_back', { attemptId: at.id, taskId: at.taskId, generation: at.generation,
+        checkpoint: seq, treeDigest: target.digest, previousTreeDigest: before.digest, reason });
+    });
+    return { attemptId: at.id, checkpoint: seq, treeDigest: target.digest };
+  }));
   for (const c of s.list<Candidate>('candidate'))
     if (c.status === 'applying') s.put('candidate', c.id, { ...c, status: 'uncertain' });
   for (const at of s.list<Attempt>('attempt'))
-    if (['provisioning', 'ready', 'running', 'submitting', 'draining'].includes(at.status)) {
+    if (['provisioning', 'ready', 'running', 'checkpointing', 'rolling_back', 'submitting', 'draining'].includes(at.status)) {
       s.put('attempt', at.id, { ...at, status: 'uncertain' });
       s.put('resource', at.resourceId, {
         ...(s.get('resource', at.resourceId) as ToolArgs),
@@ -1362,6 +1492,7 @@ export function mountWorkspace(
   expireJournal(Date.now() - RESULT_RETENTION_MS, RESULT_EXPIRY_BATCH);
   return {
     expireJournal,
+    checkpoint,
     revoke: async (id) => {
       await brokers.get(id)?.close();
       brokers.delete(id);

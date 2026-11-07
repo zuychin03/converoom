@@ -6,7 +6,11 @@ import { createServer as createTlsServer, Agent, request as tlsRequest } from 'n
 import { createRuntime } from '../apps/daemon/src/runtime.js';
 import { createServer, humanIdentity } from '../apps/daemon/src/server.js';
 import { createSharedServer } from '../apps/daemon/src/shared-server.js';
-import { ENDED_ROOMS, type Room, type Seat, type Turn } from '../packages/shared/src/contracts.js';
+import { ENDED_ROOMS, type Room, type Seat, type ToolArgs, type Turn } from '../packages/shared/src/contracts.js';
+import { run } from '../packages/adapters/src/process.js';
+import { attemptTree, checkpointStore } from '../packages/workspace/src/checkpoints.js';
+import type { Snapshot } from '../packages/workspace/src/content.js';
+import type { Attempt } from '../packages/workspace/src/index.js';
 const dir = await mkdtemp(join(tmpdir(), 'converoom-browser-'));
 const runtime = await createRuntime(dir, { noScheduler: true });
 let terminalCode = '';
@@ -108,6 +112,39 @@ const fixtureControl = createHttpServer(async (request, response) => {
       startedAt: Date.now() - 90000, args: { roomId, attemptId: id } });
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ attemptId: id }));
+    return;
+  }
+  // This runtime runs no turns, so two checkpoints are recorded on a real claimed attempt the way completed turns record them.
+  if (request.method === 'POST' && requestUrl.pathname === '/checkpoints') {
+    const owner = humanIdentity(runtime), store = runtime.core.store;
+    const call = (name: string, args: ToolArgs) => runtime.core.dispatch(owner, name, { ...args, clientKey: crypto.randomUUID() }) as Promise<ToolArgs>;
+    const donor = join(dir, 'donor-' + crypto.randomUUID());
+    await mkdir(donor);
+    await run('git', ['init'], donor);
+    await run('git', ['config', 'core.autocrlf', 'false'], donor);
+    await writeFile(join(donor, 'README.md'), 'Foundation\n');
+    await run('git', ['add', '.'], donor);
+    await run('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'Fixture'], donor);
+    const room = await call('room_create', { title: requestUrl.searchParams.get('title') ?? 'Checkpoint room', objective: 'Iterate on one attempt', workflow: 'coding' });
+    const seat = await call('seat_add', { roomId: room.id, name: 'Worker', product: 'codex', mode: 'managed' });
+    const repo = await call('repo_register', { path: donor });
+    const profile = await call('profile_register', { name: 'Fixture checks', scopePaths: ['README.md', 'notes.txt'], generatedPaths: [],
+      commands: [{ executable: process.execPath, args: ['-e', 'process.exit(0)'], timeoutMs: 5000 }] });
+    await call('task_plan', { roomId: room.id, repoId: repo.id, tasks: [{ id: 'iterate', title: 'Iterate on the readme', acceptance: 'Reviewed',
+      scopePaths: ['README.md', 'notes.txt'], dependsOn: [], profileId: profile.id }] });
+    const attempt = await call('task_claim', { roomId: room.id, taskId: 'iterate', seatId: seat.id });
+    const checkpoints = checkpointStore(store, dir), base = JSON.parse(await readFile(String(attempt.basePath), 'utf8')) as Snapshot;
+    for (const [file, text] of [['README.md', 'First turn\n'], ['notes.txt', 'Second turn\n']]) {
+      await writeFile(join(String(attempt.path), file), text);
+      const at = store.get<Attempt>('attempt', String(attempt.id))!, current = await attemptTree(at.path, []), turnId = crypto.randomUUID();
+      const { record } = await checkpoints.prepare(at, turnId, current, base);
+      store.put('checkpoint', record.id, record);
+      store.put('attempt', at.id, { ...at, status: 'completed', treeDigest: current.digest, checkpointSeq: record.seq, leaseExpiresAt: Date.now() + 1800000 });
+      store.append(String(room.id), 'checkpoint.recorded', 'runtime', { attemptId: at.id, turnId, checkpoint: record.seq, treeDigest: current.digest,
+        newBytes: record.newBytes, pruned: [] });
+    }
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ roomId: room.id, attemptId: attempt.id }));
     return;
   }
   if (request.method !== 'POST' || requestUrl.pathname !== '/pair') {

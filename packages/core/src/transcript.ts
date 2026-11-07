@@ -173,6 +173,13 @@ export function transcriptMarkdown(t: TranscriptSource): string {
     'candidate.applied': (d) => `Candidate applied to the checkout with result ${code(d.resultDigest)}.`,
     'attempt.release_requested': (d) => reason(`Release requested for attempt ${code(String(d.attemptId).slice(0, 8))}`, d.reason),
     'attempt.released': (d) => `Attempt ${code(String(d.attemptId).slice(0, 8))} released; its workspace is preserved.`,
+    'checkpoint.recorded': (d) => `Checkpoint ${Number(d.checkpoint)} of attempt ${code(String(d.attemptId).slice(0, 8))} recorded after ${turn(d.turnId)}, tree ${
+      code(d.treeDigest)}${items(d.pruned).length ? `; pruned ${plural(items(d.pruned).length, 'older checkpoint')}` : ''}.`,
+    'checkpoint.unchanged': (d) => `${capital(turn(d.turnId))} left attempt ${code(String(d.attemptId).slice(0, 8))} unchanged; no checkpoint added.`,
+    'checkpoint.skipped': (d) => `Checkpoint skipped for attempt ${code(String(d.attemptId).slice(0, 8))} after ${turn(d.turnId)}: ${
+      d.reason === 'budget' ? 'the checkpoint storage limit was reached' : 'the clone could not be read'}.`,
+    'attempt.rolled_back': (d) => reason(`Attempt ${code(String(d.attemptId).slice(0, 8))} rolled back to ${
+      Number(d.checkpoint) ? 'checkpoint ' + Number(d.checkpoint) : 'its starting point'}, tree ${code(d.treeDigest)}`, d.reason),
     'command.cleared': (d) => `Interrupted ${inline(d.command)} cleared; its client key can run again.`,
     'workspaces.removed': (d) => `Removed ${plural(items(d.removed).length, 'coding workspace')} (${Number(d.bytes)} bytes) after the owner confirmed a cleanup preview.`,
     'bridge.authorized': (d) => `Room connection approved for a participant bridge, membership generation ${Number(d.generation)}.`,

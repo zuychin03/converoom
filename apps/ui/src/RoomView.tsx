@@ -115,6 +115,10 @@ const SYSTEM_LABELS: Record<string, string> = {
   'candidate.prepared': 'candidate',
   'candidate.accepted': 'candidate accepted',
   'candidate.applied': 'candidate applied',
+  'checkpoint.recorded': 'checkpoint',
+  'checkpoint.unchanged': 'checkpoint',
+  'checkpoint.skipped': 'checkpoint skipped',
+  'attempt.rolled_back': 'rollback',
   'turn.inspected': 'inspection',
   'workspaces.removed': 'workspaces removed',
   'bridge.authorized': 'room connection approved',
@@ -1404,6 +1408,22 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `Final candidate accepted · ${string(d, 'resultDigest').slice(0, 12)}`;
     case 'candidate.applied':
       return `Candidate applied to the checkout · ${string(d, 'resultDigest').slice(0, 12)}`;
+    case 'checkpoint.recorded': {
+      const pruned = list(d, 'pruned').length;
+      return `Checkpoint ${String(d.checkpoint)} saved · attempt ${string(d, 'attemptId').slice(0, 8)} · tree ${string(d, 'treeDigest').slice(0, 12)}${
+        pruned ? ` · ${pruned} older ${pruned === 1 ? 'checkpoint' : 'checkpoints'} pruned` : ''}`;
+    }
+    case 'checkpoint.unchanged':
+      return `No changes in the turn · attempt ${string(d, 'attemptId').slice(0, 8)} stays at ${d.checkpoint ? 'checkpoint ' + String(d.checkpoint) : 'its starting point'}`;
+    case 'checkpoint.skipped':
+      return (
+        <>
+          <Status kind="warn">Checkpoint not saved</Status> attempt {string(d, 'attemptId').slice(0, 8)} ·{' '}
+          {d.reason === 'budget' ? 'storage limit reached' : 'the clone could not be read'}
+        </>
+      );
+    case 'attempt.rolled_back':
+      return `Attempt ${string(d, 'attemptId').slice(0, 8)} rolled back to ${d.checkpoint ? 'checkpoint ' + String(d.checkpoint) : 'its starting point'} · ${string(d, 'reason')}`;
     case 'command.cleared':
       return `Interrupted ${string(d, 'command')} cleared · its client key can run again`;
     case 'workspaces.removed': {

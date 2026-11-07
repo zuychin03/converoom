@@ -28,7 +28,8 @@ import { authority } from './audit.js';
 import { MAX_SAVED_TEMPLATES, findTemplate, seatProfile, templateFromRoom, templatePolicy, templatesFor } from './templates.js';
 // Reads rerun on retry, so their results are never stored under a client key.
 export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
-  'resource_profile_list', 'adapter_status', 'adapter_discover', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview', 'template_list']);
+  'resource_profile_list', 'adapter_status', 'adapter_discover', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview', 'template_list',
+  'checkpoint_list', 'checkpoint_diff']);
 const limits = {
   maxActiveTurns: 2,
   maxRounds: 6,
@@ -79,7 +80,7 @@ function cancelQueued(store: Store, a: Principal, roomId: string, error: string,
 }
 // A queued turn could never post its answer under these; turns accepted within the turn budget still run.
 const DISPATCH_BUDGETS: readonly RoomBudget[] = ['message', 'time'];
-const OPEN_ATTEMPTS = ['provisioning', 'ready', 'running', 'completed', 'quarantined', 'uncertain'];
+const OPEN_ATTEMPTS = ['provisioning', 'ready', 'running', 'checkpointing', 'rolling_back', 'completed', 'quarantined', 'uncertain'];
 export function usedBudgets(store: Store, r: Room, now = Date.now()): RoomBudget[] {
   const max = Number(r.policy.maxMessages);
   return (['message', 'turn', 'time'] as const).filter((b) => b === 'message' ? store.eventCount(r.id, 'message') >= max
@@ -536,6 +537,7 @@ export function createCore(store: Store): Core {
         'candidate_apply',
         'workspace_cleanup',
         'attempt_release',
+        'attempt_rollback',
         'repo_register',
         'managed_stop',
         'backup_request',

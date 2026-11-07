@@ -17,7 +17,8 @@ export interface ToolDefinition {
 }
 const string = { type: 'string', minLength: 1, maxLength: 65536 },
   small = { ...string, maxLength: 256 },
-  strings = { type: 'array', items: small, maxItems: 100 };
+  strings = { type: 'array', items: small, maxItems: 100 },
+  checkpoint = { type: 'integer', minimum: 0, maximum: 1000000 };
 const common: Record<string, unknown> = {
   roomId: small,
   clientKey: small,
@@ -56,6 +57,7 @@ const mutationNames = new Set([
   'task_claim',
   'task_heartbeat',
   'task_submit',
+  'attempt_rollback',
   'verification_request',
   'review_submit',
   'integration_prepare',
@@ -184,6 +186,12 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
   task_claim: { required: ['roomId', 'taskId'], fields: { seatId: small } },
   task_heartbeat: { required: ['roomId', 'attemptId'] },
   task_submit: { required: ['roomId', 'attemptId'] },
+  checkpoint_list: { required: ['roomId', 'attemptId'] },
+  checkpoint_diff: { required: ['roomId', 'attemptId', 'checkpoint'], fields: { checkpoint: checkpoint, against: checkpoint } },
+  attempt_rollback: {
+    required: ['roomId', 'attemptId', 'checkpoint', 'reason', 'confirm'],
+    fields: { checkpoint: checkpoint, reason: string, confirm: { type: 'boolean' } },
+  },
   artefact_get: { required: ['roomId', 'manifestId'] },
   shared_artefact_get: { required: ['roomId', 'artefactId'] },
   shared_artefact_list: { required: ['roomId'] },

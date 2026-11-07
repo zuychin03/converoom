@@ -262,6 +262,42 @@ test('complete human room lifecycle at desktop and mobile', async ({ page, reque
   expect(errors).toEqual([]);
 });
 
+test('inspects coding checkpoints and rolls an attempt back at desktop and mobile', async ({ page, request }, info) => {
+  const errors: string[] = [];
+  watch(page, errors);
+  const code = (await (await request.post('http://127.0.0.1:43318/pair')).json()).code;
+  const title = 'Checkpoint room ' + info.project.name;
+  expect((await request.post('http://127.0.0.1:43318/checkpoints?title=' + encodeURIComponent(title))).ok()).toBe(true);
+  await page.goto('/');
+  await page.getByLabel('Pairing code').fill(code);
+  await page.getByRole('button', { name: 'Connect to Converoom' }).click();
+  await expect(page.getByRole('heading', { name: title })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Room catalogue' }).getByText(/claim · checkpoint ×2/)).toBeVisible();
+  await page.getByRole('button', { name: 'Work', exact: true }).click();
+  const task = page.getByRole('listitem').filter({ hasText: 'Iterate on the readme' });
+  await task.getByText('Checkpoints · 2 kept · at checkpoint 2').click();
+  const rows = task.getByRole('list', { name: 'Checkpoints' }).getByRole('listitem');
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(2).getByText('Current', { exact: true })).toBeVisible();
+  await rows.nth(2).getByRole('button', { name: 'View changes' }).click();
+  const file = task.getByRole('region', { name: 'notes.txt' });
+  await expect(file.getByRole('cell', { name: 'Added: Second turn' })).toBeVisible();
+  await expect(file.getByText('Added', { exact: true })).toBeVisible();
+  expect(await task.evaluate((row) => row.scrollWidth <= row.clientWidth)).toBe(true);
+  await axe(page);
+  await task.screenshot({ path: '.artifacts/screenshots/' + info.project.name + '-checkpoints.png' });
+  await rows.nth(1).getByRole('button', { name: 'Roll back here' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Roll back to checkpoint 1' });
+  await dialog.getByLabel('Why roll back').fill('The second turn added the wrong file');
+  await axe(page);
+  await dialog.getByRole('button', { name: 'Roll back', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(task.getByText('Checkpoints · 2 kept · at checkpoint 1')).toBeVisible();
+  await expect(rows.nth(1).getByText('Current', { exact: true })).toBeVisible();
+  await expect(rows.nth(2).getByText('Superseded', { exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('creates rooms from templates and sets seat models and efforts at desktop and mobile', async ({ page, request }, info) => {
   const errors: string[] = [];
   watch(page, errors);

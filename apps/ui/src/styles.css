@@ -1506,6 +1506,140 @@ textarea {
 .task-changes pre {
   margin: var(--space-2) 0;
 }
+.checkpoint-list {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.checkpoint {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr) auto;
+  gap: 2px var(--space-3);
+  align-items: center;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--hairline);
+}
+.checkpoint > .num {
+  grid-row: span 2;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.checkpoint-title {
+  color: var(--ink);
+  font-size: var(--text-xs);
+}
+.checkpoint-meta {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.checkpoint-end {
+  display: flex;
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: flex-end;
+}
+.checkpoint-diff {
+  margin-top: var(--space-3);
+}
+.diff {
+  display: grid;
+  gap: var(--space-4);
+}
+.diff-file {
+  min-width: 0;
+  border: 1px solid var(--hairline);
+}
+.diff-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: baseline;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+  font-weight: 400;
+}
+.diff-head code {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.diff-change {
+  color: var(--muted);
+  font-family: var(--font-label);
+  font-size: 0.6875rem;
+  font-stretch: 125%;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.diff-note {
+  margin: var(--space-2) var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.diff-lines {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.6;
+}
+.diff-lines td {
+  padding: 0 var(--space-2);
+  vertical-align: top;
+}
+.diff-old,
+.diff-new,
+.diff-mark {
+  width: 1%;
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+  user-select: none;
+}
+.diff-text {
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff-add {
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+.diff-del {
+  background: color-mix(in srgb, var(--fail) 12%, transparent);
+}
+.diff-add .diff-mark,
+.diff-add .diff-text,
+.diff-del .diff-mark,
+.diff-del .diff-text {
+  color: var(--ink);
+}
+.diff-gap td {
+  padding: var(--space-1) var(--space-2);
+  border-block: 1px solid var(--hairline);
+}
+.diff-expand {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.diff-expand:hover {
+  color: var(--ink);
+}
+.diff-expand:focus-visible {
+  outline: 2px solid var(--red-ink);
+  outline-offset: 2px;
+}
 .stages {
   display: flex;
   gap: 2px;
@@ -1932,6 +2066,14 @@ textarea {
   }
   .task-changes {
     grid-column: 1;
+  }
+  .checkpoint {
+    grid-template-columns: 2rem minmax(0, 1fr);
+  }
+  .checkpoint-end {
+    grid-column: 2;
+    grid-row: auto;
+    justify-content: flex-start;
   }
   .source,
   .source.cleanup-entry {

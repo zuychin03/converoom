@@ -159,6 +159,22 @@ it('keeps the single-attempt cleanup under the same rules', async () => {
   await expect(stat(String(submitted.at.path))).rejects.toThrow();
 });
 
+it('keeps an attempt\'s checkpoints while its workspace is kept and removes them with it', async () => {
+  const at = await claim('a');
+  await writeFile(join(String(at.path), 'a.txt'), 'checkpointed');
+  core.store.put('attempt', String(at.id), { ...core.store.get<ToolArgs>('attempt', String(at.id)), status: 'checkpointing' });
+  await workspace.checkpoint(String(at.id), 'turn-a');
+  const dir = join(data, 'checkpoints', String(at.id));
+  expect(core.store.get('checkpoint', at.id + ':1')).toMatchObject({ status: 'kept', turnIds: ['turn-a'] });
+  await call('task_submit', { roomId: room.id, attemptId: at.id });
+  expect(byName(await preview()).get(String(at.id))).toMatchObject({ removable: false, reason: 'unexported' });
+  expect(existsSync(dir)).toBe(true);
+  exported();
+  await call('workspace_cleanup', { attemptId: at.id, confirm: true });
+  expect(existsSync(dir)).toBe(false);
+  expect(core.store.get('checkpoint', at.id + ':1')).toMatchObject({ status: 'pruned', reason: 'workspace_removed' });
+});
+
 it('prints the preview and the removal for the CLI', () => {
   const entries = [
     { name: 'a1', path: 'C:/data/workspaces/a1', kind: 'attempt', removable: true, detail: 'Submitted and exported', bytes: 2048 },
