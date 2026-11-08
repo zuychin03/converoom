@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 (Windows V1.2 preview, 08/11/2026)
+
+Installing Converoom with npx, or into a project, no longer downloads its development tools. npm installed every package in the bundled lockfile, so those installs added about 450 packages and 1.1 GB, including TypeScript, ESLint and the test tools. The packed lockfile now lists only what Converoom needs to run, about 160 packages; the repository's own lockfile is unchanged. Global installs were not affected. The release manifest now gives the V1.2 preview status and the digest of the lockfile that ships, where 0.3.0's still described the V1.1 preview.
+
 ## 0.3.0 (Windows V1.2 preview, 08/11/2026)
 
 This is the Windows V1.2 preview and the first release on npm, as `@converoom/cli` under the `preview` tag, published from GitHub Actions with provenance. It adds the V1.2 features below: finding and connecting installed agents, auto-start from an agent's chat, room templates, each seat's model and effort, coding attempts over several turns with checkpoints and rollback, line comments in reviews, export to a local branch, imported conversation context, threads and pins, barge-in and takeover. They have fixture tests and pass Windows CI. Live vendor checks for them are still open, apart from Codex history reads, as are the two-Windows shared pilot, fresh-user onboarding and a manual accessibility review. Room data from 0.2.0 carries over when you run `converoom upgrade`, and `converoom recover --rollback` returns to 0.2.0.

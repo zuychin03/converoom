@@ -120,7 +120,7 @@ export async function startManaged(
     };
     try {
       await rpc.request('initialize', {
-        clientInfo: { name: 'converoom', version: '0.3.0' },
+        clientInfo: { name: 'converoom', version: '0.3.1' },
         capabilities: { experimentalApi: false },
       });
       rpc.notify('initialized');

@@ -9,7 +9,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ConveroomError } from '../../../packages/shared/src/contracts.js';
 import { scopeDigest } from '../../../packages/store/src/index.js';
-export const VERSION = '0.3.0';
+export const VERSION = '0.3.1';
 export function dataDirectory() {
   return (
     process.env.CONVEROOM_DATA_DIR ??

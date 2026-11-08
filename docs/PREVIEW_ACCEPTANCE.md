@@ -1,6 +1,6 @@
 # Windows preview acceptance
 
-08/11/2026. Converoom 0.3.0 is the Windows V1.2 preview. It is not full V1, V1.1 or V1.2 certification. The public [requirement matrix](REQUIREMENT_MATRIX.md) preserves all 97 requirements and the remaining gates. The full implementation specification is local-only. Sections from earlier previews are kept below as history.
+08/11/2026. Converoom 0.3.1 is the Windows V1.2 preview. It is not full V1, V1.1 or V1.2 certification. The public [requirement matrix](REQUIREMENT_MATRIX.md) preserves all 97 requirements and the remaining gates. The full implementation specification is local-only. Sections from earlier previews are kept below as history.
 
 ## V1.2 local evidence
 
@@ -9,6 +9,8 @@ The V1.2 requirements (FR-55 to FR-58, FR-61 to FR-66 and NFR-19) are locally im
 Live vendor evidence for V1.2 comes from two checks. On 29/10/2026 discovery ran once against the agents installed on the reference machine, without inference or sign-in. On 07/11/2026 a read-only Codex check (codex-cli 0.164.0) confirmed that thread/read and thread/items/list return history without loading the thread or starting a turn, so Codex history import is on. No managed coding turn, cancellation, quota failure, amendment or takeover has run against a live vendor.
 
 Packed checks on 08/11/2026 used Node 24.21.0 and npm 11.8.0 with an empty npm cache and temporary prefixes and data folders. A plain `npm install --global` of the 0.3.0 tarball, without `--ignore-scripts`, installed 163 packages and ran. The npx path ran `converoom setup`. A 0.2.0 package built from 94de264 set up a data folder, connected a fixture Cursor configuration and stored a room message. `converoom upgrade` from the 0.3.0 package made a pre-upgrade backup, switched to 0.3.0 and pointed Cursor at the new runtime while keeping the file's other settings. The 0.3.0 runtime read the 0.2.0 message, returned the V1.2 context layers and listed threads. `converoom recover --rollback` returned to 0.2.0 without `--confirm`, since the store format is unchanged, and 0.2.0 read the messages from both versions. The tarball holds 37 files and no private paths. This was not a fresh-machine or fresh-user run.
+
+From 0.3.1 the packed lockfile keeps only the 161 production entries, since npm otherwise installs a dependency's whole lockfile. Installing the 0.3.1 tarball into a project, as npx does, added 163 packages (133 MB) where 0.3.0 added 452 (1.1 GB) with its development tools, and the global and npx installs ran 0.3.1.
 
 ## Agent and installation expansion evidence
 

@@ -15,7 +15,7 @@ export async function handleSharedMcp(request: IncomingMessage, response: Server
     (request.headers['mcp-protocol-version'] && request.headers['mcp-protocol-version'] !== SHARED_PROTOCOL) ||
     (message?.method === 'initialize' && message.params?.protocolVersion !== SHARED_PROTOCOL))
     throw new E('protocol', 'Use the tested stateless MCP protocol ' + SHARED_PROTOCOL, 400);
-  const server = new Server({ name: 'converoom-shared', version: '0.3.0' }, { capabilities: { tools: {}, ...(context ? { resources: {}, prompts: {} } : {}) } });
+  const server = new Server({ name: 'converoom-shared', version: '0.3.1' }, { capabilities: { tools: {}, ...(context ? { resources: {}, prompts: {} } : {}) } });
   if (context) mountReadServices(server, (name, args) => sharedCommand(context.core, context.actor, context.roomId, context.generation, name, args), context.roomId);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: context ? TOOL_DEFINITIONS

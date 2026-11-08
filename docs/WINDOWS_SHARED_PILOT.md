@@ -1,6 +1,6 @@
 # Windows V1.1 private-room pilot
 
-08/11/2026. Package 0.3.0, Windows 11 x64, Node 24.21.0. The real two-machine pilot is pending. Local tests use an isolated TLS fixture and protocol stand-ins; they do not prove vendor acceptance or an installed Tailscale proxy.
+08/11/2026. Package 0.3.1, Windows 11 x64, Node 24.21.0. The real two-machine pilot is pending. Local tests use an isolated TLS fixture and protocol stand-ins; they do not prove vendor acceptance or an installed Tailscale proxy.
 
 ## Host setup
 

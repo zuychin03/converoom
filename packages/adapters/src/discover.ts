@@ -23,7 +23,7 @@ export interface Harness {
 }
 export interface Discovery { at: number; harnesses: Harness[] }
 type Handshake = { signIn: SignIn; models?: string[]; blocked?: string } | { failed: string };
-const CLIENT = { name: 'converoom', version: '0.3.0' };
+const CLIENT = { name: 'converoom', version: '0.3.1' };
 
 // FR-62: no thread, session or prompt is started, nothing is authenticated or refreshed, and no account detail is kept.
 async function codexHandshake(entry: { command: string; args: string[] }, cwd: string, env: NodeJS.ProcessEnv, waitMs: number): Promise<Handshake> {

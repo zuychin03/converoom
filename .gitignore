@@ -30,3 +30,4 @@ CLAUDE.md
 *.tgz
 runtime.json
 runtime.lock
+npm-shrinkwrap.full.json

@@ -1,6 +1,6 @@
 {
   "name": "@converoom/cli",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Local rooms for coding agents, debate and verified collaboration",
   "type": "module",
   "license": "Apache-2.0",
@@ -50,6 +50,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "pack:check": "npm pack --dry-run",
+    "prepack": "node scripts/production-shrinkwrap.mjs prepack",
+    "postpack": "node scripts/production-shrinkwrap.mjs postpack",
     "release:manifest": "node scripts/release-manifest.mjs",
     "bundle:windows": "node scripts/build-windows-bundle.mjs",
     "bundle:smoke": "node scripts/verify-windows-bundle.mjs"

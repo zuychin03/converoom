@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
+import { productionLockfile } from './production-shrinkwrap.mjs';
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex'),
   root = process.cwd(),
   meta = JSON.parse(readFileSync('package.json', 'utf8')),
@@ -91,11 +92,11 @@ writeFileSync(
       schemaVersion: 1,
       assets,
       version: meta.version,
-      date: '10/10/2026',
-      status: 'Windows V1.1 preview; real shared-room pilot and mandatory acceptance gates remain open',
+      date: '08/11/2026',
+      status: 'Windows V1.2 preview; live vendor acceptance, the real shared-room pilot and mandatory acceptance gates remain open',
       supportedPreview: { os: 'Windows 11', arch: 'x64', node: '24.21.0' },
       lockfile: 'npm-shrinkwrap.json',
-      lockfileSha256: digest(readFileSync('npm-shrinkwrap.json')),
+      lockfileSha256: digest(productionLockfile(readFileSync('npm-shrinkwrap.json', 'utf8'))),
       native: [
         {
           path: binary,
