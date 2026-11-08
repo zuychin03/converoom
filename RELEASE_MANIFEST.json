@@ -30,11 +30,11 @@
       "sha256": "809306f8444febde9c633c98531c6db7d3505735545b2369881e8cce511a31f9"
     },
     {
-      "path": "dist/ui/assets/index-B7BwTmnp.css",
-      "sha256": "9f21d51999c5bcf3024afa06fdfb772a157cdaff5d930bed706f84f225294479"
+      "path": "dist/ui/assets/index--b4HudPb.css",
+      "sha256": "c4222902a7b934e98df140e2e960cb3f61f97909e47d4fb7585fc830eeb451a4"
     },
     {
-      "path": "dist/ui/assets/index-PwhPHfCv.js",
+      "path": "dist/ui/assets/index-BYOaoPgh.js",
       "sha256": "c11c01ffb3aaa01ca92be0811fceb782d38304a2cc0567603ce9d8ecb77dee0e"
     },
     {
@@ -67,7 +67,7 @@
     },
     {
       "path": "dist/ui/index.html",
-      "sha256": "70fa7d027989c31fea67fa7b952ca9f80f74377f3eab254fe53971f4f185e801"
+      "sha256": "282c143f6c25fc77695ebae2f9702409d7899643cbafc5baff0e63a82c6e1ef4"
     },
     {
       "path": "plugins/README.md",

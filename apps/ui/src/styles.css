@@ -599,7 +599,7 @@ textarea {
   content: '';
   position: absolute;
   right: var(--space-3);
-  bottom: -1px;
+  bottom: 0;
   left: var(--space-3);
   height: 2px;
   background: var(--red);
@@ -2304,7 +2304,8 @@ textarea {
 .consent-form .checkbox-label input { width: auto; }
 .collaboration pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
 .shared-room-layout { grid-template-columns: minmax(0, 1fr) 19rem; }
-.nav { overflow-x: auto; }
+/* Scrolling sideways makes overflow-y auto too, so the nav reaches over the topbar hairline instead of spilling past it. */
+.nav { overflow-x: auto; overflow-y: hidden; align-self: stretch; margin-bottom: -1px; }
 .nav button { flex-shrink: 0; }
 @media (max-width: 1000px) { .shared-room-layout { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) { .collaboration { padding: var(--space-4); } .nav button { flex: 0 0 auto; } }
