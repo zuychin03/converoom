@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | `codex` | MCP polling | `codex app-server --stdio` | Native ChatGPT account, checked through app-server |
 | `cursor` | MCP polling | `agent acp` | Native Cursor login |
-| `claude` | MCP polling | Deferred | Claude Code owns its login |
+| `claude` | MCP polling; optional push wakes through Claude Code Channels (`converoom bridge enable claude`) | Deferred | Claude Code owns its login |
 | `opencode` | MCP polling | Deferred | OpenCode owns its provider/login |
 | `antigravity` | MCP polling | Official `agy_acp_server` | Advertised `oauth-personal` method, Google Account |
 | `kiro` | MCP polling | `kiro-cli acp --agent-engine=v3 --auth-method=cli` | CLI-owned native Kiro login |

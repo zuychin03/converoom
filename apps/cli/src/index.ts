@@ -32,6 +32,7 @@ import {
 import { probeProduct } from '../../../packages/adapters/src/index.js';
 import { PRODUCT_IDS, isProduct } from '../../../packages/shared/src/products.js';
 import { redactPublic } from '../../../packages/store/src/index.js';
+import { PUSH_BRIDGES } from '../../../packages/core/src/attachments.js';
 import { exportTranscript, type RoomExport } from '../../../packages/core/src/transcript.js';
 import type { Product, ToolArgs } from '../../../packages/shared/src/contracts.js';
 interface Metadata {
@@ -98,7 +99,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'Converoom ' +
         VERSION +
         '\nProducts: ' + products.join(', ') +
-        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor [--discover] | upgrade | recover [--rollback [--confirm]] | uninstall [--confirm [--delete-data DATA_DIR]]\nonboard --products codex,cursor | onboard --auto [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] [--auto-start] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup [--confirm CODE] | cleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
+        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor [--discover] | upgrade | recover [--rollback [--confirm]] | uninstall [--confirm [--delete-data DATA_DIR]]\nonboard --products codex,cursor | onboard --auto [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] [--auto-start] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nbridge enable|disable claude\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup [--confirm CODE] | cleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
     );
     return;
   }
@@ -344,6 +345,17 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const result = await call('remote_connection_prepare', { origin: flag('--origin'), remoteRoomId: flag('--room'), product: flag('--product') }) as ToolArgs;
     console.log('Open this private authorisation URL in your browser:\n' + result.authorizationUrl + '\nConnection: ' + result.connectionId);
     console.log('After approval, use connect PRODUCT --remote-connection ID. Native execution requires separate local approval.');
+    return;
+  }
+  if (command === 'bridge') {
+    const action = argv[1], bridge = argv[2] ?? '';
+    if ((action !== 'enable' && action !== 'disable') || !(bridge in PUSH_BRIDGES))
+      throw new Error('Use converoom bridge enable claude or converoom bridge disable claude');
+    await call(action === 'enable' ? 'push_bridge_enable' : 'push_bridge_disable', { bridge });
+    console.log(action === 'enable'
+      ? 'The Claude Code push bridge is on. Start Claude Code with claude --dangerously-load-development-channels server:converoom ' +
+        'and accept its warning, then let the agent ask to attach with seat_attach and approve it in the room.'
+      : 'The Claude Code push bridge is off. Attached Claude Code seats are back to polling their inbox.');
     return;
   }
   if (command === 'remote-disconnect' || command === 'remote-enable') {

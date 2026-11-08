@@ -47,7 +47,7 @@ The agent expansion adds Antigravity, Kiro, Qoder and Grok Build to FR-01/05/11/
 | FR-37 | Future phase | Membership revocation shall invalidate access and queued work. |
 | FR-38 | Future phase | Remote workers shall validate repository/base/dependency identity and local grants before execution. |
 | FR-39 | Future phase | Remote artefact import shall validate provenance, paths, size and exact bytes before checks. |
-| FR-40 | Future phase (V1.4) | Tested native push bridges shall wake an identified existing session when it receives a directed interaction. |
+| FR-40 | Claude Code Channels bridge locally implemented with fixture tests after a live capability spike; Cursor and OpenCode bridges, live bridge acceptance and release acceptance open | Tested native push bridges shall wake an identified existing session when it receives a directed interaction. |
 | FR-41 | Open V1 acceptance | Coding-worker admission shall bind a runtime-managed session to its registered workspace, content base, profile and attempt generation. |
 | FR-42 | Open V1 acceptance | The allocator shall atomically reserve a ready task and its full logical resource bundle across local rooms, then provision and validate before dispatch. |
 | FR-43 | Open V1 acceptance | Each attempt shall receive approved isolated mutable execution resources and a redacted environment manifest. |

@@ -309,6 +309,15 @@ export const requestDetails = (args: unknown, roomId: string) =>
 export const turnTarget = (seat: RecordData) =>
   seat.role !== 'observer' && seat.status !== 'left' && (seat.mode !== 'managed' || isManagedProduct(string(seat, 'product')));
 export const workerSeat = (seat: RecordData) => seat.mode === 'managed' && turnTarget(seat);
+// FR-40: an attached seat still polls; this says whether push wakes are reaching its session. Status labels never wrap, so the detail is separate.
+export function attachmentState(attachment: RecordData | undefined): { kind: Kind; label: string; detail: string } | undefined {
+  if (!attachment) return undefined;
+  if (attachment.status === 'suspended') return { kind: 'warn', label: 'Push paused, polling', detail: string(attachment, 'reason') };
+  const detail = 'Push wakes through its Claude Code channel';
+  const attempts = isRecord(attachment.wake) ? num(attachment.wake, 'attempts') ?? 1 : 0;
+  if (attempts) return { kind: 'live', label: 'Attached · wake sent' + (attempts > 1 ? ', attempt ' + attempts : ''), detail };
+  return { kind: 'ok', label: 'Attached · wake ' + (attachment.tested === true ? 'tested' : 'untested'), detail };
+}
 export function capabilityLine(seat: RecordData) {
   const capabilities = isRecord(seat.capabilities) ? seat.capabilities : {};
   const named = (key: string, empty: string) => list(capabilities, key).join(', ') || empty;

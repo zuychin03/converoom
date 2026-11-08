@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClient, ApiError, parseSnapshot } from '../apps/ui/src/api.js';
 import { createRoomAction, grantAction, roundRobinAction, seatProfileAction, templateRoomAction } from '../apps/ui/src/actions.js';
-import { capabilityLine, profileLabel, slotChoices, slotSeat, commandLabel, failureLabel, fmtBytes, interruptedFor, liveRoomId, readiness, requestDetails, roomEvents, rosterOptions, seatState, turnEvidence, turnKind, turnTarget, visibleTurn, withEarlier, workerSeat } from '../apps/ui/src/model.js';
+import { attachmentState, capabilityLine, profileLabel, slotChoices, slotSeat, commandLabel, failureLabel, fmtBytes, interruptedFor, liveRoomId, readiness, requestDetails, roomEvents, rosterOptions, seatState, turnEvidence, turnKind, turnTarget, visibleTurn, withEarlier, workerSeat } from '../apps/ui/src/model.js';
 import { coalesce } from '../apps/ui/src/refresh.js';
 import { roomStatus } from '../apps/ui/src/RoomView.js';
 
@@ -333,4 +333,16 @@ it('ends a saved template description with a full stop before the template note'
   const note = 'The template sets the starter agenda, agent wakes and any lowered budgets.';
   expect(templateRoomAction({ id: 't', name: 'T', description: 'Our cache review', slots: [] }, () => {}).description).toBe('Our cache review. ' + note);
   expect(templateRoomAction({ id: 't', name: 'T', description: '', slots: [] }, () => {}).description).toBe(note);
+});
+it('labels an attached seat by whether push wakes are reaching its session, and the attach approval', () => {
+  expect(attachmentState(undefined)).toBeUndefined();
+  const detail = 'Push wakes through its Claude Code channel';
+  expect(attachmentState({ status: 'attached', tested: false })).toEqual({ kind: 'ok', label: 'Attached · wake untested', detail });
+  expect(attachmentState({ status: 'attached', tested: true })).toEqual({ kind: 'ok', label: 'Attached · wake tested', detail });
+  expect(attachmentState({ status: 'attached', tested: true, wake: { attempts: 1 } })).toEqual({ kind: 'live', label: 'Attached · wake sent', detail });
+  expect(attachmentState({ status: 'attached', tested: true, wake: { attempts: 3 } })).toEqual({ kind: 'live', label: 'Attached · wake sent, attempt 3', detail });
+  expect(attachmentState({ status: 'suspended', reason: 'No inbox read after 4 wake notices' }))
+    .toEqual({ kind: 'warn', label: 'Push paused, polling', detail: 'No inbox read after 4 wake notices' });
+  expect(grantAction({ id: 'p1', action: 'seat_attach', scopeDigest: 'd1', expiresAt: 1, scope: {} }))
+    .toMatchObject({ command: 'permission_grant', label: 'Attach session', args: { requestId: 'p1', scopeDigest: 'd1' } });
 });

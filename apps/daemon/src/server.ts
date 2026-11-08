@@ -27,13 +27,15 @@ import type { SharedArtefact } from '../../../packages/shared/src/contracts.js';
 import { hash, humanIdentity, issueBridgeCredential, revokeBridgeCredential, secret } from './bridges.js';
 import { latestDiscovery } from '../../cli/src/discovery.js';
 import { BUILT_IN_TEMPLATES } from '../../../packages/core/src/templates.js';
+import { createWakeHub, SESSION_ID } from './wakes.js';
 export { humanIdentity, issueBridgeCredential, ownerIdentity, revokeBridgeCredential } from './bridges.js';
 
 export const VERSION = '0.3.1';
 const equal = (a: string, b: string) =>
   a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 // Each of these is refused before the command writes anything.
-const UNCOMMITTED = ['invalid_argument', 'unknown_command', 'unauthorised', 'invalid_csrf', 'human_session_required', 'budget_exhausted'];
+const UNCOMMITTED = ['invalid_argument', 'unknown_command', 'unauthorised', 'invalid_csrf', 'human_session_required', 'budget_exhausted',
+  'wake_stream_unavailable'];
 const outcome = (name: string, args: ToolArgs) => ({ committed: !READ_COMMANDS.has(name), retrySafe: READ_COMMANDS.has(name) ||
   (typeof args.clientKey === 'string' && TOOL_DEFINITIONS.some((t) => t.name === name) &&
     !['task_claim', 'task_submit', 'verification_request', 'integration_prepare'].includes(name)) });
@@ -48,6 +50,7 @@ const installation = {
   contextRequests: 'context_request',
   remoteConnections: 'remote_connection',
   remoteProposals: 'remote_proposal',
+  pushBridges: 'push_bridge',
 };
 const roomScoped = {
   seats: 'seat',
@@ -69,6 +72,7 @@ const roomScoped = {
   pins: 'pin',
   threadSummaries: 'thread_summary',
   directives: 'directive',
+  attachments: 'attachment',
 };
 const ACTIVE_TURNS = ['dispatching', 'running', 'cancelling'];
 // The store reads at most 1,000 events per call.
@@ -107,6 +111,8 @@ export interface ServerOptions {
   onPairingCode?: (code: string, expiresAt: number) => void;
   uiDir?: string;
   onStop?: () => Promise<void>;
+  // Test override for the wake hub's tick; 0 stops its timer.
+  wakeTickMs?: number;
 }
 export async function createServer(
   runtime: Runtime,
@@ -121,6 +127,7 @@ export async function createServer(
   const sessions = new Map<string, { csrf: string; expiresAt: number }>();
   const rates = new Map<string, { at: number; count: number }>();
   const streams = new Set<() => void>();
+  const wakes = createWakeHub(runtime.core.store, options.wakeTickMs);
   const browserOrigin = (request: FastifyRequest, required: boolean) => {
     if (
       (required && !request.headers.origin) ||
@@ -282,6 +289,8 @@ export async function createServer(
     'room_barge_in',
     'turn_amend',
     'directive_clear',
+    'push_bridge_enable',
+    'push_bridge_disable',
     'attempt_takeover',
     'session_context_decide',
     'session_context_codex_threads',
@@ -348,7 +357,7 @@ export async function createServer(
     if ((request.body as { name?: string })?.name !== 'shared_artefact_publish') throw new ConveroomError('invalid_argument', 'Artefact publication required');
     return dispatch(request, human);
   });
-  app.post('/agent/commands', async (request) => {
+  const agentPrincipal = (request: FastifyRequest) => {
     browserOrigin(request, false);
     const auth = String(request.headers.authorization ?? '');
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
@@ -359,6 +368,10 @@ export async function createServer(
       runtime.core.store.get('revoked', principal.principalId)
     )
       throw new ConveroomError('unauthorised', 'Agent bridge credential required', 401);
+    return principal;
+  };
+  app.post('/agent/commands', async (request) => {
+    const principal = agentPrincipal(request);
     if (principal.remoteConnectionId) {
       const body = request.body as { name?: string; args?: ToolArgs };
       const result = await runtime.core.dispatch({ kind: 'agent', ownerId: principal.ownerId, principalId: principal.principalId },
@@ -389,11 +402,37 @@ export async function createServer(
         return { result: redact(result), committed: SHARED_WRITES.has(String(body.name)), retrySafe: SHARED_READS.has(String(body.name)) || typeof body.args?.clientKey === 'string' };
       }
     }
+    const session = String(request.headers['x-converoom-session'] ?? '');
+    const sessionId = SESSION_ID.test(session) && wakes.belongs(session, principal.principalId) ? session : undefined;
+    if ((request.body as { name?: unknown } | undefined)?.name === 'seat_attach' && !(sessionId && wakes.owns(sessionId, principal.principalId)))
+      throw new ConveroomError('wake_stream_unavailable',
+        'This session has no open Converoom wake stream. Ask again in a few seconds, or restart Claude Code if it persists', 409);
     return dispatch(request, {
       kind: 'agent',
       principalId: principal.principalId,
       ownerId: principal.ownerId,
+      ...(sessionId ? { sessionId } : {}),
     });
+  });
+  app.get('/agent/wakes', async (request, reply) => {
+    const principal = agentPrincipal(request), sessionId = String(request.headers['x-converoom-session'] ?? '');
+    if (principal.scope || principal.remoteConnectionId)
+      throw new ConveroomError('wake_scope', 'Only a local agent connection receives wakes', 403);
+    if (!SESSION_ID.test(sessionId)) throw new ConveroomError('invalid_argument', 'Wake session ID required');
+    const finish = wakes.open(sessionId, principal.principalId, { write: (text) => reply.raw.write(text), close: () => reply.raw.end() });
+    if (!finish) throw new ConveroomError('session_conflict', 'That wake session belongs to another connection', 409);
+    reply.hijack();
+    reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-content-type-options': 'nosniff' });
+    reply.raw.write(': open\n\n');
+    const heartbeat = setInterval(() => reply.raw.write(': keepalive\n\n'), 15000);
+    const done = () => {
+      clearInterval(heartbeat);
+      finish();
+      streams.delete(done);
+      reply.raw.end();
+    };
+    streams.add(done);
+    request.raw.on('close', done);
   });
   app.post('/local/commands', async (request) => {
     localAuth(request);
@@ -512,6 +551,7 @@ export async function createServer(
     );
   }
   app.addHook('onClose', async () => {
+    wakes.close();
     for (const finish of streams) finish();
     sessions.clear();
   });
@@ -521,6 +561,7 @@ export async function createServer(
     app,
     url,
     close: async () => {
+      wakes.close();
       for (const finish of streams) finish();
       await app.close();
     },

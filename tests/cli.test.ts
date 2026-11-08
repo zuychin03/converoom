@@ -133,3 +133,11 @@ it('reports whether a product is registered for this data directory and its save
     expect(JSON.stringify(await connectionReport('codex', dataDir, codexConfig, active))).not.toContain(credential.token);
   } finally { await server.close(); await runtime.stop(); await rm(root, { recursive: true, force: true }); }
 }, 30000);
+it('routes bridge enable and disable through a paired owner command and refuses anything else', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'converoom-bridge-'));
+  try {
+    await expect(main(['bridge', 'toggle', 'claude', '--data-dir', dataDir])).rejects.toThrow(/bridge enable claude/);
+    await expect(main(['bridge', 'enable', 'cursor', '--data-dir', dataDir])).rejects.toThrow(/bridge enable claude/);
+    await expect(main(['bridge', 'enable', 'claude', '--data-dir', dataDir])).rejects.toThrow(/interactive terminal/);
+  } finally { await rm(dataDir, { recursive: true, force: true }); }
+});

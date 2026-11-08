@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -8,6 +9,7 @@ import { RuntimeUnavailable, runtimeCaller, type AutoStart } from './runtime.js'
 import { SHARED_READS, SHARED_WRITES } from '../../core/src/membership.js';
 import { mountReadServices } from './read-services.js';
 import { readCredential } from '../../../apps/cli/src/credentials.js';
+import { CHANNEL_INSTRUCTIONS, channelNotice, watchWakes } from './wakes.js';
 export async function serveMcp(
   dataDir: string,
   client: string,
@@ -16,9 +18,13 @@ export async function serveMcp(
 ): Promise<void> {
   const credential = await readCredential<{ token: string; principalId: string; scope?: ManagedScope; remoteConnectionId?: string }>(
     credentialFile ?? join(dataDir, 'clients', client + '.json'));
+  // FR-40: only an unscoped Claude Code connection offers the channel, and each MCP process is its own wake session.
+  const sessionId = client === 'claude' && !credential.scope && !credential.remoteConnectionId ? randomUUID() : undefined;
   const server = new Server(
     { name: 'converoom', version: '0.3.1' },
-    { capabilities: { tools: {}, resources: {}, prompts: {} } },
+    sessionId
+      ? { capabilities: { tools: {}, resources: {}, prompts: {}, experimental: { 'claude/channel': {} } }, instructions: CHANNEL_INSTRUCTIONS }
+      : { capabilities: { tools: {}, resources: {}, prompts: {} } },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: TOOL_DEFINITIONS.filter((t) => (!credential.scope || MANAGED_TOOLS.has(t.name)) &&
@@ -27,7 +33,7 @@ export async function serveMcp(
       inputSchema: { ...t.inputSchema, type: 'object' as const },
     })),
   }));
-  const call = runtimeCaller({ dataDir, client, token: credential.token, autoStart });
+  const call = runtimeCaller({ dataDir, client, token: credential.token, autoStart, sessionId });
   const command = async (name: string, args: Record<string, unknown>) => {
     validateToolArgs(name, args);
     return call(name, args);
@@ -63,4 +69,11 @@ export async function serveMcp(
     }
   });
   await server.connect(new StdioServerTransport());
+  if (!sessionId) return;
+  // The wake stream would otherwise keep this process, and its session, alive after the client has gone.
+  const stop = new AbortController(), end = () => stop.abort();
+  process.stdin.once('end', end).once('close', end);
+  server.onclose = end;
+  void watchWakes({ dataDir, token: credential.token, sessionId, signal: stop.signal,
+    onWake: (wake) => server.notification(channelNotice(wake)) });
 }

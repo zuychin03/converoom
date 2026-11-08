@@ -39,6 +39,7 @@ import {
   FINDINGS,
   OPEN_TURN,
   activity,
+  attachmentState,
   capabilityLine,
   profileLabel,
   data,
@@ -98,6 +99,11 @@ const SYSTEM_LABELS: Record<string, string> = {
   'seat.left': 'seat left',
   'seat.consent': 'consent',
   'seat.profile': 'model and effort',
+  'seat.attached': 'attached',
+  'seat.attachment_tested': 'wake tested',
+  'seat.attachment_suspended': 'push paused',
+  'seat.attachment_resumed': 'push resumed',
+  'seat.attachment_ended': 'detached',
   'policy.changed': 'limits',
   'host.transferred': 'host',
   'room.paused': 'paused',
@@ -602,6 +608,7 @@ export function RoomView({
                 shared={shared}
                 remote={seat.ownerId !== room.ownerId}
                 ownerLabel={string(state.members.find((m) => m.ownerId === seat.ownerId) ?? {}, 'displayName', 'Local room owner')}
+                attachment={state.attachments.find((a) => a.seatId === seat.id)}
               />
             ))}
           </ul>
@@ -641,6 +648,7 @@ function SeatRow({
   shared,
   remote,
   ownerLabel,
+  attachment,
 }: {
   seat: RecordData;
   st: ReturnType<typeof seatState>;
@@ -653,12 +661,25 @@ function SeatRow({
   shared?: boolean;
   remote?: boolean;
   ownerLabel: string;
+  attachment?: RecordData;
 }) {
   const id = string(seat, 'id');
   const managed = seat.mode === 'managed';
+  const push = attachmentState(attachment);
   const consent = seat.consent === true;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  async function detach() {
+    setBusy(true);
+    setError('');
+    try {
+      await run('seat_detach', { roomId: seat.roomId, seatId: id });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The session was not detached.');
+    } finally {
+      setBusy(false);
+    }
+  }
   async function toggle() {
     setBusy(true);
     setError('');
@@ -699,6 +720,19 @@ function SeatRow({
         {managed && <>Model and effort · {profileLabel(seat.profile) || 'agent defaults'}<br /></>}
         {capabilityLine(seat)}
       </p>
+      {push && (
+        <>
+          <Status kind={push.kind}>{push.label}</Status>
+          <p className="seat-meta">{push.detail}</p>
+        </>
+      )}
+      {push && !shared && !remote && (
+        <div className="seat-actions">
+          <button type="button" className="button small" disabled={busy} onClick={() => void detach()}>
+            Detach session
+          </button>
+        </div>
+      )}
       {(managed || shared || remote) && turnTarget(seat) && (
         <div className="seat-actions">
           {!shared && !remote && <button
@@ -1750,6 +1784,16 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
       return `${seat(d.seatId)} left the room`;
     case 'seat.consent':
       return d.consent ? `Turn requests allowed for ${seat(d.seatId)}` : `Turn requests turned off for ${seat(d.seatId)}`;
+    case 'seat.attached':
+      return `${seat(d.seatId)} attached its Claude Code session for push wakes`;
+    case 'seat.attachment_tested':
+      return `Push wake reached ${seat(d.seatId)}'s session`;
+    case 'seat.attachment_suspended':
+      return `Push wakes paused for ${seat(d.seatId)}, back to polling · ${string(d, 'reason')}`;
+    case 'seat.attachment_resumed':
+      return `Push wakes resumed for ${seat(d.seatId)}`;
+    case 'seat.attachment_ended':
+      return `${seat(d.seatId)} is no longer attached · ${string(d, 'reason')}`;
     case 'seat.profile':
       return profileLabel(d.profile) ? `Model and effort for ${seat(d.seatId)} · ${profileLabel(d.profile)}` : `Model and effort for ${seat(d.seatId)} cleared · agent defaults`;
     case 'room.paused':

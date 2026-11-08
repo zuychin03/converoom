@@ -32,6 +32,7 @@ import { mountContexts, resolveRefs } from './contexts.js';
 import { applyGrantedPin, contextLayers, mountThreads, openThread } from './threads.js';
 import { DIRECTIVE_TOOLS, mountDirectives, withDirectives } from './directives.js';
 import { hostBrief, mountTakeover, reassignedNotes, takeoverNotes } from './takeover.js';
+import { applyGrantedAttach, mountAttachments, noteInboxRead } from './attachments.js';
 // Reads rerun on retry, so their results are never stored under a client key.
 export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
   'resource_profile_list', 'adapter_status', 'adapter_discover', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview', 'template_list',
@@ -583,9 +584,11 @@ export function createCore(store: Store): Core {
         'remote_connection_enable',
       ];
       const roomId = typeof x.roomId === 'string' ? x.roomId : undefined;
+      // Every session of one connection shares its principal, and an attach request belongs to the session that asked.
+      const keyed = n === 'seat_attach' && a.sessionId ? a.principalId + ':' + a.sessionId : a.principalId;
       try {
         const result = typeof x.clientKey === 'string' && !external.includes(n) && !READ_COMMANDS.has(n)
-          ? store.idempotent(a.principalId, n, x.clientKey, x, () => h(a, x)) : await h(a, x);
+          ? store.idempotent(keyed, n, x.clientKey, x, () => h(a, x)) : await h(a, x);
         if (roomId && !READ_COMMANDS.has(n)) {
           exhaustBudgets(store, roomId);
           settlePause(store, roomId);
@@ -872,24 +875,24 @@ export function createCore(store: Store): Core {
       .filter(
         (i) => i.roomId === r.id && (!s || i.recipientId === s.id) && !['resolved', 'reassigned'].includes(i.status),
       );
-    if (s)
+    const turns = store
+      .list<Turn>('turn')
+      .filter(
+        (t) =>
+          t.roomId === r.id &&
+          (!s || t.seatId === s.id) &&
+          !['completed', 'failed', 'cancelled'].includes(t.status),
+      );
+    if (s) {
       for (const i of interactions)
         if (i.status === 'stored') {
           i.status = 'delivered';
           i.deliveredAt = Date.now();
           store.put('interaction', i.id, i);
         }
-    return {
-      interactions,
-      turns: store
-        .list<Turn>('turn')
-        .filter(
-          (t) =>
-            t.roomId === r.id &&
-            (!s || t.seatId === s.id) &&
-            !['completed', 'failed', 'cancelled'].includes(t.status),
-        ),
-    };
+      noteInboxRead(store, a, s, turns.filter((t) => t.status === 'queued').map((t) => t.id));
+    }
+    return { interactions, turns };
   });
   c.register('interaction_resolve', (a, x) => {
     const r = host(a, str(x, 'roomId')),
@@ -1072,6 +1075,7 @@ export function createCore(store: Store): Core {
     refuseUsed(store, r, ['message', 'time']);
     const next = { ...t, status: 'running' as const, startedAt: Date.now() };
     store.put('turn', t.id, next);
+    noteInboxRead(store, a, s);
     ev(a, r.id, 'turn.started', { turnId: t.id, externalPolling: true, newManagedSession: false });
     return next;
   }));
@@ -1136,6 +1140,10 @@ export function createCore(store: Store): Core {
       const g = grantPermission(store, a, p);
       applyGrantedPin(store, a, p);
       return g;
+    });
+    if (p.action === 'seat_attach') return store.transaction(() => {
+      applyGrantedAttach(store, a, p);
+      return grantPermission(store, a, p);
     });
     const g = grantPermission(store, a, p);
     if (plan) {
@@ -1240,5 +1248,6 @@ export function createCore(store: Store): Core {
   mountThreads(c, (a, r, scope, summary) => requestPermission(store, a, r, 'context_pin', scope, summary));
   mountTakeover(c);
   mountDirectives(c, { queue: (a, r, s, x) => queueTurn(store, a, r, s, x), grant: (a, p) => { grantPermission(store, a, p); } });
+  mountAttachments(c, (a, r, scope, summary) => requestPermission(store, a, r, 'seat_attach', scope, summary));
   return c;
 }

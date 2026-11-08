@@ -21,6 +21,7 @@ export function GrantSlip({
   const waitEnds = agentWaitEnds(permission);
   const transfer = permission.action === 'host_transfer';
   const plan = permission.action === 'round_robin';
+  const attach = permission.action === 'seat_attach';
   const grant = () => openAction(grantAction(permission));
   const deny = () =>
     openAction({
@@ -63,7 +64,7 @@ export function GrantSlip({
         </div>
       </dl>
       <details className="raw" open={!compact}>
-        <summary>{transfer ? 'Exact transfer request' : plan ? 'Exact round-robin plan' : 'Exact execution scope'}</summary>
+        <summary>{transfer ? 'Exact transfer request' : plan ? 'Exact round-robin plan' : attach ? 'Exact attach request' : 'Exact execution scope'}</summary>
         <pre tabIndex={0}>{JSON.stringify(permission.scope, null, 2)}</pre>
       </details>
       <div className="slip-actions">
@@ -71,7 +72,7 @@ export function GrantSlip({
           Deny
         </button>
         <button type="button" className="button primary" onClick={grant}>
-          {transfer ? 'Review transfer' : plan ? 'Review plan' : 'Review and grant'}
+          {transfer ? 'Review transfer' : plan ? 'Review plan' : attach ? 'Review attach' : 'Review and grant'}
         </button>
       </div>
     </article>

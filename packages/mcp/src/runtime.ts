@@ -18,10 +18,11 @@ export class RuntimeUnavailable extends ConveroomError {
 // The call never left the bridge: the runtime's metadata is gone or nothing listens on its recorded port.
 const unsent = (e: unknown) => (e as NodeJS.ErrnoException).code === 'ENOENT' || (e as { cause?: { code?: string } }).cause?.code === 'ECONNREFUSED';
 
-export function runtimeCaller(o: { dataDir: string; client: string; token: string; autoStart?: AutoStart }) {
+export function runtimeCaller(o: { dataDir: string; client: string; token: string; autoStart?: AutoStart; sessionId?: string }) {
   const send = async (name: string, args: Record<string, unknown>) => {
     const runtime = JSON.parse(await readFile(join(o.dataDir, 'runtime.json'), 'utf8')) as { url: string };
-    const response = await fetch(runtime.url + '/agent/commands', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + o.token },
+    const response = await fetch(runtime.url + '/agent/commands', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + o.token,
+      ...(o.sessionId ? { 'X-Converoom-Session': o.sessionId } : {}) },
       body: JSON.stringify({ name, args }), signal: AbortSignal.timeout(35000) });
     return { response, value: await response.json() as Reply };
   };

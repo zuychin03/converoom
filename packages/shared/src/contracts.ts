@@ -9,6 +9,8 @@ export interface Actor {
   principalId: string;
   ownerId: string;
   seatId?: string;
+  // The MCP process an agent call came through, supplied by the transport; push wakes are bound to one.
+  sessionId?: string;
 }
 export interface Event {
   id: string;

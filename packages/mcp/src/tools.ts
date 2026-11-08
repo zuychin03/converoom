@@ -71,6 +71,8 @@ const mutationNames = new Set([
   'thread_summarize',
   'context_pin',
   'interaction_reassign',
+  'seat_attach',
+  'seat_detach',
 ]);
 const corpus: Record<string, { required: string[]; fields?: Record<string, unknown> }> = {
   room_create: {
@@ -90,6 +92,8 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
   room_list: { required: [] },
   room_join: { required: ['roomId'], fields: { name: small, product: small } },
   room_leave: { required: ['roomId'] },
+  seat_attach: { required: ['roomId'] },
+  seat_detach: { required: ['roomId'], fields: { seatId: small } },
   room_post: {
     required: ['roomId', 'text'],
     fields: {
