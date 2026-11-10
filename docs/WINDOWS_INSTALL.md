@@ -1,10 +1,10 @@
 # Windows installation bundle
 
-08/11/2026. Windows 11 x64 preview, package 0.3.1. Use 64-bit Windows PowerShell 5.1 or PowerShell 7. The default installer installs Converoom, a private Node 24.21.0 runtime, missing Git and Tailscale, and Codex when missing. No existing Node, npm, repository checkout, native compiler or application build is needed.
+11/11/2026. Windows 11 x64 preview, package 0.3.2. Use 64-bit Windows PowerShell 5.1 or PowerShell 7. The default installer installs Converoom, a private Node 26.13.0 runtime, missing Git and Tailscale, and Codex when missing. No existing Node, npm, repository checkout, native compiler or application build is needed.
 
 ## Install in one run
 
-Download `converoom-0.3.1-windows-x64.zip` from the [0.3.1 release](https://github.com/zuychin03/converoom/releases/tag/v0.3.1) and extract it into a local folder. For a development build, download the `converoom-windows-x64` artefact from a successful [Windows preview workflow](https://github.com/zuychin03/converoom/actions/workflows/windows-preview.yml) instead, check its source commit matches the version you want, and extract the artefact and the bundle zip inside it. Review this guide and `install.ps1`, then open PowerShell in the extracted bundle directory:
+Download `converoom-0.3.2-windows-x64.zip` from the [0.3.2 release](https://github.com/zuychin03/converoom/releases/tag/v0.3.2) and extract it into a local folder. For a development build, download the `converoom-windows-x64` artefact from a successful [Windows preview workflow](https://github.com/zuychin03/converoom/actions/workflows/windows-preview.yml) instead, check its source commit matches the version you want, and extract the artefact and the bundle zip inside it. Review this guide and `install.ps1`, then open PowerShell in the extracted bundle directory:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
@@ -47,7 +47,7 @@ The default installer installs Tailscale but does not join a tailnet, change Ser
 
 ## Build and check the bundle
 
-On a development machine with the repository's pinned dependencies and Node 24.21.0:
+On a development machine with the repository's pinned dependencies and Node 26.13.0:
 
 ```powershell
 npm run build
@@ -60,4 +60,4 @@ The builder downloads the exact official Node Windows ZIP and verifies its pinne
 
 Installer behaviour tests replace machine-level software installation with controlled fixtures. The extracted-bundle smoke uses the actual bundled Node/runtime, isolated user/data directories and real local MCP registration, pairing, room creation, restart and shutdown. It simulates Git/Tailscale availability and Tailscale's logged-out status. It does not establish a fresh-machine MSI install, actual vendor inference, live Tailscale connectivity or three fresh-user onboarding timings. Those acceptance gates remain open.
 
-Sources: [Node 24.21.0 release and SHA-256](https://github.com/nodejs/nodejs.org/blob/main/apps/site/pages/en/blog/release/v24.21.0.md), [WinGet installation flags](https://learn.microsoft.com/en-us/windows/package-manager/winget/install), [Tailscale Windows installation and native login](https://tailscale.com/docs/install/windows), [Codex](https://github.com/openai/codex), [Claude Code npm installation](https://code.claude.com/docs/en/setup#install-with-npm), [OpenCode Windows installation](https://opencode.ai/docs/#windows), [Qoder installation](https://docs.qoder.com/cli/installation).
+Sources: [Node 26.13.0 release and SHA-256](https://github.com/nodejs/nodejs.org/blob/main/apps/site/pages/en/blog/release/v26.13.0.md), [WinGet installation flags](https://learn.microsoft.com/en-us/windows/package-manager/winget/install), [Tailscale Windows installation and native login](https://tailscale.com/docs/install/windows), [Codex](https://github.com/openai/codex), [Claude Code npm installation](https://code.claude.com/docs/en/setup#install-with-npm), [OpenCode Windows installation](https://opencode.ai/docs/#windows), [Qoder installation](https://docs.qoder.com/cli/installation).

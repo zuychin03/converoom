@@ -6,9 +6,9 @@ Converoom runs a loopback daemon and browser UI on your computer. Existing Claud
 
 ## Current status
 
-The 0.3.1 Windows V1.2 preview adds iterative coding and workflow presets to the V1.1 private shared rooms: finding and connecting installed agents, opt-in auto-start from an agent's chat, room templates, each seat's model and effort, coding attempts over several turns with checkpoints and rollback, line comments in reviews, export to a local branch with a PR brief, imported conversation context, threads and pins, owner barge-in, and handing stalled work to another seat. These have fixture tests and pass Windows CI. Live vendor acceptance for them (apart from Codex history reads), the real two-Windows pilot, fresh-user onboarding and manual accessibility remain pending. This is a preview, not full V1, V1.1 or V1.2 acceptance.
+The 0.3.2 Windows V1.2 preview adds iterative coding and workflow presets to the V1.1 private shared rooms: finding and connecting installed agents, opt-in auto-start from an agent's chat, room templates, each seat's model and effort, coding attempts over several turns with checkpoints and rollback, line comments in reviews, export to a local branch with a PR brief, imported conversation context, threads and pins, owner barge-in, and handing stalled work to another seat. These have fixture tests and pass Windows CI. Live vendor acceptance for them (apart from Codex history reads), the real two-Windows pilot, fresh-user onboarding and manual accessibility remain pending. This is a preview, not full V1, V1.1 or V1.2 acceptance.
 
-Shared access is disabled by default and requires explicit private HTTPS setup. Windows 11 x64 and Node 24 are the only verification and release target. macOS and Linux support is deferred until those platforms can be tested. See the [architecture](docs/ARCHITECTURE.md), [preview evidence](docs/PREVIEW_ACCEPTANCE.md), [requirement matrix](docs/REQUIREMENT_MATRIX.md) and [Windows pilot guide](docs/WINDOWS_SHARED_PILOT.md).
+Shared access is disabled by default and requires explicit private HTTPS setup. Windows 11 x64 is the only verification and release target. Converoom runs on Node 24.14 or later and is tested on Node 24 and 26. macOS and Linux support is deferred until those platforms can be tested. See the [architecture](docs/ARCHITECTURE.md), [preview evidence](docs/PREVIEW_ACCEPTANCE.md), [requirement matrix](docs/REQUIREMENT_MATRIX.md) and [Windows pilot guide](docs/WINDOWS_SHARED_PILOT.md).
 
 The new agent adapters have local protocol fixture coverage. Live vendor acceptance is pending. See [agent setup and capabilities](docs/AGENT_SUPPORT.md) for each native launch, config path and authentication requirement. Antigravity needs Google's separate official ACP server; its normal `agy` CLI is sufficient for MCP participation.
 
@@ -16,7 +16,7 @@ The primary flows are rooms, directed interactions and receipts, scoped human ap
 
 ## Run from source
 
-Use Node 24.14 or later within the Node 24 line and Git. Node 24.21 is the tested development runtime.
+Use Node 24.14 or later, and Git. CI runs every check on Node 24.22 and 26.13, and Node 26.13 is the development runtime. Later Node release lines are accepted but untested.
 
 ```sh
 npm ci --ignore-scripts
@@ -56,7 +56,7 @@ converoom setup
 converoom start
 ```
 
-Or use `npx --ignore-scripts --package @converoom/cli@preview converoom setup`. Setup copies the compiled runtime and production dependencies into the stable application-data directory. MCP registrations point there, not at an npm cache. No pnpm or compiler is needed to run a supported packed release; the Windows supervisor prebuild is included. Releases are published from GitHub Actions with npm provenance, which `npm audit signatures` checks. To install from a checkout instead, run `npm pack` and install `./converoom-cli-0.3.1.tgz` the same way.
+Or use `npx --ignore-scripts --package @converoom/cli@preview converoom setup`. Setup copies the compiled runtime and production dependencies into the stable application-data directory. MCP registrations point there, not at an npm cache. No pnpm or compiler is needed to run a supported packed release; the Windows supervisor prebuild is included. Releases are published from GitHub Actions with npm provenance, which `npm audit signatures` checks. To install from a checkout instead, run `npm pack` and install `./converoom-cli-0.3.2.tgz` the same way.
 
 ### Upgrade, recover and uninstall
 

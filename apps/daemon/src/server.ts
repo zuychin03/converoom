@@ -30,7 +30,7 @@ import { BUILT_IN_TEMPLATES } from '../../../packages/core/src/templates.js';
 import { createWakeHub, SESSION_ID } from './wakes.js';
 export { humanIdentity, issueBridgeCredential, ownerIdentity, revokeBridgeCredential } from './bridges.js';
 
-export const VERSION = '0.3.1';
+export const VERSION = '0.3.2';
 const equal = (a: string, b: string) =>
   a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 // Each of these is refused before the command writes anything.

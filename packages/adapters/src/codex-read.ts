@@ -6,7 +6,7 @@ import { ConveroomError as E, type ToolArgs } from '../../shared/src/contracts.j
 // SPEC FR-63 allows reading Codex history only once confirmed as a read. Live check 07/11/2026, codex-cli 0.164.0: thread/read and
 // thread/items/list returned history while thread/loaded/list stayed empty and no turn or item notification arrived.
 export const CODEX_THREAD_READ_VERIFIED = true;
-const CLIENT = { name: 'converoom', version: '0.3.1' };
+const CLIENT = { name: 'converoom', version: '0.3.2' };
 const WAIT = 30000, PAGES = 20;
 // Only initialize, thread/list, thread/read and thread/items/list are sent; nothing starts, resumes, forks or prompts a thread.
 async function withCodex<T>(cwd: string, env: NodeJS.ProcessEnv, fn: (rpc: RpcPeer) => Promise<T>): Promise<T> {

@@ -1,6 +1,6 @@
 # Windows preview acceptance
 
-08/11/2026. Converoom 0.3.1 is the Windows V1.2 preview. It is not full V1, V1.1 or V1.2 certification. The public [requirement matrix](REQUIREMENT_MATRIX.md) preserves all 97 requirements and the remaining gates. The full implementation specification is local-only. Sections from earlier previews are kept below as history.
+11/11/2026. Converoom 0.3.2 is the Windows V1.2 preview. It is not full V1, V1.1 or V1.2 certification. The public [requirement matrix](REQUIREMENT_MATRIX.md) preserves all 97 requirements and the remaining gates. The full implementation specification is local-only. Sections from earlier previews are kept below as history.
 
 ## V1.2 local evidence
 
@@ -11,6 +11,8 @@ Live vendor evidence for V1.2 comes from two checks. On 29/10/2026 discovery ran
 Packed checks on 08/11/2026 used Node 24.21.0 and npm 11.8.0 with an empty npm cache and temporary prefixes and data folders. A plain `npm install --global` of the 0.3.0 tarball, without `--ignore-scripts`, installed 163 packages and ran. The npx path ran `converoom setup`. A 0.2.0 package built from 94de264 set up a data folder, connected a fixture Cursor configuration and stored a room message. `converoom upgrade` from the 0.3.0 package made a pre-upgrade backup, switched to 0.3.0 and pointed Cursor at the new runtime while keeping the file's other settings. The 0.3.0 runtime read the 0.2.0 message, returned the V1.2 context layers and listed threads. `converoom recover --rollback` returned to 0.2.0 without `--confirm`, since the store format is unchanged, and 0.2.0 read the messages from both versions. The tarball holds 37 files and no private paths. This was not a fresh-machine or fresh-user run.
 
 From 0.3.1 the packed lockfile keeps only the 161 production entries, since npm otherwise installs a dependency's whole lockfile. Installing the 0.3.1 tarball into a project, as npx does, added 163 packages (133 MB) where 0.3.0 added 452 (1.1 GB) with its development tools, and the global and npx installs ran 0.3.1.
+
+On 11/11/2026, 0.3.2 passed every local check on Windows x64 under both Node 24.22.2 and Node 26.13.0: type checking, lint, the compiled builds, 555 Vitest tests in 60 files, the 24 browser flows, the V1.4a push-wake smoke (19 checks) and the room panel smoke (16 checks). Both builds produced the same release manifest, and a guard test confirmed that each run's tests ran on the intended Node. The Windows bundle was built with Node 26.13.0, whose official ZIP checksum matches the Node release post, and its extracted-bundle smoke passed. The packed 0.3.2 tarball installed globally with no engine warning under Node 24.22.2, Node 26.13.0 and the machine's Node 25.6.0, an end-of-life release line that is accepted but not tested. Under each, setup, doctor, the daemon and a registered MCP client's `room_create` worked. Node releases older than 24.14 were not run: the CLI refuses them by version number, and a unit test covers that check.
 
 ## Agent and installation expansion evidence
 
@@ -104,7 +106,7 @@ Quarantined or uncertain work is retained for inspection. Automatic resource rec
 
 ## Reproduce local checks
 
-With Node 24, Git and the packed Windows supervisor present:
+With Node 24.14 or later, Git and the packed Windows supervisor present:
 
 ```sh
 npm ci --ignore-scripts

@@ -11,7 +11,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 const run = promisify(execFile), receipt = JSON.parse(await readFile('.artifacts/windows-bundle/latest.json', 'utf8'));
 const root = await mkdtemp(join(tmpdir(), 'converoom-bundle-smoke-'));
 const data = join(root, 'data'), home = join(root, 'home'), extracted = join(root, 'extracted');
-const report = { archiveSha256: receipt.archiveSha256, node: '24.21.0', realVendorInference: false,
+const report = { archiveSha256: receipt.archiveSha256, node: receipt.node, realVendorInference: false,
   machineInstallers: 'fixtures only', realTailscale: false };
 let daemon, exited, metadata, client;
 const assert = (value, message) => { if (!value) throw new Error(message); };
@@ -29,10 +29,10 @@ try {
   await cp('tests/fixtures/windows-bundle-install.ps1', fixture);
   await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', fixture,
     '-Bundle', extracted, '-DataDirectory', data], { env, windowsHide: true, timeout: 180000 });
-  const node = join(data, 'tools/node-v24.21.0/node.exe'), cli = join(data, 'runtime', receipt.version, 'dist/cli.js');
+  const node = join(data, 'tools/node-v' + receipt.node + '/node.exe'), cli = join(data, 'runtime', receipt.version, 'dist/cli.js');
   const installedEnv = { ...env, PATH: dirname(node) + ';' + env.PATH };
   const command = (args) => run(node, [cli, ...args, '--data-dir', data], { env: installedEnv, windowsHide: true, timeout: 180000 });
-  assert((await run(node, ['--version'])).stdout.trim() === 'v24.21.0', 'Wrong bundled Node');
+  assert((await run(node, ['--version'])).stdout.trim() === 'v' + receipt.node, 'Wrong bundled Node');
   await access(join(data, 'runtime', receipt.version, 'node_modules/better-sqlite3/prebuilds/win32-x64.node'));
   await access(join(data, 'runtime', receipt.version, 'native/bin/win32-x64/converoom-supervisor.exe'));
   report.installedWithoutSystemNode = true;
@@ -60,7 +60,7 @@ try {
   const products = ['codex', 'cursor', 'claude', 'opencode', 'antigravity', 'kiro', 'qoder', 'grok'];
   for (const product of products) await access(join(data, 'clients', product + '.json'));
   const config = await readFile(join(home, '.codex/config.toml'), 'utf8');
-  assert(config.includes('[mcp_servers.converoom]') && config.includes('node-v24.21.0') && config.includes('runtime'), 'Registration did not bind bundled Node and stable runtime');
+  assert(config.includes('[mcp_servers.converoom]') && config.includes('node-v' + receipt.node) && config.includes('runtime'), 'Registration did not bind bundled Node and stable runtime');
   report.mcpRegistrations = products.length;
   async function mcp(name, args) {
     client = new Client({ name: 'bundle-smoke', version: '1' }, { capabilities: {} });

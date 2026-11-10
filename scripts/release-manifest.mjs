@@ -92,9 +92,9 @@ writeFileSync(
       schemaVersion: 1,
       assets,
       version: meta.version,
-      date: '08/11/2026',
+      date: '11/11/2026',
       status: 'Windows V1.2 preview; live vendor acceptance, the real shared-room pilot and mandatory acceptance gates remain open',
-      supportedPreview: { os: 'Windows 11', arch: 'x64', node: '24.21.0' },
+      supportedPreview: { os: 'Windows 11', arch: 'x64', node: '>=24.14', testedNode: ['24.22.2', '26.13.0'] },
       lockfile: 'npm-shrinkwrap.json',
       lockfileSha256: digest(productionLockfile(readFileSync('npm-shrinkwrap.json', 'utf8'))),
       native: [

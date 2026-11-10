@@ -22,7 +22,7 @@ export async function serveMcp(
   // FR-40: only an unscoped Claude Code connection offers the channel, and each MCP process is its own wake session.
   const sessionId = client === 'claude' && !credential.scope && !credential.remoteConnectionId ? randomUUID() : undefined;
   const server = new Server(
-    { name: 'converoom', version: '0.3.1' },
+    { name: 'converoom', version: '0.3.2' },
     sessionId
       ? { capabilities: { tools: {}, resources: {}, prompts: {}, experimental: { 'claude/channel': {} } }, instructions: CHANNEL_INSTRUCTIONS }
       : { capabilities: { tools: {}, resources: {}, prompts: {} } },

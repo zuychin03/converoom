@@ -21,7 +21,7 @@ jobs:
           ref: ${{ github.event.release.tag_name }}
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
-          node-version: 24.21.0
+          node-version: 26.13.0
           cache: npm
           cache-dependency-path: npm-shrinkwrap.json
           registry-url: https://registry.npmjs.org

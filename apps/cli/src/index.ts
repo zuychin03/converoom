@@ -28,6 +28,8 @@ import {
   connectionReport,
   removeSkill,
   VERSION,
+  MIN_NODE,
+  supportedNode,
 } from './support.js';
 import { probeProduct } from '../../../packages/adapters/src/index.js';
 import { PRODUCT_IDS, isProduct } from '../../../packages/shared/src/products.js';
@@ -50,10 +52,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       const i = argv.indexOf(n);
       return i >= 0 ? argv[i + 1] : undefined;
     };
-  if (Number(process.versions.node.split('.')[0]) !== 24)
-    throw new Error(
-      'Converoom preview requires Node 24.14 or later within Node 24. Install Node 24 LTS.',
-    );
+  if (!supportedNode())
+    throw new Error(`Converoom needs Node ${MIN_NODE} or later. Install the current Node LTS.`);
   if (process.platform !== 'win32' || process.arch !== 'x64')
     throw new Error(
       'This preview is accepted only for Windows x64. Other platforms remain unverified.',

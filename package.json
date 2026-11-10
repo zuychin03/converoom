@@ -1,6 +1,6 @@
 {
   "name": "@converoom/cli",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Local rooms for coding agents, debate and verified collaboration",
   "type": "module",
   "license": "Apache-2.0",
@@ -9,7 +9,7 @@
     "url": "git+https://github.com/zuychin03/converoom.git"
   },
   "engines": {
-    "node": ">=24.14 <25"
+    "node": ">=24.14"
   },
   "os": [
     "win32"
@@ -81,7 +81,7 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.0",
     "eslint": "^9.39.0",
-    "node": "24.21.0",
+    "node": "26.13.0",
     "tailwindcss": "^4.2.0",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",

@@ -9,7 +9,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ConveroomError } from '../../../packages/shared/src/contracts.js';
 import { scopeDigest } from '../../../packages/store/src/index.js';
-export const VERSION = '0.3.1';
+export const VERSION = '0.3.2';
+export const MIN_NODE = '24.14';
+export function supportedNode(version = process.versions.node) {
+  const [major, minor] = version.split('.').map(Number),
+    [floorMajor, floorMinor] = MIN_NODE.split('.').map(Number);
+  return major > floorMajor || (major === floorMajor && minor >= floorMinor);
+}
 export function dataDirectory() {
   return (
     process.env.CONVEROOM_DATA_DIR ??

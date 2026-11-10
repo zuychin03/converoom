@@ -1,12 +1,12 @@
 {
   "name": "@converoom/cli",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@converoom/cli",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "cpu": [
         "x64"
       ],
@@ -42,7 +42,7 @@
         "@types/react-dom": "^19.2.0",
         "@vitejs/plugin-react": "^6.0.0",
         "eslint": "^9.39.0",
-        "node": "24.21.0",
+        "node": "26.13.0",
         "tailwindcss": "^4.2.0",
         "tsup": "^8.5.1",
         "tsx": "^4.21.0",
@@ -52,7 +52,7 @@
         "vitest": "5.0.3"
       },
       "engines": {
-        "node": ">=24.14 <25"
+        "node": ">=24.14"
       }
     },
     "node_modules/@agentclientprotocol/sdk": {
@@ -4724,9 +4724,9 @@
       }
     },
     "node_modules/node": {
-      "version": "24.21.0",
-      "resolved": "https://registry.npmjs.org/node/-/node-24.21.0.tgz",
-      "integrity": "sha512-GquwdXTr1CyRzrHsP+GVYnKj/yxIX7kUpyGMKu30fKJa9Hqtp9GP/Zu4BXY3gLIQVc/H5eWdMQmBgMBx5veCbw==",
+      "version": "26.13.0",
+      "resolved": "https://registry.npmjs.org/node/-/node-26.13.0.tgz",
+      "integrity": "sha512-tULaq1l6WCYvOda1/qb+dXABG9a0NVhx0ySmzhR9rxGxeDU3d3Mc+FzVHSUS3gnMEb3PFLRZC5AjkGIG4RN4ew==",
       "dev": true,
       "hasInstallScript": true,
       "license": "MIT",

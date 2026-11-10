@@ -20,11 +20,11 @@ async function install(mode: string) {
       await writeFile(join(bundle, path), content);
       assets.push({ path, sha256: createHash('sha256').update(content).digest('hex') });
     }
-    await writeFile(join(bundle, 'bundle.json'), JSON.stringify({ schemaVersion: 1, version: '0.2.0', nodeVersion: '24.21.0', assets }));
+    await writeFile(join(bundle, 'bundle.json'), JSON.stringify({ schemaVersion: 1, version: '0.2.0', nodeVersion: '26.13.0', assets }));
     if (mode === 'tampered') await writeFile(join(bundle, 'runtime/dist/cli.js'), 'modified');
     if (mode === 'escape') {
       assets[0].path = '../outside.exe';
-      await writeFile(join(bundle, 'bundle.json'), JSON.stringify({ schemaVersion: 1, version: '0.2.0', nodeVersion: '24.21.0', assets }));
+      await writeFile(join(bundle, 'bundle.json'), JSON.stringify({ schemaVersion: 1, version: '0.2.0', nodeVersion: '26.13.0', assets }));
     }
     const fixture = join(root, 'fixture.ps1');
     if (mode === 'entry') await writeFile(join(root, 'install.ps1'), await readFile('scripts/install-windows.ps1'));
@@ -49,6 +49,7 @@ it('installs missing Git, Tailscale and the selected agent before reporting loca
   expect(result.receipt.tailscale).toBe('NeedsLogin');
   expect(result.receipt.sharedAccess).toBe('disabled');
   expect(result.launcher).toContain('dist');
+  expect(result.launcher).toContain('tools/node-v26.13.0');
 });
 
 it.each(['upgrade', 'legacy'])('runs upgrade instead of setup over an earlier %s installation', async (mode) => {

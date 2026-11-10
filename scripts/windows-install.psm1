@@ -53,7 +53,7 @@ function Invoke-ConveroomProgram([string]$Command, [string[]]$Arguments) {
 function Assert-ConveroomBundle([string]$Bundle) {
   $manifest = [System.IO.File]::ReadAllText((Join-Path $Bundle 'bundle.json')) | ConvertFrom-Json
   if ($manifest.schemaVersion -ne 1 -or $manifest.version -notmatch '^\d+\.\d+\.\d+$' -or
-      $manifest.nodeVersion -ne '24.21.0' -or !$manifest.assets.Count) { throw 'Unsupported bundle manifest' }
+      $manifest.nodeVersion -ne '26.13.0' -or !$manifest.assets.Count) { throw 'Unsupported bundle manifest' }
   $seen = @{}
   foreach ($asset in $manifest.assets) {
     if ($asset.path -isnot [string] -or $asset.path -match '[<>:"\\|?*\x00-\x1f]' -or
@@ -162,12 +162,12 @@ function Install-ConveroomBundle {
   $launcher = @'
 $ErrorActionPreference = 'Stop'
 $root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$tools = Join-Path $root 'tools/node-v24.21.0'
+$tools = Join-Path $root 'tools/node-vNODE_RELEASE'
 $env:PATH = $tools + ';' + (Join-Path $root 'tools/agents') + ';' + $env:PATH
 & (Join-Path $tools 'node.exe') (Join-Path $root 'runtime/VERSION/dist/cli.js') @args --data-dir $root
 exit $LASTEXITCODE
 '@
-  [System.IO.File]::WriteAllText((Join-Path $bin 'converoom.ps1'), ($launcher.Replace('VERSION', $manifest.version) + "`n"))
+  [System.IO.File]::WriteAllText((Join-Path $bin 'converoom.ps1'), ($launcher.Replace('NODE_RELEASE', $manifest.nodeVersion).Replace('VERSION', $manifest.version) + "`n"))
   [System.IO.File]::WriteAllText((Join-Path $bin 'converoom.cmd'), '@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0converoom.ps1" %*' + "`r`n")
   if (!$NoPath) { Set-ConveroomUserPath @($bin, $tools, $agents) }
   return @{ version = $manifest.version; node = $node; cli = $cli; dataDirectory = $DataDirectory; products = $Products;

@@ -3,19 +3,19 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "a336f75644ad40ddfbe5287a0ce5d5966ac269369876f1f1bd48e31ac8dcb3d7"
+      "sha256": "c35389ce71306807859d43d86d099bbe563746bc6555b35456095855332693fd"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "d82d98ae981931dc412ed802aa055b940933654ebab79c3a1320f5b9ef22f542"
+      "sha256": "60dc60933ed7eab70519a441b8e8117ba18505d398e2561d97a19eb10f1fb287"
     },
     {
       "path": "dist/server.js",
-      "sha256": "3870d2d70bda8d1b815389268c833e0171d291e839c1acf013d9226333ba11ed"
+      "sha256": "ac3c06cfc8626b5772e9169d4e33baa9261856364c2acb3c0fcdc6cea43d4b7b"
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "60b017f480b666c586adb223756056eeda17e92ec84d8e382d14ef54e8af058a"
+      "sha256": "59f318049c49f9d26ea9352bac8a079f0d9413390f52b2f3630c79a832330d6e"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -83,15 +83,15 @@
     },
     {
       "path": "README.md",
-      "sha256": "bd109fe1179707f3cb7e79ede3f7d34b4c4c4ccf4a61b4d53752b4b865f0e641"
+      "sha256": "aec3828634c1db33f844e4a35778adf873fce7f2acdde2658c0de1f5c353e62d"
     },
     {
       "path": "docs/WINDOWS_SHARED_PILOT.md",
-      "sha256": "34fbe7ca37900a945ecff61f8beb195c6567ddf14f2c8a523960ea23c1d12e24"
+      "sha256": "8070434fa52bd4d5a4148834bc8fb54ec45a4e0790fed8cab30289a493b4aeeb"
     },
     {
       "path": "docs/PREVIEW_ACCEPTANCE.md",
-      "sha256": "7ffe45093d8df81ee56a82e6dc8b5e08642d1998781099a77a4487542431ef78"
+      "sha256": "9c74603fc107dba51e8e9c26ce186bcfa01a7e139e9ae31066d8e1696ba229fa"
     },
     {
       "path": "docs/AGENT_SUPPORT.md",
@@ -103,7 +103,7 @@
     },
     {
       "path": "docs/WINDOWS_INSTALL.md",
-      "sha256": "18a213e24431e5cd44a10b48ba8c313c768a2fce1a530f93f2c8f75c0ae10740"
+      "sha256": "64df33f9f6580f26443dbe10d4dda0da3abe1baa653d47b0d3916688d856bb5d"
     },
     {
       "path": "scripts/install-windows.ps1",
@@ -111,19 +111,23 @@
     },
     {
       "path": "scripts/windows-install.psm1",
-      "sha256": "2e136654be34a48cd8893801e744349b45314381eaf8685311972bd931c48334"
+      "sha256": "699eace9c7854fc1317f26009c59387a9f2f5df6820c6ffe7d7c02b6a4f54fb7"
     }
   ],
-  "version": "0.3.1",
-  "date": "08/11/2026",
+  "version": "0.3.2",
+  "date": "11/11/2026",
   "status": "Windows V1.2 preview; live vendor acceptance, the real shared-room pilot and mandatory acceptance gates remain open",
   "supportedPreview": {
     "os": "Windows 11",
     "arch": "x64",
-    "node": "24.21.0"
+    "node": ">=24.14",
+    "testedNode": [
+      "24.22.2",
+      "26.13.0"
+    ]
   },
   "lockfile": "npm-shrinkwrap.json",
-  "lockfileSha256": "11a0c8f9987b066cb7e86dc3d0e29b602ac84105f23ae4697f6e784c8a5218bf",
+  "lockfileSha256": "fcf097391b3963d2d0cafe212fbbe84e5c0452df22c4fef75f1043f7b89d7559",
   "native": [
     {
       "path": "native/bin/win32-x64/converoom-supervisor.exe",
