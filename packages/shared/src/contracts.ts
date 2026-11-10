@@ -335,6 +335,8 @@ export class ConveroomError extends Error {
     this.name = 'ConveroomError';
   }
 }
+export const keyReused = (command: string) => new ConveroomError('idempotency_conflict',
+  `This clientKey was already used for a different ${command} call. Use a fresh clientKey for each new write, and reuse one only to retry that same write.`, 409);
 export function requiredString(args: ToolArgs, key: string, max = 65536): string {
   const value = args[key];
   if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value) > max)

@@ -23,7 +23,7 @@ const string = { type: 'string', minLength: 1, maxLength: 65536 },
   refs = { type: 'array', items: { ...small, maxLength: 300 }, maxItems: 10 };
 const common: Record<string, unknown> = {
   roomId: small,
-  clientKey: small,
+  clientKey: { ...small, description: 'Fresh for each new write. Reuse one only to retry that same write.' },
   seatId: small,
   turnId: small,
   taskId: small,
@@ -98,7 +98,7 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
     required: ['roomId', 'text'],
     fields: {
       text: string,
-      replyToId: small,
+      replyToId: { ...small, description: 'The interactionId from room_inbox, or the ID of the message that asked you.' },
       contextRefs: refs,
       threadId: small,
       mentions: {

@@ -3,19 +3,19 @@
   "assets": [
     {
       "path": "dist/cli.js",
-      "sha256": "8caf3f4d4236c9d7f111f7766ea90947ac9cb43fbe857ae4e4c3ee683476e099"
+      "sha256": "d4bc76d9b61e9df7118063565c3b6468ca13ff23e32d19c7e94a0a1f2caead0f"
     },
     {
       "path": "dist/cli.js.map",
-      "sha256": "ad78a53cf7acff4b80088f4fa3c7cdef80611788ffbf91eb870c09fe1d61a7eb"
+      "sha256": "8c501e5b8d5ea67d8611ab8402b4fb26ced22e16709503e48a8796b0c0d2e5f7"
     },
     {
       "path": "dist/server.js",
-      "sha256": "0ecfcf0512d870e3629f8b52b8ab23480c00b9fc067d5b6a9c67ece840a2fd56"
+      "sha256": "72ea969561e110271cd48c83486723587e391117fc68f55c6cfce82057ea59d9"
     },
     {
       "path": "dist/server.js.map",
-      "sha256": "8a8d1cb6bca99e6c5232415f1c2bb465b508e99eed66b7eda04ae16fc179883f"
+      "sha256": "9b5024fbdf444a5fdff9a8db3f84a401bf23f3c2aef4c52514a85491516ce082"
     },
     {
       "path": "dist/ui/assets/hubot-sans-latin-ext-wdth-normal-BuZvgPRv.woff2",
@@ -75,7 +75,7 @@
     },
     {
       "path": "packages/plugin-content/skills/converoom-room/SKILL.md",
-      "sha256": "6e58fb755b900de0d9ea58a4f374151c101b7d8a0a3c6fca8ea1819ef0b10372"
+      "sha256": "eeb19788d199212bf936205732e70e5eaa8d9e13bfaee7d4bb44ccf1bf964540"
     },
     {
       "path": "native/bin/win32-x64/converoom-supervisor.exe",

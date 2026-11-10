@@ -75,7 +75,7 @@ describe('durable store', () => {
     expect(new Set(results.map((r) => r.id)).size).toBe(1);
     expect(store.events('r')).toHaveLength(1);
     expect(() => store.idempotent('actor', 'post', 'key', { a: 2 }, () => null)).toThrow(
-      /payload/i,
+      /different post call/,
     );
     expect(store.idempotent('actor', 'post', 'key', { a: 1, b: 2 }, () => null)).toEqual(
       results[0],

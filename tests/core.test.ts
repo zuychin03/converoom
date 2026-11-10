@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from '../packages/store/src/index.js';
 import { createCore } from '../packages/core/src/index.js';
+import { TOOL_DEFINITIONS } from '../packages/mcp/src/tools.js';
 import type {
   Actor,
   Core,
@@ -45,7 +46,7 @@ it('forgets stored read results at startup but keeps mutation results for safe r
     createCore(previous);
     expect(previous.idempotent('owner', 'room_export', 'export-key', { roomId: 'room', rerun: true }, () => 'rerun')).toBe('rerun');
     expect(() => previous.idempotent('owner', 'room_post', 'post-key', { roomId: 'room', text: 'Changed' }, () => 'duplicate'))
-      .toThrow(/different payload/i);
+      .toThrow(/different room_post call/);
   } finally { previous.close(); }
 });
 it('removes stored mutation results a week after a later startup pass, so expired keys run again', async () => {
@@ -90,7 +91,7 @@ describe('room authority and interactions', () => {
       role: 'host',
     });
     await expect(call('room_create', { ...args, title: 'Different' }, agent)).rejects.toThrow(
-      /payload/i,
+      /different room_create call/,
     );
   });
   it('rejects forged identity, nonmembers, observers and agent owner grants', async () => {
@@ -162,6 +163,35 @@ describe('room authority and interactions', () => {
       agent,
     );
     expect(store.list<ToolArgs>('interaction')[0].status).toBe('resolved');
+  });
+  it('takes the ID of the message that asked a seat as its reply target, and says what replyToId takes when it names no request', async () => {
+    const r = await room();
+    const first = await seat(r.id, 'polling');
+    const second = await call<Seat>('seat_add', { roomId: r.id, product: 'codex', name: 'Second', mode: 'polling', role: 'member' });
+    const reader = { ...agent, principalId: first.principalId };
+    const asked = await call<Event>('room_post', { roomId: r.id, text: 'Which option?', clientKey: 'ask',
+      mentions: [{ seatId: first.id, intent: 'question' }, { seatId: second.id, intent: 'question' }] }, agent);
+    const mine = store.list<ToolArgs>('interaction').find((i) => i.recipientId === first.id)!;
+    const answer = await call<Event>('room_post', { roomId: r.id, text: 'Option B', replyToId: asked.id, clientKey: 'answer' }, reader);
+    expect((answer.data as ToolArgs).replyToId).toBe(mine.id);
+    expect(store.get<ToolArgs>('interaction', String(mine.id))).toMatchObject({ status: 'responded', responseId: answer.id });
+    expect(store.list<ToolArgs>('interaction').find((i) => i.recipientId === second.id)?.status).toBe('stored');
+    await expect(call('room_post', { roomId: r.id, text: 'Not asked', replyToId: asked.id, clientKey: 'host' }, agent))
+      .rejects.toMatchObject({ code: 'recipient', status: 403 });
+    const plain = await call<Event>('room_post', { roomId: r.id, text: 'No question here', clientKey: 'plain' }, agent);
+    for (const [replyToId, clientKey] of [['no-such-id', 'unknown'], [plain.id, 'plain-reply']])
+      await expect(call('room_post', { roomId: r.id, text: 'Reply', replyToId, clientKey }, reader))
+        .rejects.toMatchObject({ code: 'interaction', message: expect.stringMatching(/interactionId from room_inbox/) });
+  });
+  it('tells an agent that reused a clientKey for a different write to use a fresh one', async () => {
+    const r = await room();
+    await call('room_post', { roomId: r.id, text: 'First point', clientKey: 'reused' }, agent);
+    await expect(call('room_post', { roomId: r.id, text: 'Second point', clientKey: 'reused' }, agent)).rejects.toMatchObject({
+      code: 'idempotency_conflict', status: 409, message: expect.stringMatching(/different room_post call.*fresh clientKey/),
+    });
+    const schema = TOOL_DEFINITIONS.find((t) => t.name === 'room_post')!.inputSchema.properties as Record<string, { description?: string }>;
+    expect(schema.clientKey.description).toMatch(/fresh/i);
+    expect(schema.replyToId.description).toMatch(/interactionId.*message/i);
   });
   it('bounds seats, pending obligations, payloads and immutable policies', async () => {
     const r = await room();

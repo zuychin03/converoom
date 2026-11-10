@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   ConveroomError,
+  keyReused,
   type Event,
   type Store,
   type ToolArgs,
@@ -278,12 +279,7 @@ export function createStore(path: string): Store {
           const previous = idemGet.get(actorId, command, key) as
             { payload_hash: string; result: string } | undefined;
           if (previous) {
-            if (previous.payload_hash !== hash)
-              throw new ConveroomError(
-                'idempotency_conflict',
-                'Client key reused with a different payload',
-                409,
-              );
+            if (previous.payload_hash !== hash) throw keyReused(command);
             return JSON.parse(previous.result) as T;
           }
           const result = fn();

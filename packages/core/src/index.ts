@@ -763,9 +763,13 @@ export function createCore(store: Store): Core {
       throw new E('mentions', 'Invalid mentions');
     let reply: I | undefined;
     if (x.replyToId) {
-      reply = store.get<I>('interaction', String(x.replyToId));
-      if (!reply || reply.roomId !== r.id || reply.recipientId !== sender)
-        throw new E('recipient', 'Only recipient can reply', 403);
+      // A message asks each seat at most once, so the ID of the message that asked the sender names one request too.
+      const id = String(x.replyToId),
+        asked = store.list<I>('interaction', { roomId: r.id }).filter((i) => i.id === id || i.messageId === id);
+      reply = asked.find((i) => i.recipientId === sender);
+      if (!reply && asked.length) throw new E('recipient', 'Only the recipient can reply to this request', 403);
+      if (!reply)
+        throw new E('interaction', 'replyToId names no request in this room. Pass the interactionId from room_inbox, or the ID of the message that asked you.');
     }
     // A mention made during a turn continues the chain that woke it, so peer wakes stay within the hop limit.
     const woken = a.kind === 'agent' ? store.list<Turn>('turn', { seatId: sender, status: STARTED_TURNS }).find((t) => t.interactionId) : undefined;
@@ -800,7 +804,7 @@ export function createCore(store: Store): Core {
       text: redactPublic(text),
       senderId: sender,
       mentions,
-      replyToId: x.replyToId ?? null,
+      replyToId: reply?.id ?? null,
       ...(refs.length ? { contextRefs: refs } : {}),
       ...(thread ? { threadId: thread.id } : {}),
     });

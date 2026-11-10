@@ -4,6 +4,7 @@ import { mkdir, writeFile, readFile, readdir, realpath, rm, lstat, stat } from '
 import { join, resolve } from 'node:path';
 import {
   ConveroomError as E,
+  keyReused,
   requiredString as str,
   type Core,
   type Actor,
@@ -266,8 +267,7 @@ export function mountWorkspace(
       hash = scopeDigest(x),
       prior = s.get<{ hash: string; status: string; result?: unknown }>('command', key);
     if (prior) {
-      if (prior.hash !== hash)
-        throw new E('idempotency_conflict', 'Client key reused with a different payload', 409);
+      if (prior.hash !== hash) throw keyReused(n);
       if (prior.status === 'done') return prior.result;
       throw new E(
         'uncertain_command',
