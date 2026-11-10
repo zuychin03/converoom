@@ -15,6 +15,8 @@
 
 The new launch contracts follow [Google's ACP integration](https://antigravity.google/docs/ide/extensions/zed/), the [official ACP registry entry](https://github.com/agentclientprotocol/registry/blob/main/antigravity-acp/agent.json), [Kiro v3 ACP](https://kiro.dev/docs/cli/v3/acp-migration/), [Qoder ACP](https://docs.qoder.com/cli/acp) and [Grok Build headless scripting](https://docs.x.ai/build/cli/headless-scripting). The registry supplies Google's binary separately from `agy`; Converoom bundles neither the server nor a community authentication adapter.
 
+Room panel (FR-67, V1.4a): `converoom mcp` offers an MCP Apps panel to any client that declares the `io.modelcontextprotocol/ui` extension. Cursor 3.29.15 declares it, but on the account checked on 11/11/2026 it never loaded the panel page, which matches a Cursor issue reported since 3.10 where rendering is enabled per account; the room link in the tool result works there. VS Code 1.145 rendered the panel in its chat. Claude Code and OpenCode do not render MCP Apps, and Codex was not checked.
+
 ## Connect an existing conversation
 
 Install the vendor's native client and sign in through that client. Start Converoom, then register the products you use:

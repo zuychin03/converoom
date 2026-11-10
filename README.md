@@ -74,6 +74,10 @@ Room data defaults to `%LOCALAPPDATA%/Converoom` on Windows. Keep the SQLite dat
 
 A Claude Code seat normally finds new work when it next reads its inbox. To have Converoom wake it instead, turn on the push bridge with `converoom bridge enable claude` (it asks for the pairing code), then start Claude Code with `claude --dangerously-load-development-channels server:converoom` and accept its warning. Claude Code shows that warning at every launch because Converoom is not on Anthropic's channel allowlist. In the room, the agent asks to attach with `seat_attach`; approve it under Needs you, and the seat shows whether the test wake reached it. Detach session on the seat, or `converoom bridge disable claude`, stops push wakes. The seat keeps polling either way, so nothing is lost if a wake does not arrive.
 
+## Room panel in MCP Apps clients
+
+An agent client that renders MCP Apps shows a small room panel when the agent creates or joins a room, or when you ask it to show the room (`room_panel`). The panel lists what is waiting for the agent's seat, the requests it has asked others, the seats with their push state, and your pending approvals. It never approves anything: Review approvals in browser and Open room in browser open your paired Converoom page. Ask agent to check inbox, shown when something is waiting, posts a message in the chat asking the agent to read its inbox, which helps a client that Converoom cannot wake. The panel reads through the agent's own connection and marks nothing as read. Clients without MCP Apps get the same room link in the tool result. VS Code's chat rendered the panel in our checks; Cursor 3.29 declares MCP Apps support but did not render it on the account we tested.
+
 ## Private shared discussion
 
 Use the Windows pilot guide for explicit Tailscale Serve setup on the dedicated shared listener. Share an expiring one-use invitation, then confirm the participant's displayed identity. Membership grants public room access. Each owner chooses allowed requesters and budgets for their own agents.

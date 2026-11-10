@@ -33,10 +33,11 @@ import { applyGrantedPin, contextLayers, mountThreads, openThread } from './thre
 import { DIRECTIVE_TOOLS, mountDirectives, withDirectives } from './directives.js';
 import { hostBrief, mountTakeover, reassignedNotes, takeoverNotes } from './takeover.js';
 import { applyGrantedAttach, mountAttachments, noteInboxRead } from './attachments.js';
+import { roomPanel } from './panel.js';
 // Reads rerun on retry, so their results are never stored under a client key.
 export const READ_COMMANDS: ReadonlySet<string> = new Set([...SHARED_READS, 'runtime_capabilities', 'task_get', 'artefact_get', 'repo_list',
   'resource_profile_list', 'adapter_status', 'adapter_discover', 'room_export', 'interrupted_command_list', 'workspace_cleanup_preview', 'template_list',
-  'checkpoint_list', 'checkpoint_diff', 'artefact_diff', 'session_context_list', 'session_context_get', 'session_context_request_get', 'session_context_codex_threads', 'thread_list']);
+  'checkpoint_list', 'checkpoint_diff', 'artefact_diff', 'session_context_list', 'session_context_get', 'session_context_request_get', 'session_context_codex_threads', 'thread_list', 'room_panel']);
 const limits = {
   maxActiveTurns: 2,
   maxRounds: 6,
@@ -674,6 +675,12 @@ export function createCore(store: Store): Core {
       .list<Room>('room')
       .filter((r) => (a.kind === 'human' ? r.ownerId === a.ownerId || !!activeMembership(store, r.id, a.ownerId, a.principalId) : !!seat(a, r.id))),
   );
+  c.register('room_panel', (a, x) => {
+    if (a.kind !== 'agent') throw new E('agent_required', 'The room panel belongs to an agent connection', 403);
+    const rooms = store.list<Room>('room').filter((r) => !!seat(a, r.id)).reverse().sort((p, q) => q.createdAt - p.createdAt);
+    const r = x.roomId === undefined ? rooms[0] : access(a, str(x, 'roomId'));
+    return roomPanel(store, r, r && seat(a, r.id), a.ownerId, rooms);
+  });
   c.register('room_join', (a, x) => {
     const r = room(str(x, 'roomId'));
     if (a.kind === 'human') {

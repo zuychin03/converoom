@@ -45,7 +45,11 @@ export function App() {
   const [earlier, setEarlier] = useState<{ roomId: string; events: RecordData[] }>();
   const snapshot = useMemo(() => fetched && withEarlier(fetched, earlier), [fetched, earlier]);
   const selected = useRef(roomId);
-  const [view, setView] = useState<View>('room');
+  const [view, setView] = useState<View>(() => {
+    // FR-67: a room panel links straight to a view, such as ?view=approvals.
+    const asked = new URL(window.location.href).searchParams.get('view');
+    return VIEWS.find(([key]) => key === asked)?.[0] ?? 'room';
+  });
   const [connection, setConnection] = useState<'connecting' | 'live' | 'reconnecting' | 'offline'>('connecting');
   const [error, setError] = useState('');
   const [failure, setFailure] = useState('');

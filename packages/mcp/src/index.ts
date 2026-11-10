@@ -10,6 +10,7 @@ import { SHARED_READS, SHARED_WRITES } from '../../core/src/membership.js';
 import { mountReadServices } from './read-services.js';
 import { readCredential } from '../../../apps/cli/src/credentials.js';
 import { CHANNEL_INSTRUCTIONS, channelNotice, watchWakes } from './wakes.js';
+import { PANEL_TOOLS, PANEL_URI, supportsPanel } from './panel.js';
 export async function serveMcp(
   dataDir: string,
   client: string,
@@ -26,11 +27,14 @@ export async function serveMcp(
       ? { capabilities: { tools: {}, resources: {}, prompts: {}, experimental: { 'claude/channel': {} } }, instructions: CHANNEL_INSTRUCTIONS }
       : { capabilities: { tools: {}, resources: {}, prompts: {} } },
   );
+  // FR-67: offered only to an unscoped local connection whose client declared MCP Apps; others keep the text result and room link.
+  const panel = () => !credential.scope && !credential.remoteConnectionId && supportsPanel(server.getClientCapabilities());
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: TOOL_DEFINITIONS.filter((t) => (!credential.scope || MANAGED_TOOLS.has(t.name)) &&
       (!(credential.remoteConnectionId || credential.scope?.remoteConnectionId) || SHARED_READS.has(t.name) || SHARED_WRITES.has(t.name) || t.name === 'runtime_capabilities')).map((t) => ({
       ...t,
       inputSchema: { ...t.inputSchema, type: 'object' as const },
+      ...(PANEL_TOOLS.has(t.name) && panel() ? { _meta: { ui: { resourceUri: PANEL_URI } } } : {}),
     })),
   }));
   const call = runtimeCaller({ dataDir, client, token: credential.token, autoStart, sessionId });
@@ -42,7 +46,7 @@ export async function serveMcp(
     const { response, value } = await command(name, args);
     if (!response.ok) throw new Error(value.error?.message ?? 'Room resource unavailable');
     return value.result;
-  }, credential.scope?.roomId);
+  }, credential.scope?.roomId, panel);
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
       const args = request.params.arguments ?? {};

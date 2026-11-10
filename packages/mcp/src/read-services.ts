@@ -1,15 +1,19 @@
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ListResourcesRequestSchema, ReadResourceRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { ConveroomError as E, type ToolArgs } from '../../shared/src/contracts.js';
+import { PANEL_HTML, PANEL_MIME, PANEL_URI } from './panel.js';
 
-export function mountReadServices(server: Server, command: (name: string, args: ToolArgs) => Promise<unknown>, roomId?: string) {
+export function mountReadServices(server: Server, command: (name: string, args: ToolArgs) => Promise<unknown>, roomId?: string, panel = () => false) {
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const rooms = roomId ? [await command('room_get', { roomId })] : await command('room_list', {}) as ToolArgs[];
-    return { resources: (rooms as ToolArgs[]).slice(0, 50).flatMap((r) => ['state', 'events'].map((kind) => ({
+    const ui = panel() ? [{ uri: PANEL_URI, name: 'Converoom room panel', mimeType: PANEL_MIME }] : [];
+    return { resources: [...ui, ...(rooms as ToolArgs[]).slice(0, 50).flatMap((r) => ['state', 'events'].map((kind) => ({
       uri: 'converoom://rooms/' + r.id + '/' + kind, name: String(r.title) + ' ' + kind, mimeType: 'application/json',
-    }))) };
+    })))] };
   });
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    if (request.params.uri === PANEL_URI && panel())
+      return { contents: [{ uri: PANEL_URI, mimeType: PANEL_MIME, text: PANEL_HTML, _meta: { ui: { prefersBorder: true } } }] };
     const uri = request.params.uri, match = /^converoom:\/\/rooms\/([A-Za-z0-9-]{1,256})\/(state|events|artefacts\/([A-Za-z0-9-]{1,256}))$/.exec(uri);
     if (!match || (roomId && roomId !== match[1])) throw new E('resource_scope', 'Exact authorised room resource required', 403);
     const value = await command(match[2] === 'state' ? 'room_get' : match[2] === 'events' ? 'room_read' : 'shared_artefact_get',

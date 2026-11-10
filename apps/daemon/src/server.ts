@@ -347,6 +347,15 @@ export async function createServer(
         }),
       };
     }
+    if ((body.name === 'room_join' || body.name === 'room_panel') && result && typeof result === 'object') {
+      const value = result as ToolArgs, room = body.name === 'room_panel' ? value.room as ToolArgs | null : value;
+      const id = room && (room.roomId ?? room.id);
+      if (typeof id === 'string') {
+        const appUrl = url + '/?room=' + encodeURIComponent(id);
+        return { result: redact({ ...value, appUrl, ...(body.name === 'room_panel' ? { approvalsUrl: appUrl + '&view=approvals' } : {}) }),
+          ...outcome(body.name, args) };
+      }
+    }
     return { result: redact(result), ...outcome(body.name, args) };
   };
   app.post('/api/commands', async (request) => {

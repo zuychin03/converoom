@@ -132,6 +132,7 @@ const corpus: Record<string, { required: string[]; fields?: Record<string, unkno
     },
   },
   room_inbox: { required: ['roomId'] },
+  room_panel: { required: [], fields: { roomId: small } },
   room_members: { required: ['roomId'] },
   interaction_resolve: {
     required: ['roomId', 'interactionId', 'reason'],

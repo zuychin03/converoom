@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { AxeBuilder } from '@axe-core/playwright';
+import { PANEL_HTML } from '../packages/mcp/src/panel.js';
 const axe = async (page: Page) =>
   expect(
     (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations,
@@ -627,5 +628,107 @@ test('creates rooms from templates and sets seat models and efforts at desktop a
   await row.getByRole('button', { name: 'Delete' }).click();
   await page.getByRole('dialog', { name: 'Delete template' }).getByRole('button', { name: 'Delete template', exact: true }).click();
   await expect(row).toBeHidden();
+  expect(errors).toEqual([]);
+});
+// A scripted MCP Apps host: the panel runs sandboxed in an iframe (same origin only so axe can inspect it) and every host call is recorded.
+const HOST_PAGE = `<!doctype html><html lang="en"><head><title>MCP Apps host</title></head><body style="margin:0"><main>
+<iframe id="view" title="Converoom room panel" sandbox="allow-scripts allow-same-origin" style="width:100%;height:900px;border:0"></iframe></main>
+<script>
+  const frame = document.getElementById('view');
+  const reply = (id, payload) => frame.contentWindow.postMessage({ jsonrpc: '2.0', id, ...payload }, '*');
+  const note = (method, params) => frame.contentWindow.postMessage({ jsonrpc: '2.0', method, params }, '*');
+  window.addEventListener('message', async (event) => {
+    if (event.source !== frame.contentWindow) return;
+    const msg = event.data;
+    if (!msg || !msg.method) return;
+    await window.hostSent(msg.method, msg.params ?? null);
+    if (msg.method === 'ui/initialize') return reply(msg.id, { result: { protocolVersion: '2026-01-26', hostInfo: { name: 'host', version: '1' },
+      hostCapabilities: { openLinks: {}, serverTools: {} }, hostContext: { theme: 'dark', displayMode: 'inline' } } });
+    if (msg.method === 'ui/notifications/initialized') {
+      note('ui/notifications/tool-input', { arguments: { roomId: 'room-1' } });
+      note('ui/notifications/tool-result', await window.hostTool('room_panel', { roomId: 'room-1' }));
+      return;
+    }
+    if (msg.method === 'tools/call') return reply(msg.id, { result: await window.hostTool(msg.params.name, msg.params.arguments ?? {}) });
+    if (msg.id !== undefined) reply(msg.id, { result: {} });
+  });
+  window.loadView = (html) => { frame.srcdoc = html; };
+</script></body></html>`;
+const panelSnapshot = (over: Record<string, unknown> = {}) => ({
+  room: { id: 'room-1', title: 'Panel room', objective: 'Pick a storage option', workflow: 'discussion', lifecycle: 'active', phase: 'deliberation' },
+  seat: { id: 'seat-1', name: 'Claude', role: 'host', mode: 'polling' },
+  roster: [
+    { id: 'seat-1', name: 'Claude', product: 'claude', role: 'host', mode: 'polling', status: 'active', you: true,
+      push: { status: 'suspended', tested: true, attempts: 4, reason: 'No inbox read after 4 wake notices' } },
+    { id: 'seat-2', name: 'Codex', product: 'codex', role: 'member', mode: 'polling', status: 'active', you: false },
+  ],
+  waiting: { requests: [{ id: 'i-1', messageId: 'm-1', from: 'Owner', intent: 'question', status: 'stored', createdAt: Date.now() - 120000 }], turns: [], directives: 0 },
+  asked: [{ id: 'i-2', to: 'Codex', intent: 'review', status: 'delivered', createdAt: Date.now() - 60000 }],
+  approvals: [{ id: 'p-1', action: 'context_pin', summary: 'Pin the storage decision as a room invariant', expiresAt: Date.now() + 3600000 }],
+  budgets: { messages: { used: 4, limit: 60 }, turns: { used: 1 } },
+  rooms: [{ id: 'room-1', title: 'Panel room', lifecycle: 'active' }, { id: 'room-2', title: 'Older room', lifecycle: 'closed' }],
+  appUrl: 'http://127.0.0.1:43317/?room=room-1',
+  approvalsUrl: 'http://127.0.0.1:43317/?room=room-1&view=approvals',
+  ...over,
+});
+const toolResult = (result: unknown) => ({ content: [{ type: 'text', text: JSON.stringify({ result }) }], structuredContent: { result } });
+test('renders the room panel in an MCP Apps host, asks the agent to read its inbox and sends approvals to the paired browser', async ({ page }) => {
+  const errors: string[] = [];
+  watch(page, errors);
+  const sent: { method: string; params: Record<string, unknown> | null }[] = [], calls: { name: string; args: Record<string, unknown> }[] = [];
+  let answer: unknown = toolResult(panelSnapshot());
+  await page.exposeFunction('hostSent', (method: string, params: Record<string, unknown> | null) => { sent.push({ method, params }); });
+  await page.exposeFunction('hostTool', (name: string, args: Record<string, unknown>) => { calls.push({ name, args }); return answer; });
+  await page.setContent(HOST_PAGE);
+  await page.evaluate((html) => (window as unknown as { loadView(h: string): void }).loadView(html), PANEL_HTML);
+  const view = page.frameLocator('#view');
+  const opened = () => sent.filter((m) => m.method === 'ui/open-link').map((m) => m.params?.url);
+
+  await expect(view.getByRole('heading', { name: 'Panel room' })).toBeVisible();
+  expect(sent.find((m) => m.method === 'ui/initialize')?.params).toMatchObject({ protocolVersion: '2026-01-26', appInfo: { name: 'converoom-room-panel' } });
+  expect(sent.some((m) => m.method === 'ui/notifications/initialized')).toBe(true);
+  await expect(view.getByRole('region', { name: 'Waiting for you' })).toContainText('Question from Owner');
+  await expect(view.getByRole('region', { name: 'Your open requests' })).toContainText('Review asked of Codex');
+  await expect(view.getByRole('list', { name: 'Seats' })).toContainText('Push paused, polling');
+  await expect(view.getByRole('list', { name: 'Seats' })).toContainText('Codex');
+  await axe(page);
+
+  await view.getByRole('button', { name: 'Ask agent to check inbox' }).click();
+  await expect.poll(() => sent.some((m) => m.method === 'ui/message')).toBe(true);
+  const message = sent.find((m) => m.method === 'ui/message')?.params as { role: string; content: { type: string; text: string }[] };
+  expect(message.role).toBe('user');
+  expect(message.content[0]!.text).toMatch(/room_inbox.*room-1/);
+  await expect(view.getByRole('status')).toContainText('Asked the agent to read its inbox');
+
+  await expect(view.getByRole('region', { name: 'Approvals' })).toContainText('Pin the storage decision as a room invariant');
+  await view.getByRole('button', { name: 'Review 1 approval in browser' }).click();
+  await view.getByRole('button', { name: 'Open room in browser' }).click();
+  await expect.poll(opened).toEqual(['http://127.0.0.1:43317/?room=room-1&view=approvals', 'http://127.0.0.1:43317/?room=room-1']);
+
+  await view.getByLabel('Room', { exact: true }).selectOption({ label: 'Older room (closed)' });
+  await expect.poll(() => calls.some((c) => c.name === 'room_panel' && c.args.roomId === 'room-2')).toBe(true);
+
+  answer = toolResult(panelSnapshot({ waiting: { requests: [], turns: [], directives: 0 }, approvals: [], appUrl: 'https://elsewhere.example/', approvalsUrl: 'https://elsewhere.example/' }));
+  await view.getByRole('button', { name: 'Refresh' }).click();
+  await expect(view.getByText('Nothing is waiting for this seat.')).toBeVisible();
+  await expect(view.getByRole('button', { name: 'Ask agent to check inbox' })).toBeHidden();
+  await expect(view.getByRole('region', { name: 'Approvals' })).toBeHidden();
+  await expect(view.getByRole('button', { name: 'Open room in browser' })).toBeHidden();
+
+  answer = { isError: true, content: [{ type: 'text', text: '{}' }], structuredContent: { error: { code: 'runtime_unavailable', message: 'Converoom is not running' } } };
+  await view.getByRole('button', { name: 'Refresh' }).click();
+  await expect(view.getByRole('alert')).toContainText('Converoom is not running');
+  expect(sent.some((m) => m.method === 'ui/notifications/size-changed')).toBe(true);
+  expect(calls.every((c) => c.name === 'room_panel')).toBe(true);
+  expect(errors).toEqual([]);
+});
+test('opens the approval queue from a room panel link', async ({ page, request }) => {
+  const errors: string[] = [];
+  watch(page, errors);
+  const code = (await (await request.post('http://127.0.0.1:43318/pair')).json()).code;
+  await page.goto('/?view=approvals');
+  await page.getByLabel('Pairing code').fill(code);
+  await page.getByRole('button', { name: 'Connect to Converoom' }).click();
+  await expect(page.getByRole('heading', { name: 'Approval queue' })).toBeVisible();
   expect(errors).toEqual([]);
 });
