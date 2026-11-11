@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/zuychin03/converoom/security/policy
+    about: Please report vulnerabilities privately, not in a public issue.
+  - name: Agent setup and capabilities
+    url: https://github.com/zuychin03/converoom/blob/develop/docs/AGENT_SUPPORT.md
+    about: Native launch, config path and sign-in for each agent client.
+  - name: Windows install
+    url: https://github.com/zuychin03/converoom/blob/develop/docs/WINDOWS_INSTALL.md
+    about: The one-run Windows bundle.

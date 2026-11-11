@@ -1,0 +1,71 @@
+name: Bug report
+description: Something doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. For a security problem, use the private report on the Security tab instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you saw, including any error message or refusal code.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. converoom start
+        2. Create a room with a Codex and a Cursor seat
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Rooms, messages or approvals
+        - Managed turns or agent adapters
+        - Coding workflow (clones, checks, apply, branch export)
+        - Shared rooms
+        - Push wakes or the MCP room panel
+        - Install, upgrade, recover or uninstall
+        - Browser UI
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Converoom version
+      description: The output of `converoom version`, or the commit if you run from source.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Windows and Node versions
+      placeholder: e.g. Windows 11 24H2, Node 26.13.0
+    validations:
+      required: true
+  - type: input
+    id: agents
+    attributes:
+      label: Agent clients involved
+      placeholder: e.g. Codex CLI 0.164.0, Cursor 3.29
+  - type: textarea
+    id: doctor
+    attributes:
+      label: converoom doctor output and logs
+      description: Remove pairing codes, invitation links, tokens and private room content before posting.
+      render: text
