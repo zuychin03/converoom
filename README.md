@@ -6,7 +6,7 @@ Converoom runs a loopback daemon and browser UI on your computer. Existing Claud
 
 ## Current status
 
-The 0.3.2 Windows V1.2 preview adds iterative coding and workflow presets to the V1.1 private shared rooms: finding and connecting installed agents, opt-in auto-start from an agent's chat, room templates, each seat's model and effort, coding attempts over several turns with checkpoints and rollback, line comments in reviews, export to a local branch with a PR brief, imported conversation context, threads and pins, owner barge-in, and handing stalled work to another seat. These have fixture tests and pass Windows CI. Live vendor acceptance for them (apart from Codex history reads), the real two-Windows pilot, fresh-user onboarding and manual accessibility remain pending. This is a preview, not full V1, V1.1 or V1.2 acceptance.
+The 0.3.2 Windows V1.2 preview runs on Node 24.14 or later, can wake Claude Code seats by push and shows a room panel in MCP Apps clients. It keeps the iterative coding and workflow presets that 0.3.0 added to the V1.1 private shared rooms: finding and connecting installed agents, opt-in auto-start from an agent's chat, room templates, each seat's model and effort, coding attempts over several turns with checkpoints and rollback, line comments in reviews, export to a local branch with a PR brief, imported conversation context, threads and pins, owner barge-in, and handing stalled work to another seat. These have fixture tests and pass Windows CI. Live vendor acceptance for them (apart from Codex history reads), the real two-Windows pilot, fresh-user onboarding and manual accessibility remain pending. This is a preview, not full V1, V1.1 or V1.2 acceptance.
 
 Shared access is disabled by default and requires explicit private HTTPS setup. Windows 11 x64 is the only verification and release target. Converoom runs on Node 24.14 or later and is tested on Node 24 and 26. macOS and Linux support is deferred until those platforms can be tested. See the [architecture](docs/ARCHITECTURE.md), [preview evidence](docs/PREVIEW_ACCEPTANCE.md), [requirement matrix](docs/REQUIREMENT_MATRIX.md) and [Windows pilot guide](docs/WINDOWS_SHARED_PILOT.md).
 
@@ -16,7 +16,7 @@ The primary flows are rooms, directed interactions and receipts, scoped human ap
 
 ## Run from source
 
-Use Node 24.14 or later, and Git. CI runs every check on Node 24.22 and 26.13, and Node 26.13 is the development runtime. Later Node release lines are accepted but untested.
+Use Node 24.14 or later, and Git. CI runs every check on Node 24.22 and 26.13, except the Windows bundle build and smoke test, which run on 26.13 only. Node 26.13 is the development runtime. Later Node release lines are accepted but untested.
 
 ```sh
 npm ci --ignore-scripts
@@ -60,7 +60,7 @@ Or use `npx --ignore-scripts --package @converoom/cli@preview converoom setup`. 
 
 ### Upgrade, recover and uninstall
 
-Stop the runtime before any of these. Converoom records which installed version is active, and a different package never changes it on its own: `start`, `setup`, `connect` and `onboard` stop and say which version is installed. Run the newer package's `converoom upgrade`. It backs up the room store and artefacts under `backups`, installs the new runtime, points every connected product at it without issuing new credentials and refreshes room skills you have not edited. The previous version stays installed. Downgrades are refused.
+Stop the runtime with `converoom stop` before any of these. Converoom records which installed version is active, and a different package never changes it on its own: `start`, `setup`, `connect` and `onboard` stop and say which version is installed. Run the newer package's `converoom upgrade`. It backs up the room store and artefacts under `backups`, installs the new runtime, points every connected product at it without issuing new credentials and refreshes room skills you have not edited. The previous version stays installed. Downgrades are refused.
 
 `converoom recover` finishes an interrupted upgrade, clears the files a crashed runtime left, repairs the active runtime's files and points stale registrations back at it. `converoom recover --rollback` returns to the version used before the last upgrade. If that upgrade changed the room store's format, rollback also needs `--confirm`: it restores the pre-upgrade backup and keeps the newer store aside.
 
@@ -100,9 +100,13 @@ Every attempt, combined candidate and check keeps its clone until you clean it u
 
 ## Tests and diagnostics
 
-`npm test` covers behaviour, persistence, identity, scheduling, content, workspace, fixture, agent protocols and Windows installation boundaries. See the [preview evidence](docs/PREVIEW_ACCEPTANCE.md) for recorded counts and limitations. `npm run test:e2e` runs four non-inference desktop/mobile flows for solo rooms and shared consent, review, denial, revocation and recovery. Live vendor tests are recorded separately and never inferred from fixture success. Windows CI checks the exact source commit; local checks and earlier CI runs do not validate a later revision.
+`npm test` covers behaviour, persistence, identity, scheduling, content, workspace, fixture, agent protocols and Windows installation boundaries. See the [preview evidence](docs/PREVIEW_ACCEPTANCE.md) for recorded counts and limitations. `npm run test:e2e` runs 24 non-inference browser flows, 12 tests each at desktop and mobile size: the room lifecycle, shared consent, review, denial, revocation and reconnect, checkpoints and rollback, line comments, branch export, context import, threads and pins, barge-in, reassigning and handing over work, templates and seat settings, and the MCP Apps room panel. Live vendor tests are recorded separately and never inferred from fixture success. Windows CI checks the exact source commit; local checks and earlier CI runs do not validate a later revision.
 
-`converoom export ROOM_ID --output room.json` produces a redacted versioned history export with ordered event provenance. A `.md` output is a readable transcript of the same history: every numbered event in order, with names, approvals and digests, and the JSON export's digest for matching the two. Message, agenda and decision text appears in fenced blocks, so recorded text cannot pass for transcript structure. Only the JSON export can be restored. `backup --output DIRECTORY` creates a private local backup directory containing a consistent SQLite copy and immutable content artefacts. Export, backup and cleanup require an interactive terminal: enter the one-use code printed in the terminal running `converoom start`. `converoom pair` also prints its new code in that original terminal. The installation token in `runtime.json` cannot issue human commands or retrieve codes. Keep backups private. Restore imports history into an empty data directory and does not reactivate local execution paths. Cleanup retains dirty, unexported and uncertain work.
+`converoom export ROOM_ID --output room.json` produces a redacted versioned history export with ordered event provenance. A `.md` output is a readable transcript of the same history: every numbered event in order, with names, approvals and digests, and the JSON export's digest for matching the two. Message, agenda and decision text appears in fenced blocks, so recorded text cannot pass for transcript structure. Only the JSON export can be restored. `backup --output DIRECTORY` creates a private local backup directory containing a consistent SQLite copy and immutable content artefacts. Export, backup and cleanup require an interactive terminal: enter the one-use code printed in the terminal running `converoom start`. `converoom pair` also prints its new code in that original terminal. The installation token in `runtime.json` cannot issue human commands or retrieve codes. Keep backups private. `converoom restore --input PATH` imports a JSON export into an empty data directory and does not reactivate local execution paths. Cleanup retains dirty, unexported and uncertain work.
+
+## Commands, changes and contributing
+
+`converoom help` lists every command, including `status`, `stop`, `remote-enable`, `remote-disconnect` and `interrupted`. The [changelog](CHANGELOG.md) records each release. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and checks, [SECURITY.md](SECURITY.md) to report a vulnerability privately, and the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Licence
 
