@@ -1785,7 +1785,7 @@ function systemLine(type: string, d: RecordData, ctx: EntryContext): ReactNode {
     case 'seat.consent':
       return d.consent ? `Turn requests allowed for ${seat(d.seatId)}` : `Turn requests turned off for ${seat(d.seatId)}`;
     case 'seat.attached':
-      return `${seat(d.seatId)} attached its Claude Code session for push wakes`;
+      return `${seat(d.seatId)} attached its ${d.bridge === 'opencode' ? 'OpenCode' : 'Claude Code'} session for push wakes`;
     case 'seat.attachment_tested':
       return `Push wake reached ${seat(d.seatId)}'s session`;
     case 'seat.attachment_suspended':

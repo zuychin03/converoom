@@ -313,8 +313,13 @@ export const workerSeat = (seat: RecordData) => seat.mode === 'managed' && turnT
 export function attachmentState(attachment: RecordData | undefined): { kind: Kind; label: string; detail: string } | undefined {
   if (!attachment) return undefined;
   if (attachment.status === 'suspended') return { kind: 'warn', label: 'Push paused, polling', detail: string(attachment, 'reason') };
-  const detail = 'Push wakes through its Claude Code channel';
-  const attempts = isRecord(attachment.wake) ? num(attachment.wake, 'attempts') ?? 1 : 0;
+  const opencode = attachment.bridge === 'opencode';
+  const detail = opencode ? "Push wakes through Converoom's OpenCode server" : 'Push wakes through its Claude Code channel';
+  const wake = isRecord(attachment.wake) ? attachment.wake : undefined;
+  // OpenCode never re-sends; its wake waits in the session's queue until a turn takes it.
+  if (wake && opencode) return { kind: 'live', detail,
+    label: 'Attached · wake ' + (num(wake, 'deliveredAt') ? 'delivered' : string(wake, 'inboxId') ? 'queued in OpenCode' : 'sent') };
+  const attempts = wake ? num(wake, 'attempts') ?? 1 : 0;
   if (attempts) return { kind: 'live', label: 'Attached · wake sent' + (attempts > 1 ? ', attempt ' + attempts : ''), detail };
   return { kind: 'ok', label: 'Attached · wake ' + (attachment.tested === true ? 'tested' : 'untested'), detail };
 }

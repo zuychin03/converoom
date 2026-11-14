@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { open, writeFile, unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -26,12 +27,15 @@ import {
   secret,
   editConfig,
   connectionReport,
+  registeredEntry,
   removeSkill,
   VERSION,
   MIN_NODE,
   supportedNode,
 } from './support.js';
 import { probeProduct } from '../../../packages/adapters/src/index.js';
+import { executable } from '../../../packages/adapters/src/process.js';
+import { OPENCODE_TESTED } from '../../daemon/src/opencode.js';
 import { PRODUCT_IDS, isProduct } from '../../../packages/shared/src/products.js';
 import { redactPublic } from '../../../packages/store/src/index.js';
 import { PUSH_BRIDGES } from '../../../packages/core/src/attachments.js';
@@ -64,13 +68,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     products = PRODUCT_IDS;
   const metadata = () => json<Metadata>(metaPath);
   const local = async (path: string, body?: unknown) => {
-    const m = await metadata();
+    // A runtime that stopped without cleaning up leaves runtime.json pointing at a closed port.
+    const down = () => new Error(`Converoom is not running for the data folder ${dataDir}. Start it with converoom start, then try again.`);
+    const m = await metadata().catch(() => { throw down(); });
     const r = await fetch(m.url + path, {
       method: body ? 'POST' : 'GET',
       headers: { Authorization: 'Bearer ' + m.controlToken, 'Content-Type': 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(35000),
-    });
+    }).catch((e: unknown) => { throw e instanceof TypeError ? down() : e; });
     const v = (await r.json()) as ToolArgs;
     if (!r.ok)
       throw new Error(String((v.error as ToolArgs)?.message ?? 'Runtime operation failed'));
@@ -99,7 +105,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'Converoom ' +
         VERSION +
         '\nProducts: ' + products.join(', ') +
-        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor [--discover] | upgrade | recover [--rollback [--confirm]] | uninstall [--confirm [--delete-data DATA_DIR]]\nonboard --products codex,cursor | onboard --auto [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] [--auto-start] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nbridge enable|disable claude\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup [--confirm CODE] | cleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
+        '\nstart [--port 0] [--data-dir PATH] [--shared-origin HTTPS_ORIGIN --shared-port PORT]\npair | status | stop\nsetup | doctor [--discover] | upgrade | recover [--rollback [--confirm]] | uninstall [--confirm [--delete-data DATA_DIR]]\nonboard --products codex,cursor | onboard --auto [--no-open]\nconnect PRODUCT [--config PATH] [--remote-connection ID] [--auto-start] | disconnect PRODUCT\nremote-connect --origin HTTPS_ORIGIN --room ID --product PRODUCT\nremote-disconnect ID | remote-enable ID --max-turns N --max-turn-ms N\nbridge enable|disable claude|opencode\nopencode [DIR] [-s SESSION]\nmcp --client PRODUCT\nexport ROOM_ID --output PATH | backup --output PATH\nrestore --input PATH (empty data directory only)\ncleanup [--confirm CODE] | cleanup --attempt ID --confirm\ninterrupted | interrupted-clear ID\n\nShared access is disabled by default. Tailscale Serve setup is explicit and separate. Never expose the local control listener. Native subscription sign-in remains with vendors. No model API fallback.',
     );
     return;
   }
@@ -145,6 +151,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             ...(await connectionReport(p, dataDir, defaultConfig(p), active)),
             credentialStored: await credentialLocation(join(dataDir, 'clients', p + '.json')) ?? 'none saved',
           }))),
+          ...(running ? { opencodeBridge: await local('/local/opencode/status', {}).catch(() => 'not checked') } : {}),
           smoke: 'Approve a bounded managed turn in the room UI; doctor never starts inference',
         },
         null,
@@ -350,12 +357,36 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   if (command === 'bridge') {
     const action = argv[1], bridge = argv[2] ?? '';
     if ((action !== 'enable' && action !== 'disable') || !(bridge in PUSH_BRIDGES))
-      throw new Error('Use converoom bridge enable claude or converoom bridge disable claude');
+      throw new Error('Use converoom bridge enable claude or converoom bridge enable opencode, or disable in place of enable');
     await call(action === 'enable' ? 'push_bridge_enable' : 'push_bridge_disable', { bridge });
-    console.log(action === 'enable'
-      ? 'The Claude Code push bridge is on. Start Claude Code with claude --dangerously-load-development-channels server:converoom ' +
-        'and accept its warning, then let the agent ask to attach with seat_attach and approve it in the room.'
-      : 'The Claude Code push bridge is off. Attached Claude Code seats are back to polling their inbox.');
+    console.log(bridge === 'opencode'
+      ? action === 'enable'
+        ? 'The OpenCode push bridge is on. Open a session with converoom opencode [DIR], let the agent ask to attach with seat_attach ' +
+          'and approve it in the room. Wakes run whether or not the OpenCode window is open, with your usual OpenCode permissions.'
+        : 'The OpenCode push bridge is off and Converoom\'s OpenCode server has stopped. Attached OpenCode seats are back to polling their inbox.'
+      : action === 'enable'
+        ? 'The Claude Code push bridge is on. Start Claude Code with claude --dangerously-load-development-channels server:converoom ' +
+          'and accept its warning, then let the agent ask to attach with seat_attach and approve it in the room.'
+        : 'The Claude Code push bridge is off. Attached Claude Code seats are back to polling their inbox.');
+    return;
+  }
+  if (command === 'opencode') {
+    let dir: string | undefined, session: string | undefined;
+    for (let i = 1; i < argv.length; i++) {
+      if (['-s', '--session'].includes(argv[i]!)) session = argv[++i];
+      else if (argv[i] === '--data-dir') i++;
+      else if (!argv[i]!.startsWith('-')) dir ??= argv[i];
+    }
+    const access = await local('/local/opencode', {}) as { url: string; key: string; version: string };
+    const client = await json<{ config?: string }>(join(dataDir, 'clients', 'opencode.json')).catch(() => undefined);
+    if (!await registeredEntry('opencode', client?.config ?? defaultConfig('opencode')).catch(() => undefined))
+      console.error('Converoom is not registered in OpenCode, so this session cannot reach a room. Run converoom connect opencode first.');
+    console.log(`Opening OpenCode ${access.version} on Converoom's OpenCode server` +
+      (access.version === OPENCODE_TESTED ? '.' : ` (the bridge was tested on ${OPENCODE_TESTED}).`));
+    const opencode = await executable('opencode');
+    const child = spawn(opencode.command, [...opencode.args, '--server', access.url, ...(session ? ['-s', session] : []), resolve(dir ?? '.')],
+      { stdio: 'inherit', env: { ...process.env, OPENCODE_PASSWORD: access.key, OPENCODE_SERVER_PASSWORD: access.key } });
+    process.exitCode = await new Promise<number>((done, fail) => { child.once('error', fail); child.once('exit', (code) => done(code ?? 1)); });
     return;
   }
   if (command === 'remote-disconnect' || command === 'remote-enable') {

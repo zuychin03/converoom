@@ -496,7 +496,9 @@ export function createCore(store: Store): Core {
         5
     )
       throw new E('seat_limit', 'Seat limit reached', 409);
-    const product = (x.product ?? 'codex') as Seat['product'];
+    const registered = a.kind === 'agent' && x.product === undefined
+      ? store.list<Actor & { product?: string }>('bridge').find((b) => b.principalId === a.principalId)?.product : undefined;
+    const product = (x.product ?? registered ?? 'codex') as Seat['product'];
     if (!isProduct(product))
       throw new E('product', 'Unsupported product');
     const mode = x.mode === 'managed' ? 'managed' : 'polling';
@@ -637,7 +639,7 @@ export function createCore(store: Store): Core {
       add(
         a,
         room(r.id),
-        { name: x.name ?? 'Host', product: x.product ?? 'codex', role: 'host' },
+        { name: x.name ?? 'Host', product: x.product, role: 'host' },
         a.principalId,
       );
     for (const s of roster as ToolArgs[]) {

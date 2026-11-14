@@ -19,10 +19,10 @@ export class RuntimeUnavailable extends ConveroomError {
 const unsent = (e: unknown) => (e as NodeJS.ErrnoException).code === 'ENOENT' || (e as { cause?: { code?: string } }).cause?.code === 'ECONNREFUSED';
 
 export function runtimeCaller(o: { dataDir: string; client: string; token: string; autoStart?: AutoStart; sessionId?: string }) {
-  const send = async (name: string, args: Record<string, unknown>) => {
+  const send = async (name: string, args: Record<string, unknown>, headers: Record<string, string> = {}) => {
     const runtime = JSON.parse(await readFile(join(o.dataDir, 'runtime.json'), 'utf8')) as { url: string };
     const response = await fetch(runtime.url + '/agent/commands', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + o.token,
-      ...(o.sessionId ? { 'X-Converoom-Session': o.sessionId } : {}) },
+      ...(o.sessionId ? { 'X-Converoom-Session': o.sessionId } : {}), ...headers },
       body: JSON.stringify({ name, args }), signal: AbortSignal.timeout(35000) });
     return { response, value: await response.json() as Reply };
   };
@@ -32,10 +32,10 @@ export function runtimeCaller(o: { dataDir: string; client: string; token: strin
     : `Converoom is not running. Ask the owner to run ${start} in their own terminal; do not run it yourself, because it prints a private pairing code. ` +
       `To let this agent start it next time, the owner can run converoom connect ${o.client} --auto-start${dataDir}.`, start);
   let starting: Promise<boolean> | undefined;
-  return async (name: string, args: Record<string, unknown>) => {
-    try { return await send(name, args); } catch (e) { if (!unsent(e)) throw e; }
+  return async (name: string, args: Record<string, unknown>, headers?: Record<string, string>) => {
+    try { return await send(name, args, headers); } catch (e) { if (!unsent(e)) throw e; }
     if (!o.autoStart || !await (starting ??= startRuntime(o.dataDir, o.autoStart).finally(() => { starting = undefined; }))) throw unavailable();
-    try { return await send(name, args); } catch (e) { throw unsent(e) ? unavailable() : e; }
+    try { return await send(name, args, headers); } catch (e) { throw unsent(e) ? unavailable() : e; }
   };
 }
 

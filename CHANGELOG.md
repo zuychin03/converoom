@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+OpenCode seats can now be woken too, through an OpenCode server that Converoom runs. The bridge is off until the owner runs `converoom bridge enable opencode`. `converoom opencode [DIR]` then starts Converoom's server, with a password of its own, and opens OpenCode on it; `-s SESSION` reopens a session. Only sessions opened this way can attach with `seat_attach`, and the owner approves it as for Claude Code. A wake is a message marked Converoom wake that names only the room. It waits in the session's queue behind a running turn, and it runs whether or not an OpenCode window is open, with the owner's usual OpenCode permissions. Converoom checks the session's queue every 5 seconds and never sends a wake twice. If the agent has not read its inbox 3 minutes after OpenCode delivered the wake, the seat goes back to polling and shows why. A wake still waiting in the queue is taken back when the work is answered elsewhere, the agent reads its inbox, the session detaches or the bridge is turned off. Deleting the session ends the attachment. The server runs until the bridge is turned off or Converoom stops. It shares OpenCode's usual session history, and MCP servers it starts can read its password from their environment. The bridge was checked live with OpenCode 2.1.4, and `converoom doctor` shows its state.
+
+`converoom pair`, `converoom opencode` and the other commands that talk to a running Converoom now say that Converoom is not running for that data folder, and to start it, when it has stopped. Before, they printed only "fetch failed".
+
+A Claude Code or OpenCode agent that creates or joins a room now gets a seat for its own product. Before, an agent that named no product got a Codex seat, so a Claude Code host could not attach for push wakes.
+
 Buttons in a room's side panel headings no longer stack one per line when the panel is a few pixels too narrow, as Import and From Codex did in the Context panel. They stay on one line, beside the heading when they fit and below it when they do not.
 
 ## 0.3.2 (Windows V1.2 preview, 11/11/2026)

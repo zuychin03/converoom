@@ -28,6 +28,8 @@ import { hash, humanIdentity, issueBridgeCredential, revokeBridgeCredential, sec
 import { latestDiscovery } from '../../cli/src/discovery.js';
 import { BUILT_IN_TEMPLATES } from '../../../packages/core/src/templates.js';
 import { createWakeHub, SESSION_ID } from './wakes.js';
+import { createOpenCodeServer } from './opencode.js';
+import { OPENCODE_SESSION } from '../../../packages/core/src/attachments.js';
 export { humanIdentity, issueBridgeCredential, ownerIdentity, revokeBridgeCredential } from './bridges.js';
 
 export const VERSION = '0.3.2';
@@ -113,6 +115,7 @@ export interface ServerOptions {
   onStop?: () => Promise<void>;
   // Test override for the wake hub's tick; 0 stops its timer.
   wakeTickMs?: number;
+  opencodeReadyMs?: number;
 }
 export async function createServer(
   runtime: Runtime,
@@ -127,7 +130,8 @@ export async function createServer(
   const sessions = new Map<string, { csrf: string; expiresAt: number }>();
   const rates = new Map<string, { at: number; count: number }>();
   const streams = new Set<() => void>();
-  const wakes = createWakeHub(runtime.core.store, options.wakeTickMs);
+  const opencode = createOpenCodeServer(runtime.core.store, runtime.dataDir, { readyMs: options.opencodeReadyMs });
+  const wakes = createWakeHub(runtime.core.store, options.wakeTickMs, opencode);
   const browserOrigin = (request: FastifyRequest, required: boolean) => {
     if (
       (required && !request.headers.origin) ||
@@ -412,8 +416,12 @@ export async function createServer(
       }
     }
     const session = String(request.headers['x-converoom-session'] ?? '');
-    const sessionId = SESSION_ID.test(session) && wakes.belongs(session, principal.principalId) ? session : undefined;
-    if ((request.body as { name?: unknown } | undefined)?.name === 'seat_attach' && !(sessionId && wakes.owns(sessionId, principal.principalId)))
+    // An OpenCode session ID counts only from an MCP process that Converoom's current OpenCode server started.
+    const sessionId = SESSION_ID.test(session) ? (wakes.belongs(session, principal.principalId) ? session : undefined)
+      : OPENCODE_SESSION.test(session) && !principal.scope && opencode.accepts(String(request.headers['x-converoom-opencode-server'] ?? ''))
+        ? session : undefined;
+    if ((request.body as { name?: unknown } | undefined)?.name === 'seat_attach' && SESSION_ID.test(session) &&
+      !(sessionId && wakes.owns(sessionId, principal.principalId)))
       throw new ConveroomError('wake_stream_unavailable',
         'This session has no open Converoom wake stream. Ask again in a few seconds, or restart Claude Code if it persists', 409);
     return dispatch(request, {
@@ -453,6 +461,16 @@ export async function createServer(
     installationAuthority(runtime.core.store, human, 'bridge.credential_issued', { principalId: issued.principalId, product: request.body.product,
       ...(issued.remoteConnectionId ? { remoteConnectionId: issued.remoteConnectionId } : {}) });
     return issued;
+  });
+  // The launcher's access to Converoom's OpenCode server: control token only, never a browser.
+  app.post('/local/opencode', async (request) => {
+    localAuth(request);
+    const access = await opencode.ensure();
+    return { url: access.url, key: access.key, version: access.version };
+  });
+  app.post('/local/opencode/status', async (request) => {
+    localAuth(request);
+    return opencode.status();
   });
   app.post('/local/pair', async (request) => {
     localAuth(request);
@@ -561,6 +579,7 @@ export async function createServer(
   }
   app.addHook('onClose', async () => {
     wakes.close();
+    await opencode.stop();
     for (const finish of streams) finish();
     sessions.clear();
   });
@@ -571,6 +590,7 @@ export async function createServer(
     url,
     close: async () => {
       wakes.close();
+      await opencode.stop();
       for (const finish of streams) finish();
       await app.close();
     },

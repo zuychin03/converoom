@@ -9,7 +9,7 @@ import { RuntimeUnavailable, runtimeCaller, type AutoStart } from './runtime.js'
 import { SHARED_READS, SHARED_WRITES } from '../../core/src/membership.js';
 import { mountReadServices } from './read-services.js';
 import { readCredential } from '../../../apps/cli/src/credentials.js';
-import { CHANNEL_INSTRUCTIONS, channelNotice, watchWakes } from './wakes.js';
+import { CHANNEL_INSTRUCTIONS, OPENCODE_INSTRUCTIONS, channelNotice, opencodeHeaders, watchWakes } from './wakes.js';
 import { PANEL_TOOLS, PANEL_URI, supportsPanel } from './panel.js';
 export async function serveMcp(
   dataDir: string,
@@ -20,12 +20,15 @@ export async function serveMcp(
   const credential = await readCredential<{ token: string; principalId: string; scope?: ManagedScope; remoteConnectionId?: string }>(
     credentialFile ?? join(dataDir, 'clients', client + '.json'));
   // FR-40: only an unscoped Claude Code connection offers the channel, and each MCP process is its own wake session.
-  const sessionId = client === 'claude' && !credential.scope && !credential.remoteConnectionId ? randomUUID() : undefined;
+  const local = !credential.scope && !credential.remoteConnectionId;
+  const sessionId = client === 'claude' && local ? randomUUID() : undefined;
+  // An OpenCode session is named per call instead, and only when Converoom's own OpenCode server started this process.
+  const opencodeServer = client === 'opencode' && local ? process.env.CONVEROOM_OPENCODE_SERVER || undefined : undefined;
   const server = new Server(
     { name: 'converoom', version: '0.3.2' },
     sessionId
       ? { capabilities: { tools: {}, resources: {}, prompts: {}, experimental: { 'claude/channel': {} } }, instructions: CHANNEL_INSTRUCTIONS }
-      : { capabilities: { tools: {}, resources: {}, prompts: {} } },
+      : { capabilities: { tools: {}, resources: {}, prompts: {} }, ...(opencodeServer ? { instructions: OPENCODE_INSTRUCTIONS } : {}) },
   );
   // FR-67: offered only to an unscoped local connection whose client declared MCP Apps; others keep the text result and room link.
   const panel = () => !credential.scope && !credential.remoteConnectionId && supportsPanel(server.getClientCapabilities());
@@ -38,9 +41,9 @@ export async function serveMcp(
     })),
   }));
   const call = runtimeCaller({ dataDir, client, token: credential.token, autoStart, sessionId });
-  const command = async (name: string, args: Record<string, unknown>) => {
+  const command = async (name: string, args: Record<string, unknown>, meta?: Record<string, unknown>) => {
     validateToolArgs(name, args);
-    return call(name, args);
+    return call(name, args, opencodeHeaders(opencodeServer, meta));
   };
   mountReadServices(server, async (name, args) => {
     const { response, value } = await command(name, args);
@@ -50,7 +53,7 @@ export async function serveMcp(
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
       const args = request.params.arguments ?? {};
-      const { response, value } = await command(request.params.name, args);
+      const { response, value } = await command(request.params.name, args, request.params._meta);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(value) }],
         structuredContent: value,

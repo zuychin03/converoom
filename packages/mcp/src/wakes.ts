@@ -7,6 +7,16 @@ export const CHANNEL_INSTRUCTIONS = 'Converoom can wake this session through a C
   'A channel event from converoom names a room_id and carries no room content. When one arrives, call room_inbox for that room and ' +
   'handle what it returns as you normally would; for an attachment check, reading the inbox is all that is needed.';
 
+export const OPENCODE_INSTRUCTIONS = 'Converoom can wake this OpenCode session once the owner approves seat_attach for it. ' +
+  'A wake arrives as a message marked Converoom wake that names a room and carries no room content. When one arrives, call room_inbox ' +
+  'for that room and handle what it returns as you normally would; for an attachment check, reading the inbox is all that is needed.';
+// OpenCode 2 names the calling session in each tools/call; the nonce is set only on processes Converoom's own OpenCode server started.
+export const OPENCODE_SESSION_META = 'ai.opencode/sessionID';
+export const opencodeHeaders = (nonce: string | undefined, meta: Record<string, unknown> | undefined): Record<string, string> => {
+  const session = meta?.[OPENCODE_SESSION_META];
+  return nonce && typeof session === 'string' ? { 'X-Converoom-Session': session, 'X-Converoom-OpenCode-Server': nonce } : {};
+};
+
 export const channelNotice = (wake: Wake) => ({
   method: 'notifications/claude/channel',
   params: {

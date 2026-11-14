@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createServer as createNetServer } from 'node:net';
 it.each(['antigravity', 'kiro', 'qoder'])('preserves unrelated JSON settings when connecting %s', async (product) => {
   const root = await mkdtemp(join(tmpdir(), 'converoom-config-'));
   try {
@@ -139,5 +140,16 @@ it('routes bridge enable and disable through a paired owner command and refuses 
     await expect(main(['bridge', 'toggle', 'claude', '--data-dir', dataDir])).rejects.toThrow(/bridge enable claude/);
     await expect(main(['bridge', 'enable', 'cursor', '--data-dir', dataDir])).rejects.toThrow(/bridge enable claude/);
     await expect(main(['bridge', 'enable', 'claude', '--data-dir', dataDir])).rejects.toThrow(/interactive terminal/);
+  } finally { await rm(dataDir, { recursive: true, force: true }); }
+});
+it('says the runtime is not running when runtime.json is missing or names a closed port', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'converoom-down-'));
+  try {
+    await expect(main(['opencode', '--data-dir', dataDir])).rejects.toThrow(/Converoom is not running for the data folder .*converoom start/);
+    const closed = createNetServer();
+    const port = await new Promise<number>((done) => closed.listen(0, '127.0.0.1', () => done((closed.address() as { port: number }).port)));
+    await new Promise((done) => closed.close(done));
+    await writeFile(join(dataDir, 'runtime.json'), JSON.stringify({ url: 'http://127.0.0.1:' + port, pid: 1, controlToken: 'x', version: 'x', startedAt: 0 }));
+    await expect(main(['pair', '--data-dir', dataDir])).rejects.toThrow(/Converoom is not running for the data folder/);
   } finally { await rm(dataDir, { recursive: true, force: true }); }
 });

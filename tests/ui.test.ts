@@ -343,6 +343,16 @@ it('labels an attached seat by whether push wakes are reaching its session, and 
   expect(attachmentState({ status: 'attached', tested: true, wake: { attempts: 3 } })).toEqual({ kind: 'live', label: 'Attached · wake sent, attempt 3', detail });
   expect(attachmentState({ status: 'suspended', reason: 'No inbox read after 4 wake notices' }))
     .toEqual({ kind: 'warn', label: 'Push paused, polling', detail: 'No inbox read after 4 wake notices' });
+  const opencode = "Push wakes through Converoom's OpenCode server";
+  expect(attachmentState({ status: 'attached', bridge: 'opencode', tested: false })).toEqual({ kind: 'ok', label: 'Attached · wake untested', detail: opencode });
+  expect(attachmentState({ status: 'attached', bridge: 'opencode', tested: false, wake: { attempts: 1 } }))
+    .toEqual({ kind: 'live', label: 'Attached · wake sent', detail: opencode });
+  expect(attachmentState({ status: 'attached', bridge: 'opencode', tested: true, wake: { attempts: 1, inboxId: 'msg_1' } }))
+    .toEqual({ kind: 'live', label: 'Attached · wake queued in OpenCode', detail: opencode });
+  expect(attachmentState({ status: 'attached', bridge: 'opencode', tested: true, wake: { attempts: 1, inboxId: 'msg_1', deliveredAt: 5 } }))
+    .toEqual({ kind: 'live', label: 'Attached · wake delivered', detail: opencode });
   expect(grantAction({ id: 'p1', action: 'seat_attach', scopeDigest: 'd1', expiresAt: 1, scope: {} }))
-    .toMatchObject({ command: 'permission_grant', label: 'Attach session', args: { requestId: 'p1', scopeDigest: 'd1' } });
+    .toMatchObject({ command: 'permission_grant', label: 'Attach session', args: { requestId: 'p1', scopeDigest: 'd1' }, confirm: expect.stringContaining('Claude Code session') });
+  expect(grantAction({ id: 'p2', action: 'seat_attach', scopeDigest: 'd2', expiresAt: 1, scope: { bridge: 'opencode' } }).confirm)
+    .toMatch(/this OpenCode session.*no OpenCode window is open, with your usual OpenCode permissions/);
 });

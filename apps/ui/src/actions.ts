@@ -311,8 +311,12 @@ export const grantAction = (permission: RecordData): Action => {
       command: 'permission_grant',
       args,
       label: 'Attach session',
-      confirm: 'Let Converoom wake this Claude Code session when its seat has something new in its inbox. A wake names only the room and seat, ' +
-        'and the agent reads its inbox as usual. Converoom sends one test wake now, and you can detach the session from its seat at any time.',
+      confirm: isRecord(permission.scope) && permission.scope.bridge === 'opencode'
+        ? 'Let Converoom wake this OpenCode session when its seat has something new in its inbox. A wake names only the room and seat, ' +
+          'and it can start a turn while no OpenCode window is open, with your usual OpenCode permissions. ' +
+          'Converoom sends one test wake now, and you can detach the session from its seat at any time.'
+        : 'Let Converoom wake this Claude Code session when its seat has something new in its inbox. A wake names only the room and seat, ' +
+          'and the agent reads its inbox as usual. Converoom sends one test wake now, and you can detach the session from its seat at any time.',
     };
   if (permission.action === 'context_pin')
     return {

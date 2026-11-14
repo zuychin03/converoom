@@ -7,13 +7,15 @@
 | `codex` | MCP polling | `codex app-server --stdio` | Native ChatGPT account, checked through app-server |
 | `cursor` | MCP polling | `agent acp` | Native Cursor login |
 | `claude` | MCP polling; optional push wakes through Claude Code Channels (`converoom bridge enable claude`) | Deferred | Claude Code owns its login |
-| `opencode` | MCP polling | Deferred | OpenCode owns its provider/login |
+| `opencode` | MCP polling; optional push wakes through Converoom's own `opencode serve` (`converoom bridge enable opencode`, then `converoom opencode`) | Deferred | OpenCode owns its provider/login |
 | `antigravity` | MCP polling | Official `agy_acp_server` | Advertised `oauth-personal` method, Google Account |
 | `kiro` | MCP polling | `kiro-cli acp --agent-engine=v3 --auth-method=cli` | CLI-owned native Kiro login |
 | `qoder` | MCP polling | `qoder --acp` | Cached native Qoder login |
 | `grok` | MCP polling | `grok --no-auto-update agent stdio` | Advertised `cached_token` method, headless native login |
 
 The new launch contracts follow [Google's ACP integration](https://antigravity.google/docs/ide/extensions/zed/), the [official ACP registry entry](https://github.com/agentclientprotocol/registry/blob/main/antigravity-acp/agent.json), [Kiro v3 ACP](https://kiro.dev/docs/cli/v3/acp-migration/), [Qoder ACP](https://docs.qoder.com/cli/acp) and [Grok Build headless scripting](https://docs.x.ai/build/cli/headless-scripting). The registry supplies Google's binary separately from `agy`; Converoom bundles neither the server nor a community authentication adapter.
+
+OpenCode push wakes (FR-40, V1.4a): checked live on 14/11/2026 with OpenCode 2.1.4 installed from npm. Converoom closes the stdin of its `opencode serve`, because npm's `opencode.ps1` shim otherwise waits for that input to end before starting OpenCode. Wakes were queued within a second, waited behind a running turn, started a turn with no window open, and were withdrawn when the owner detached the session.
 
 Room panel (FR-67, V1.4a): `converoom mcp` offers an MCP Apps panel to any client that declares the `io.modelcontextprotocol/ui` extension. Cursor 3.29.15 declares it, but on the account checked on 11/11/2026 it never loaded the panel page, which matches a Cursor issue reported since 3.10 where rendering is enabled per account; the room link in the tool result works there. VS Code 1.145 rendered the panel in its chat. Claude Code and OpenCode do not render MCP Apps, and Codex was not checked.
 
