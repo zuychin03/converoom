@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+Buttons in a room's side panel headings no longer stack one per line when the panel is a few pixels too narrow, as Import and From Codex did in the Context panel. They stay on one line, beside the heading when they fit and below it when they do not.
+
 ## 0.3.2 (Windows V1.2 preview, 11/11/2026)
 
 Converoom now runs on Node 24.14 or later, including Node 26, the current LTS. Before, it refused every Node release line except 24, both at install and when the CLI started. The CLI now refuses only Node older than 24.14, which includes the Node 24 releases before 24.14 it used to let through. Development, publishing and the Windows bundle's private runtime move to Node 26.13.0. CI runs every check on Node 24.22.2 and 26.13.0. Later Node release lines are accepted, but they are untested until CI covers them.
