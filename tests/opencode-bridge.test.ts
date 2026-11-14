@@ -59,7 +59,8 @@ async function fixture() {
     await server.close();
     await runtime.stop();
     delete process.env.FAKE_OPENCODE_LOG;
-    await rm(dir, { recursive: true, force: true });
+    // The fake server's working folder is the data folder, and Windows locks it until that process has exited.
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   };
   return { dir, runtime, server, human, local, fakeLog, mcp, close };
 }

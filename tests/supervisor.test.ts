@@ -25,8 +25,10 @@ it('supervises child trees and preserves literal argv', async () => {
     let pid = 0;
     for (let i = 0; i < 50; i++) {
       try {
+        // The descendant creates the file before writing its pid, so an early read can be empty.
         pid = Number(await readFile(join(cwd, 'descendant'), 'utf8'));
-        break;
+        if (pid > 0) break;
+        await new Promise((r) => setTimeout(r, 50));
       } catch {
         await new Promise((r) => setTimeout(r, 50));
       }
@@ -66,8 +68,10 @@ it('terminates owned descendants when the runtime parent dies', async () => {
     let pid = 0;
     for (let i = 0; i < 100; i++) {
       try {
+        // The descendant creates the file before writing its pid, so an early read can be empty.
         pid = Number(await readFile(join(cwd, 'descendant'), 'utf8'));
-        break;
+        if (pid > 0) break;
+        await new Promise((r) => setTimeout(r, 50));
       } catch {
         await new Promise((r) => setTimeout(r, 50));
       }
